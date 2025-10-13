@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 챗봇</title>
-    <link rel="stylesheet" href="/css/index.css">
+    <link rel="stylesheet" href="./lib/bootstrap/dist/css/bootstrap.min.css"><!-- 부트스트랩 모달 스타일 로드 -->
+    <link rel="stylesheet" href="./css/index.css">
 </head>
 <body>
     <div class="app-container">
@@ -26,8 +27,7 @@
             <aside class="chat-list-container">
                 <section class="new-chat-section">
                     <h2>새로운 채팅 시작</h2>
-                    <ul id="new-chat-list">
-                    </ul>
+                    <button id="new-chat-btn" class="primary-btn" disabled>새 채팅</button><!-- 학과 정보 로딩 전까지 비활성화 -->
                 </section>
 
                 <section id="active-chat-section" class="hidden">
@@ -51,6 +51,33 @@
             </section>
         </main>
     </div>
-    <script src="/js/index.js"></script>
+
+    <!-- 학과별 채팅방 생성 모달 -->
+    <div class="modal fade" id="new-chat-modal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">새 채팅방 만들기</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+                </div>
+                <div class="modal-body">
+                    <label for="chat-room-department" class="form-label">학과 선택</label>
+                    <select id="chat-room-department" class="form-select" required>
+                        <option value="">학과를 선택해주세요.</option>
+                    </select>
+                    <label for="chat-room-title" class="form-label mt-3">채팅방 제목</label>
+                    <input type="text" id="chat-room-title" class="form-control" placeholder="예: 2024-1 통계학과 상담" required>
+                    <div class="form-text">선택한 학과 기준으로 새로운 채팅방이 생성됩니다.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="button" id="create-chat-room" class="btn btn-primary">생성</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="./lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script><!-- 부트스트랩 모달 동작 스크립트 -->
+    <script src="./js/index.js"></script>
 </body>
 </html>
