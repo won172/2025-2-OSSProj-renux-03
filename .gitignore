@@ -3,3 +3,4 @@ RenuxServer.csproj*
 RenuxServer.sln
 **/bin/
 **/obj/
+*.env
