@@ -13,6 +13,7 @@ using RenuxServer.Models;
 using RenuxServer.Dtos.ChatDtos;
 using RenuxServer.Dtos.EtcDtos;
 using RenuxServer.Apis;
+using RenuxServer.Apis.Chat;
 
 var builder = WebApplication.CreateBuilder();
 
@@ -69,6 +70,20 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ServerDbContext>();
+    try
+    {
+        await db.Database.MigrateAsync();
+    }
+    catch(Exception e)
+    {
+        Console.WriteLine(e.Message);
+        return;
+    }
+}
+
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 
 app.UseAuthentication();
@@ -77,6 +92,7 @@ app.UseAuthorization();
 app.UseStaticFiles();
 
 app.AddAuthApis();
+app.AddChatApis();
 app.AddEtcApis();
 
 app.MapGet("/", async (HttpContext context) =>

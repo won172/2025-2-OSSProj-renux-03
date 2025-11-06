@@ -1,83 +1,14 @@
-﻿<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 챗봇</title>
-    <link rel="stylesheet" href="/lib/bootstrap/dist/css/bootstrap.min.css"><!-- 부트스트랩 모달 스타일 로드 -->
-    <link rel="stylesheet" href="/css/index.css">
-</head>
-<body>
-    <div class="app-container">
-        <header>
-            <h1>AI 챗봇</h1>
-            <nav id="auth-nav">
-                <div id="guest-view">
-                    <button id="login-btn" class="auth-btn">로그인</button>
-                    <button id="signup-btn" class="auth-btn">회원가입</button>
-                </div>
-                <div id="user-view" class="hidden">
-                    <span id="welcome-message"></span>
-                    <button id="logout-btn" class="auth-btn">로그아웃</button>
-                </div>
-            </nav>
-        </header>
-
-        <main>
-            <aside class="chat-list-container">
-                <section class="new-chat-section">
-                    <h2>새로운 채팅 시작</h2>
-                    <button id="new-chat-btn" class="primary-btn" disabled>새 채팅</button><!-- 학과 정보 로딩 전까지 비활성화 -->
-                </section>
-
-                <section id="active-chat-section" class="hidden">
-                    <h2>최근 채팅</h2>
-                    <ul id="active-chat-list">
-                    </ul>
-                </section>
-            </aside>
-            <section class="chatbot-container">
-                <div class="chat-window">
-                    <div class="chat-messages">
-                        <div class="message bot">
-                            <p>안녕하세요! 무엇을 도와드릴까요?</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="chat-input-area">
-                    <input type="text" id="chat-input" placeholder="메시지를 입력하세요...">
-                    <button id="send-btn">전송</button>
-                </div>
-            </section>
-        </main>
-    </div>
-
-    <!-- 학과별 채팅방 생성 모달 -->
-    <div class="modal fade" id="new-chat-modal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">새 채팅방 만들기</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
-                </div>
-                <div class="modal-body">
-                    <label for="chat-room-department" class="form-label">학과 선택</label>
-                    <select id="chat-room-department" class="form-select" required>
-                        <option value="">학과를 선택해주세요.</option>
-                    </select>
-                    <label for="chat-room-title" class="form-label mt-3">채팅방 제목</label>
-                    <input type="text" id="chat-room-title" class="form-control" placeholder="예: 2024-1 통계학과 상담" required>
-                    <div class="form-text">선택한 학과 기준으로 새로운 채팅방이 생성됩니다.</div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-                    <button type="button" id="create-chat-room" class="btn btn-primary">생성</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script><!-- 부트스트랩 모달 동작 스크립트 -->
-    <script src="/js/index.js"></script>
-</body>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>frontend</title>
+    <script type="module" crossorigin src="/assets/index-B0dUHDeE.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-C7NHKg0E.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>
