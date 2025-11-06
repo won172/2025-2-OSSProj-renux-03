@@ -1,0 +1,9 @@
+bin/
+obj/
+Properties
+__docker_temp
+.vs/
+Pages
+.dockerignore
+Dockerfile
+docker-compose.yml

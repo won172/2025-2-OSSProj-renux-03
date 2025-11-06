@@ -1,0 +1,44 @@
+version : '3.8'
+
+services:
+  db:
+    image: postgres:latest
+    container_name: renux_db
+    environment:
+      POSTRGRES_DB: renux_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: tlwlsvld
+    volumes:
+      - postgres_data_test:/var/lib/postgresql
+    ports:
+      - "5556:5432"
+  api:
+    container_name: renux_api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - db
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__DefaultConnection=Host=db;Database=renux_db;Username=postgres;Password=tlwlsvld
+      - Jwt__Key=b9etwTicKtogQif+KR7GX+CcfKDszBs02EAx7xAUq7op8/+vpOXGOGFC9BCUl7zWr4hVoGwM38mo7ewWVTa18QkJHOXu+UB+mmI9yovZhi/BGw0W5VoS9h0spKb3EW2Hb8tYzOUivbJrmYMaAtY394+f3L1xuP108hnYouPizgM=
+    ports:
+      - "8081:80"
+  
+  nginx:
+    container_name: renux_nginx
+    image: nginx:latest
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - api
+
+volumes:
+  postgres_data_test:
+
+networks:
+  renux_network_test:
