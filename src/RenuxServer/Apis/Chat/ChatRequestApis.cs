@@ -77,13 +77,6 @@ static public class ChatRequestApis
 
         });
 
-        app.MapPost("/startload", async (ServerDbContext db, Guid chatId, IMapper mapper) =>
-        {
-            List<ChatMessageDto> chatMessages = await MessagesToList(db, mapper, DateTime.Now.Ticks, chatId);
-
-            return Results.Ok(chatMessages);
-        }).RequireAuthorization();
-
         app.MapPost("/load", async (ServerDbContext db, Guid chatId, IMapper mapper, long lastTime) =>
         {
             List<ChatMessageDto> chatMessages = await MessagesToList(db, mapper, lastTime, chatId);
@@ -97,7 +90,7 @@ static public class ChatRequestApis
         List<ChatMessageDto> chatMessages = mapper.Map<List<ChatMessageDto>>(
                 await db.ChatMessages.Where(cm => Equals(cm.ChatId, chatId) && cm.CreatedTime < lastTime)
                 .OrderByDescending(cm => cm.CreatedTime)
-                .Take(10)
+                .Take(20)
                 .ToListAsync());
 
         return chatMessages;

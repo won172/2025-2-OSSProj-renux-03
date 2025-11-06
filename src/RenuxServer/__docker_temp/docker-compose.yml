@@ -9,9 +9,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: tlwlsvld
     volumes:
-      - postgres_data:/var/lib/postgresql/postgres_data
+      - postgres_data_test:/var/lib/postgresql
     ports:
-      - "5432:5432"
+      - "5556:5432"
   api:
     container_name: renux_api
     build:
@@ -38,4 +38,7 @@ services:
       - api
 
 volumes:
-  postgres_data:
+  postgres_data_test:
+
+networks:
+  renux_network_test:
