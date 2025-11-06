@@ -1,0 +1,665 @@
+﻿chunk_id,doc_id,chunk_text,position,token_len,title,course_code,source_table,topics,source,url,published_at
+c92bedf4c895ca4db83eaf1f07ec02dcb4266551,5d59cb8f12b318ac8b8a31622dd57b86e9fb33b6,"[탐색적자료분석]
+
+학수번호: STA2005
+탐색적자료분석
+영문명: Exploratory Data Analysis
+해설: 기본적인 기술통계학의 적용뿐만 아니라 단변량 분석, 자료의 시각화, 선형모형, GLM, 다변량 분석 등 여러 가지 다양한 통계기법을 이용하여 자료를 분석하는 방법을 다룬다. 특히 실제 자료를 이용하여 SAS, S-PLUS, SPSS 등 여러 통계 팩키지를 사용하여 자료에 대한 보다 깊은 이해를 할 수 있게 한다. The techniques of exploratory data analysis help us to cope with a set of data in a fairly informal way, guiding us toward structure relatively quickly and easily. The primary purpose of the course is to introduce the general steps and operations that make up practical exploratory data analysis.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,118,탐색적자료분석,STA2005,description,description,courses,,
+02c2da5b3b5156d6668a78c37b6306ea9ae5a135,c8d08221a90d2ebae59ccfd2d07bedf566780bd5,"[프로그래밍 및 실습1]
+
+학수번호: STA2013
+프로그래밍 및 실습1
+영문명: Programming and Labs1
+해설: 컴퓨터의 원리, 활용 및 발전과정 등에 대하여 학습하고 기본적인 프로그램의 작성원리를 이해하며, 향후 통계학 전공과목들의 수강시 기초가 되는 SAS나 S-Plus 및 SPSS 등의 통계프로그래밍을 공부한다. This course is designed to teach students how to use the SAS software package for windows. The goal is to learn the basic data analysis techniques and gain experience on computing and analysis, so that the students can find their way around the many SAS reference manuals and learn more advanced topics on their own. The skills learned will be valuable for their future work with Statistics.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,122,프로그래밍 및 실습1,STA2013,description,description,courses,,
+48378c7d5f41ddc0fbbfc90ed25f7bf8afc8697c,e27d9af5d5665927f3b44079f5cc31fe79461673,"[프로그래밍 및 실습2]
+
+학수번호: STA2014
+프로그래밍 및 실습2
+영문명: Programming and Labs2
+해설: 프로그래밍 및 실습 I의 연속 교과목으로 Ⅰ에서보다 고급 프로그램 기법 등을 학습하며, 보다 고급의 통계 기법을 수행할 수 있는 프로그램언어-비주얼베이직, C, C++, 자바 등-을 이용하여 프로그램을 작성한다. The emphasis of this course will be on advanced methods of data manipulation and statistical analysis techniques using SAS Macro and SQL. Also customized reporting techinques will be introduced.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,86,프로그래밍 및 실습2,STA2014,description,description,courses,,
+5c63cac2d9baf07f8e64fc63b8f4e9159ffde060,6430573ffa186937721adff8793571411de6f506,"[확률과정론]
+
+학수번호: STA2015
+확률과정론
+영문명: Stochastic Process
+해설: 확률과정의 기본 개념을 설명하고 주로 Markov Chains에 관한 것을 학습하며 Markov Chains의 기본 개념, 흡수 Markov Chains, Regular Markov Chains, Ergodic Markov Chains, 그리고 Markov Chains의 응용에 관한 것을 다룬다. The basic concepts of stochastic process are taught. Main topics are definition of Markov chains, absorbing Markov chains, regular Markov chains, ergodic Markov chains, and application of Markov chains.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,84,확률과정론,STA2015,description,description,courses,,
+bbbd3f22ee75feff4bf50e742a19052bfc17023b,86685511b0409336e8c8608a9b4df94bc5279e1a,"[수리통계학1]
+
+학수번호: STA2017
+수리통계학1
+영문명: Mathematical Statistics1
+해설: 본 과목에서는 표본 공간의 정의에 필요한 순열 조합 수와 집합의 분할, 그래프이론, 생성함수 등의 이산수학적 주제를 다루면서 확률 실험 및 확률 변수의 성질을 이해한다. 또한, 통계학의 기초이론인 정의, 정리 등을 수리적으로 증명함과 동시에 이들의 이론적 배경과 응용을 다루고, 집합론, 실해석론, 확률론, 확률분포론 및 표본분포론, 중심극한 정리와 같은 근사분포이론을 중점 강의한다. Histograms. Descriptive statistics. Probability. Probability spaces. Fundamental theorems in discrete probability. Random variables; densities and distribution functions. Continuous distributions. Independence. Distribution functions.Transformations of random variables. Central limit theorem. Distributions of sample statistics. Generating functions. Convergence concepts. Limit theorems.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,113,수리통계학1,STA2017,description,description,courses,,
+e196f9e3b40aa0bc8960825eb11689dba144bbd6,e34d7721ee36b3a9713fab8ed1c39806f487e6b8,"[수리통계학2]
+
+학수번호: STA2021
+수리통계학2
+영문명: Mathematical Statistics2
+해설: 수리통계I에서 배운 분포이론들을 바탕으로 추정, 가설검정, 분산분석 등으로 구성된 통계적 모형 추론이론과 응용에 대하여 중점 강의한다. Hypothesis testing. Confidence intervals. Estimation and hypothesis testing. Order statistics, Decision theory. Bayes and empirical Bayes rules. Efficiency. Analysis of Variance. Distribution free and robust techniques.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,67,수리통계학2,STA2021,description,description,courses,,
+9314de199bfb0986e6979d3a2d22f5178dc0341d,8b64495f8090720f7131c4e66d0451bc82f79da7,"[선형계획법]
+
+학수번호: STA2018
+선형계획법
+영문명: Linear Programming
+해설: 선형계획법은 주어진 선형조건들을 만족하면서 선형 목적함수의 최대 또는 최소값을 구하는 방법을 연구하는 학문분야이다. Simplex 알고리즘을 중점적으로 학습한다. 선형대수의 기초지식이 다소 요구된다. By use of linear programming, one can find the optimal solution which maximizes or minimizes a linear objective function satisfying linear constraints. In the course, the simplex algorithm is mainly discussed. Students are expected to have some background in linear algebra.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,87,선형계획법,STA2018,description,description,courses,,
+d00b924b2129d29ede96599d81c01b717e5b7882,5bba2768058e5594ddd383e9865c01fcae3a9924,"[통계수학 및 R실습]
+
+학수번호: STA2019
+통계수학 및 R실습
+영문명: Mathematics for Statistics and R Exercises
+해설: 미적분학, 비선형 방정식, 행렬대수학 이론들 중에서 통계학도를 위한 통계수학과 최근 많이 사용하고 있는 오픈 소스 형태의 통계소프트웨어인 R 프로그램을 익히고 실습하는 것을 병행하여 학습한다. This course will be studied the Mathematics for statistician such as calculus, non-linear equations and linear algebra. In addition, R software which is an open source programming language and software environment for statistical computing and graphic will be exercised.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,96,통계수학 및 R실습,STA2019,description,description,courses,,
+0bd8ac60748396e0254ae54b372df20cb37d3a53,14fd649c7139ba8353f6f7e65264cda5b0bab60f,"[통계계산 및 그래픽실습]
+
+학수번호: STA2020
+통계계산 및 그래픽실습
+영문명: Statistical Computing and Graphical Exercises
+해설: 붓스트랩, 잭나이프와 같은 재표본 기법과 통계 계산에 필요한 몬테카를로 시뮬레이션, 몬테카를로 적분, 수치적 최적화 기법들에 관한 이론을 학습하며, R, Python 등의 오픈소스 프로그램들을 이용하여 그래픽 등 시각화 기법 등의 실습을 통해 기술통계학에 대한 이해를 넓힌다. Resampling method such as bootstrap and jackknife, and various statistical computing techniques such as Monte Carlo simulation, Monte Carlo integration, numerical optimization will be studied. In addition, student can expand their understanding of descriptive Statistics through hands-on exercises based on graphic and visualization method using R and Python open source programs.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,118,통계계산 및 그래픽실습,STA2020,description,description,courses,,
+ffd7bb4b2d1e05de8c9ca4134830b44dbc4b0f96,11d5afb5386ed9ca93628e62b9e43a66049e53b6,"[다변량해석]
+
+학수번호: STA4004
+다변량해석
+영문명: Multivariate Analysis
+해설: 통계적 기법들 중 상관관계가 있는 두개 이상의 변량으로 이루어진 확률변수벡터들의 분포성질 및 자료를 선현대수 및 행렬대수이론에 기반하여 분석하는 기법으로 이에 필요한 다변량 확률변수들의 수리적 통계이론 및 인자분석, 주성분분석, 상관분석 등 다양한 다변량자료 분석기법을 강의한다. Algebra and calculus of vectors and matrices, special multivariate distributions (normal, Wishart, Hotelling’s T-squared, multivariate T, multivariate log-normal, etc.). Categorical dependent variable regression, loglinear models, inference in the multivariate normal distribution, multivariate multiple regression, gypothesis testing, likelihood ratio tests, multivariate analysis of variance and covariance, principal components analysis, factor analysis, and classification and discrimination models.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,114,다변량해석,STA4004,description,description,courses,,
+57c3ff3914c57687cff08b13e0628de8b732925c,0f3505f59da70b8ade2440623cc001fae9ed65d7,"[데이터마이닝]
+
+학수번호: STA4005
+데이터마이닝
+영문명: Data Mining
+해설: 데이터 마이닝의 개념과 적용사례, 그리고 통계학에서의 역할 등과 함께 데이터 마이닝의 여러 기법 중 로지스틱 회귀 분석, 의사결정나무, 신경망 분석 등을 실제 자료를 이용하여 여러 가지의 통계패키지를 이용하여 분석 비교 연구한다. Basic concepts and applications of Data Mining are taught. Various data mining techniques such as logistic regression, decision trees, and neural networks are analyzed and compared based on real data with various statistic packages.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,90,데이터마이닝,STA4005,description,description,courses,,
+1885739895200be32bffda4ae66df126b86bafc3,8558fe36f6da2f6ee4535df7663c2b48aff37659,"[범주형자료분석]
+
+학수번호: STA4006
+범주형자료분석
+영문명: Categorical Data Analysis
+해설: 확률변수가 연속적이 아닌 이산형 자료에 대한 자료 분석과 모형 구축에 대하여 학습한다. 이항분포 및 포아송분포 뿐 아니라 분할표를 이용한 로지스틱 회귀모형, 다범주 로짓모형 등 최근 여러 학문 분야에서 급격히 증가하고 있는 범주형 자료에 대한 다양한 통계적 모형이나 분석 방법 등을 다룬다. Model development and data analysis are taught using data based on discrete random variable such as binomial distribution, Poisson distribution. Main topics are Chi-square test using contingency table, logistic regression, log linear models, and multicategory logit models.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,104,범주형자료분석,STA4006,description,description,courses,,
+45b512cc9fe7b58040751ba01ec81f230dfb0305,534cf0ad70a3f3ab1ca6983e8a247d2aed978aa1,"[비모수통계학]
+
+학수번호: STA4008
+비모수통계학
+영문명: Nonparametric Statistics
+해설: 통계문제를 다룸에 있어서 모집단의 분포를 모르는 경우나 모집단 분포가 정규분포가 아닌 경우에 측정된 자료를 통계 분석하는 방법을 학습한다. 특히, 의학통계학에서 다루는 자료들이 이 범주에 속하며, 임상실험에서 나오는 실제 자료를 분석한다. The aim of this course is to develop a deep and practical understanding of nonparametric statistical methods, which are used for data without normality assumption. Especially, the following cases are included in this category : data with outliers, data from survey and medical statistics. Those data will be analyzed using SAS and/or R programs.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,109,비모수통계학,STA4008,description,description,courses,,
+bf7be330b1cece9a7a982d4a60d387d678193aef,15c712bfe8dbe042bcab95a80adb29b0ce8b8281,"[시계열해석]
+
+학수번호: STA4011
+시계열해석
+영문명: Time Series Analysis
+해설: 시계열의 변동을 장기적 추세변동, 계절변동, 순환변동, 불규칙변동으로 나누어 이들 변동에 따라 시계열을 해석하는 추세모형분석법, 분해법 및 평활법을 이용한 예측법에 대해 경험적 자료실습 및 통계적 이론을 통해 강의하며, 더 나아가서 정상 및 비정상 시계열 과정에 적합한 ARIMA모형을 이용한 시계열분석 방법을 습득하게 한다. For time series data analyses, stationary and non-stationar processes are introduced and explored. Variations of time series data are analyzed into deterministic trends, seasonal trends, periodic trends, and so on. Such trends are discussed.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,101,시계열해석,STA4011,description,description,courses,,
+76e5a1dec593bb01c7ed86457a37c89537a55baa,23cd8e1629d8d35228cb096aae3c5a9d5d4420b0,"[실험계획법]
+
+학수번호: STA4012
+실험계획법
+영문명: Experimental Design
+해설: 가장 좋은 정보를 얻기 위하여 어떻게 실험을 계획할 것인가에 대하여 학습하고, 얻어진 자료를 분석하고 해석하는 방법에 대하여 강의한다. For scientific studies and experiments, an efficient plan for them is required. Statistics has been developed experimental design for the purpose. Ih the couse, the methodologies for the analysis are introduced for several designs.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,77,실험계획법,STA4012,description,description,courses,,
+2424c979b150935bbd2aefc16d9612bfa4352ca6,523f801487c086bdf41297062ee82292a6471a75,"[통계모델링 및 컨설팅1]
+
+학수번호: STA4016
+통계모델링 및 컨설팅1
+영문명: Statistical Modeling and Consulting1
+해설: 컴퓨터에 입력되는 자료는 대량화되고, 입력된 방대한 자료가 주는 메시지나 연구자가 원하는 정보를 추출하는 것이 최우선적 과제이다. 본 강의에서는 실험계획법, ANOVA, 회귀분석, 다변량분석, 비모수통계학에서 배우는 이론들을 실제 자료를 이용하여 컴퓨터 프로그램과 통계적 해석방법을 공부한다. This course prepares students to a rigorous study of the linear model on the appled statistical point of view, which is best known through multiple regression and analysis of variance. The aim of this course is to develop a deep and practical understanding of this classical linear model, along with its strengths and frailties. Depth of understanding comes from a systematic use of variety of data applications. Practical understanding comes from broad experience with and probing of the methods on particular data sets through use of a flexible computer data analysis language, which for us, will be SAS and/or R.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,164,통계모델링 및 컨설팅1,STA4016,description,description,courses,,
+720c8c3c105af82a018a24411a4f24524c07aceb,bf97b99874e87d85e31a3c3b96411d2fd0df0a22,"[통계모델링 및 컨설팅2]
+
+학수번호: STA4017
+통계모델링 및 컨설팅2
+영문명: Statistical Modeling and Consulting2
+해설: 통계학습(Statistical Learning)의 지도학습(Supervised Learning)과 자율학습(Unsupervised Learning)과 관련된 빅데이터 모델링의 이론과 실제 자료 분석을 통해 공부한다. 또한 기초적인 text mining 방법을 공부한다. This course is designed for students to learn various analysis methods in statistical learning, including supervised learning and unsupervised learning in Big data modeling. And also study the introductory text mining techniques.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,84,통계모델링 및 컨설팅2,STA4017,description,description,courses,,
+6cf37f2ae16b2c550c40ea53aef65a13db02b4f3,20c347002d52050bd4d14c422d0578d581302b9d,"[통계적품질관리]
+
+학수번호: STA4020
+통계적품질관리
+영문명: Statistical Quality Control
+해설: 품질관리에서 필요로 하는 제반 통계적 기법 및 품질 검사에서 판정 방법, 표본 선택 방법 등을 학습하고, 관리도 작성 요령과 활용방법에 관하여 강의한다. Statical methodologies for quality control are introduced. Sampling methods, test for quality, etc. are discussed.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,63,통계적품질관리,STA4020,description,description,courses,,
+2be8f8c3afd8cec3ed11a38ef5f87b0f7a36b84a,12fd37d65d873b41269d2fc81a98dd808b3076c4,"[회귀해석]
+
+학수번호: STA4034
+회귀해석
+영문명: Regression Analysis
+해설: 두 변량 이상의 변수들 사이의 관계를 식으로 표현하는 방법에 대하여 학습하고 회귀계수의 추정, 검정방법과 회귀선의 적합도검정, 분산분석 기법 등을 강의한다. Regression models are considered to identify any relation between two variables. Regression analysis course introduces estimations and tests for regression coefficients, lack-of-fit test, analysis of variances and so on.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,74,회귀해석,STA4034,description,description,courses,,
+fb018d73f58aeffd7954a6fd1c2fa19f5d3def47,828b34bdd16485a0e9fd088c8105a5690009251c,"[보험통계학]
+
+학수번호: STA4035
+보험통계학
+영문명: Insurance Statistics
+해설: 보험통계의 개념, 종류 및 여러 계산 방식을 학습하고, 생명표 작성, 순보험료 및 영업 보험료의 계산, 책임 준비금, 해약 환급금, 이익배당, 장기정기보험, 기업연금보험 등의 계산방식을 다룬다. This course focuses on the basic concepts on the insurance statistics. It covers the following issues: probabilities, random variables, moments, distribution in insurance statistics, insurance and Poisson processes etc. Through the course, the students will be familiar with applied problems in the insurance industry.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,94,보험통계학,STA4035,description,description,courses,,
+87c6a636e65d2c4afae40d194aa1a5f5c7bd4fac,284f688cc56c0d048c2a3b2de16f3d6f58ee5f4c,"[표본조사방법론 및 실습]
+
+학수번호: STA4037
+표본조사방법론 및 실습
+영문명: Sample Survey Methodology and Practice
+해설: 이론, 실습 수업 및 체험 학습 등을 통하여 각종 정부통계조사, 사회조사, 여론조사, 마케팅조사 등의 목적으로 흔히 사용되는 표본조사가 실제로 어떠한 절차에 따라 진행이 되는지 체계적으로 배운다. 표본조사의 기초 정보 수집을 위한 핵심 그룹 활동, 표본추출틀 준비, 자료수집방법 및 표본 크기 결정, 설문지 설계, 사전조사 실시, 조사원 선발 및 교육, 현장조사 실시, 설문 자료의 코드화 및 분석, 보고서 작성 등을 강의한다. An audience can be undergraduate and graduate students who want to understand and experience survey research. The course will be helpful for students who are faced with gathering data through a survey research project. It explores the topics: developing and administrating questionnaires, conducting practical surveys, ensuring scientific accuracy, analyzing and reporting survey results etc.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,146,표본조사방법론 및 실습,STA4037,description,description,courses,,
+b559a46f04df25731b66733751abaca59c6411f3,97d8a1cd6733e015a5f47abc8fcc153283c8536b,"[표본설계]
+
+학수번호: STA4038
+표본설계
+영문명: Sample Design
+해설: 표본조사의 기본개념과 모집단으로부터 실제로 표본을 추출하는 추출방법, 즉 단순임의추출법, 층별임의추출법, 집락추출법, 계통추출법, 확률비례추출법 등을 배우며 이들 추출법에 근거한 모수의 추정방법들을 다룬다. 실습을 통해 모집단을 대표할 수 있는 표본을 어떻게 추출하는지 실제로 경험한다. This is an introductory course on the design and analysis of sample surveys. The prerequisite is an elementary course in statistics. The course emphasizes the practical aspects of survey problems. It covers the following topics: basic concepts for sampling theory, simple random sampling and estimation, stratified random sampling and estimation, ratio, regression, and difference estimation, systematic sampling and estimation, cluster sampling and estimation etc.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,121,표본설계,STA4038,description,description,courses,,
+5330de316d55a4138fe0d35f4b2199ed6bb3ca1a,6401b93a5a51958bebcc2af620cedcceeeb39846,"[생존분석]
+
+학수번호: STA4039
+생존분석
+영문명: Survival Analysis
+해설: 본 과목에서는 특정 사건이 발생할 때까지 걸리는 시간을 분석하는 통계 방법들을 학습한다. 특히, 사건까지 걸리는 시간이 중도절단 되는 특징을 반영하는 비모수적, 준모수적, 그리고 모수적 모형들을 다룬다. R을 활용하여 실제 자료를 분석한다. This course introduces statistical methods that analyze a time-to-event variable of interest. Especially, the focus will be on fitting non-parametric, semi-parametric and parametric models that take the censoring property of the variable into account. Several real data sets will be analyzed using statistical software R.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,101,생존분석,STA4039,description,description,courses,,
+313e06e44e5ab0da44cc58115c4a11119f361ac4,e0cef7fcaa0af621e28a8c6ffc81e74e1664cd49,"[베이지안통계학]
+
+학수번호: STA4040
+베이지안통계학
+영문명: Bayesian Statistics
+해설: 베이지안 통계학은 확률론을 기반으로 한 의사결정 이론과 추론 방법론을 제공하는 현대 통계학의 주요 분야 중 하나 입니다. 본 교과목은 베이지안 통계학의 기본 개념, 원리 및 실제 응용 사례를 학습하는 것을 목표 합니다. ayesian statistics is one of the major fields of modern statistics, providing decision-making theories and inference methodologies based on probability theory. This course aims to study the fundamental concepts, principles, and practical applications of Bayesian statistics.
+nan
+학점: nan
+이론: nan
+실습: nan
+전공구분: nan
+이수대상: nan
+원어강의: nan
+개설학기: nan
+비고: nan",0,93,베이지안통계학,STA4040,description,description,courses,,
+55af9bca3e0703baa1a01b57e6f72c62eeaf09e2,ae8ba778c84e0101d89ef9c847522911d30fa073,"[nan]
+
+학수번호: STA2005
+nan
+영문명: nan
+해설: nan
+탐색적자료분석
+학점: 3
+이론: 3
+전공구분: 기초
+이수대상: 학사2년
+원어강의: 영어
+개설학기: 2",0,21,nan,STA2005,major,major,courses,,
+e3699216c683a4c43d7e6db0ae24099f0316ff7a,7e84674999c96aad66a66c50a49bc8fb817fb449,"[nan]
+
+학수번호: STA2013
+nan
+영문명: nan
+해설: nan
+프로그래밍및실습1
+학점: 3
+이론: 2
+실습: 2.0
+전공구분: 기초
+이수대상: 학사1년
+개설학기: 2",0,21,nan,STA2013,major,major,courses,,
+80e96c87ddaf034055cf8d57e152b357eca07c93,c287de2b1c7bdc9e67c9525003cfe727281f68e1,"[nan]
+
+학수번호: STA2014
+nan
+영문명: nan
+해설: nan
+프로그래밍및실습2
+학점: 3
+이론: 2
+실습: 2.0
+전공구분: 기초
+이수대상: 학사2년
+개설학기: 1",0,21,nan,STA2014,major,major,courses,,
+4f8cabd721eada627c83557eccb1ae9071a6b713,73f603d17c9fd5000fcd7a7780b1ab85cfcb06dc,"[nan]
+
+학수번호: STA2015
+nan
+영문명: nan
+해설: nan
+확률과정론
+학점: 3
+이론: 3
+전공구분: 기초
+이수대상: 학사2년
+개설학기: 2",0,19,nan,STA2015,major,major,courses,,
+dc865b8e9075cada74e05897d0366a2cd66c0094,7568096ef8650a930b25296017936c5c9cdf2f4d,"[nan]
+
+학수번호: STA2017
+nan
+영문명: nan
+해설: nan
+수리통계학1
+학점: 3
+이론: 3
+이수대상: 기초
+원어강의: 학사2년
+개설학기: 1
+비고: 대학통계및실습1 대학통계및실습2 선수권장",0,23,nan,STA2017,major,major,courses,,
+628e5a95a11d23bf5cc1da3c0451db9d4e2bb01a,58a297918d552d0085c9e2ccd6b4ec3af0c87b5f,"[nan]
+
+학수번호: STA2021
+nan
+영문명: nan
+해설: nan
+수리통계학2
+학점: 3
+이론: 3
+전공구분: 기초
+이수대상: 학사2년
+개설학기: 2
+비고: 대학통계및실습1 대학통계및실습2 수리통계학1 선수권장",0,24,nan,STA2021,major,major,courses,,
+3eecdac5aa4766ecc73854c62afa3c80fa5a791a,adea527aa6af2e3798ab72ccb1aea1e80107ce95,"[nan]
+
+학수번호: STA2018
+nan
+영문명: nan
+해설: nan
+선형계획법
+학점: 3
+이론: 3
+전공구분: 기초
+이수대상: 학사2년
+개설학기: 1",0,19,nan,STA2018,major,major,courses,,
+7d323bbfc92d7e12f67e14725818392be6c95f98,fdf5d14dda332ba8f13cc9a975d414029b52ae3c,"[nan]
+
+학수번호: STA2019
+nan
+영문명: nan
+해설: nan
+통계수학및R실습
+학점: 3
+이론: 2
+실습: 2.0
+전공구분: 기초
+이수대상: 학사2년
+개설학기: 1",0,21,nan,STA2019,major,major,courses,,
+fee1f75580f188af490ef0ee0e4c0e992f419dfd,01c6205397e67ebe6c251437a8d751a367c9e494,"[nan]
+
+학수번호: STA2020
+nan
+영문명: nan
+해설: nan
+통계계산및그래픽실습
+학점: 3
+이론: 2
+실습: 2.0
+전공구분: 기초
+이수대상: 학사2년
+개설학기: 2",0,21,nan,STA2020,major,major,courses,,
+423065469814cff367e7d3fdf00e4d2f914a1eae,fdb21c1d436987315969605a35d644a33fb5f0a4,"[nan]
+
+학수번호: STA4004
+nan
+영문명: nan
+해설: nan
+다변량해석
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+개설학기: 1
+비고: 대학통계및실습1 대학통계및실습2 수리통계학1 수리통계학2 선수권장",0,25,nan,STA4004,major,major,courses,,
+6aee61081642131a0ecaf157c00b0bbf7836277d,0f6511aeae1103cf9ba96e0e543a3901ea5aa9b2,"[nan]
+
+학수번호: STA4005
+nan
+영문명: nan
+해설: nan
+데이터마이닝
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+개설학기: 1",0,19,nan,STA4005,major,major,courses,,
+1e821f169da46b900b6accc3aa743a0acba4e9a4,55aabdb72536629c2cfa711430afb48a241c8728,"[nan]
+
+학수번호: STA4006
+nan
+영문명: nan
+해설: nan
+범주형자료분석
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+개설학기: 2",0,19,nan,STA4006,major,major,courses,,
+b05b711b70ca756ec423499afadb4807bf4ac571,fb7dcf1d91c1611155773bdcdeabbf9aae205144,"[nan]
+
+학수번호: STA4008
+nan
+영문명: nan
+해설: nan
+비모수통계학
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+원어강의: 영어
+개설학기: 1",0,21,nan,STA4008,major,major,courses,,
+2ae61cf22462cd643142b74680151388491a4350,3d68234fe43738f64346f7da713b46df7f5780bc,"[nan]
+
+학수번호: STA4011
+nan
+영문명: nan
+해설: nan
+시계열해석
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+개설학기: 2",0,19,nan,STA4011,major,major,courses,,
+38d8cc4809bbd6866b271715c4b765a14b0036c1,337799cd549c5f8d19c72d5587267d17cc11ed59,"[nan]
+
+학수번호: STA4012
+nan
+영문명: nan
+해설: nan
+실험계획법
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+원어강의: 영어
+개설학기: 2",0,21,nan,STA4012,major,major,courses,,
+9d3efdebb9a68dc3ba60127b1788656b0ef6480d,893651b2fea5fcf9022c2e2123282f0b55fce3e5,"[nan]
+
+학수번호: STA4016
+nan
+영문명: nan
+해설: nan
+통계모델링및컨설팅1
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+개설학기: 1",0,19,nan,STA4016,major,major,courses,,
+6721ad32797b73830b78ad77a65dc558c5973bef,4127f7fef3fc1e95f53f7240d6b03ee1453ed288,"[nan]
+
+학수번호: STA4017
+nan
+영문명: nan
+해설: nan
+통계모델링및컨설팅2
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+개설학기: 2",0,19,nan,STA4017,major,major,courses,,
+4a3d2aaac854b5b3c5ec01c23acb01b75bc7cef8,a49174afaa0792ddac4b208c433e69e72d566d1b,"[nan]
+
+학수번호: STA4020
+nan
+영문명: nan
+해설: nan
+통계적품질관리
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+원어강의: 영어
+개설학기: 2",0,21,nan,STA4020,major,major,courses,,
+ee0b70535db442c8c2fbe56d6c4b8dd51fa54f38,9c0cc875ec0ab241738c8d001c9370c485048515,"[nan]
+
+학수번호: STA4034
+nan
+영문명: nan
+해설: nan
+회귀해석
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+원어강의: 영어
+개설학기: 1",0,21,nan,STA4034,major,major,courses,,
+7d43ef6e6dc3e4785110c88de95dc533a498ecd0,e4aa5661ea5e9ce6034b76eddfacdb36a4905453,"[nan]
+
+학수번호: STA4035
+nan
+영문명: nan
+해설: nan
+보험통계학
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+원어강의: 영어
+개설학기: 1",0,21,nan,STA4035,major,major,courses,,
+3014143f177a45b9df897e884828f4ae441982f2,260fe04901497460c13ae6e4045e19fe36c66441,"[nan]
+
+학수번호: STA4037
+nan
+영문명: nan
+해설: nan
+표본조사방법론및실습
+학점: 3
+이론: 2
+실습: 2.0
+전공구분: 전문
+이수대상: 학사3,4년
+개설학기: 2",0,21,nan,STA4037,major,major,courses,,
+bdf6bcd1013f9a9f981bb20095d0e007116e8110,968c20fbdcbc7450fe80b7fd4411c56b19308ff1,"[nan]
+
+학수번호: STA4038
+nan
+영문명: nan
+해설: nan
+표본설계
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+개설학기: 1",0,19,nan,STA4038,major,major,courses,,
+8105d0cbcfc906aa511ab6ee40e5ed987562a091,05d7c697cc1d30c96570ffad7f183e2854a8c082,"[nan]
+
+학수번호: STA4039
+nan
+영문명: nan
+해설: nan
+생존분석
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+원어강의: 영어
+개설학기: 2",0,21,nan,STA4039,major,major,courses,,
+a9ea38ea9b195d3da3fbb9d59a9cc3a73a1539ab,a1c43874d2f09404f37e8a492bbe0cba5e4839c3,"[nan]
+
+학수번호: STA4040
+nan
+영문명: nan
+해설: nan
+베이지안통계학
+학점: 3
+이론: 3
+전공구분: 전문
+이수대상: 학사3,4년
+원어강의: 영어
+개설학기: 1",0,21,nan,STA4040,major,major,courses,,
