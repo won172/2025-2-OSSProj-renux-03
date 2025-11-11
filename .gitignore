@@ -1,10 +1,7 @@
 .vs/
 __*/
-RenuxServer.csproj*
-RenuxServer.sln
 **/bin/
 **/obj/
-Dockerfile
-docker-compose.yml
 *.env
-
+RenuxServer.csproj.Backup.tmp
+RenuxServer.csproj.user

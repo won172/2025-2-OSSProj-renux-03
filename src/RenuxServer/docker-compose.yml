@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+    
+    db: # docker run -d --name renux_db_test -e POSTGRES_DB=renux_DB -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -v postgres_data:/var/lib/postgresql -p 5678:5432 postgres:latest
+        container_name: renux_db_test
+        image: postgres:latest
+        env_file: .env
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+        volumes:
+            - postgres_data_test:/var/lib/postgresql
+        ports:
+            - "5678:5432"
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+            interval: 5s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
+    
+    api: # docker run -d --name renux_server_test -e ASTNETCORE_ENVIRONMENT=Production -e 
+        container_name: renux_server_test
+        build:
+            context: .
+            dockerfile: Dockerfile
+        depends_on:
+            db:
+                condition: service_healthy
+        env_file: .env
+        environment:
+            - ASPNETCORE_ENVIRONMENT=Production
+            - ASPNETCORE_URLS=http://+:8080
+            - ConnectionStrings__RenuxServer=${CONNECTIONSTRING}
+            - Jwt__Key=${JWT_KEY}
+        restart: on-failure
+ 
+    nginx:
+        container_name: renux_nginx_test
+        image: nginx:latest
+        ports:
+            - "8080:80"
+        volumes:
+            - ./nginx.conf:/etc/nginx/nginx.conf:ro
+        depends_on:
+            - api
+volumes:
+    postgres_data_test:    
+    
+    

@@ -25,7 +25,6 @@ builder.Services.AddDbContext<ServerDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("RenuxServer"));
 });
 
-
 // AutoMapper Setting
 builder.Services.AddAutoMapper(options =>
 {
@@ -70,6 +69,8 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
+
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ServerDbContext>();
@@ -84,7 +85,6 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
