@@ -3,10 +3,12 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
+#pragma warning disable CA1814 // Prefer jagged arrays over multidimensional
+
 namespace RenuxServer.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class IniticalCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -16,7 +18,7 @@ namespace RenuxServer.Migrations
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
-                    department_name = table.Column<string>(type: "text", nullable: false)
+                    major_name = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -156,6 +158,25 @@ namespace RenuxServer.Migrations
                         onDelete: ReferentialAction.Cascade);
                 });
 
+            migrationBuilder.InsertData(
+                table: "majors",
+                columns: new[] { "id", "major_name" },
+                values: new object[,]
+                {
+                    { new Guid("293e8c9e-5c1d-40d7-adf4-3df7a419e4d6"), "통계학과" },
+                    { new Guid("f762ae12-21f7-4943-a78d-ab3931506306"), "수학과" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "roles",
+                columns: new[] { "id", "role_name" },
+                values: new object[,]
+                {
+                    { new Guid("b4114fd1-c9f0-4171-821f-b53a15faba9b"), "일반학생" },
+                    { new Guid("c22bc8f7-98b8-45a3-9053-3b779e027649"), "학생회" },
+                    { new Guid("ec62f7d6-069d-4a47-8801-db61b938a299"), "교직원" }
+                });
+
             migrationBuilder.CreateIndex(
                 name: "IX_active_chats_organization_id",
                 table: "active_chats",
@@ -182,9 +203,22 @@ namespace RenuxServer.Migrations
                 column: "organization_id");
 
             migrationBuilder.CreateIndex(
+                name: "IX_majors_major_name",
+                table: "majors",
+                column: "major_name",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_organizations_major_id",
                 table: "organizations",
-                column: "major_id");
+                column: "major_id",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_roles_role_name",
+                table: "roles",
+                column: "role_name",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_users_major_id",

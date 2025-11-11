@@ -30,9 +30,19 @@ public class ServerDbContext : DbContext
         users.ToTable("users").HasIndex(p => p.UserId).IsUnique();
         activeChats.ToTable("active_chats");
         message.ToTable("chat_messages").HasIndex(c => c.CreatedTime);
-        org.ToTable("organizations");
-        majors.ToTable("majors");
-        role.ToTable("roles");
+        majors.ToTable("majors").HasIndex(m => m.Majorname).IsUnique();
+        org.ToTable("organizations").HasIndex(o => o.MajorId).IsUnique();
+        majors.HasData([
+            new() { Id=new("293e8c9e-5c1d-40d7-adf4-3df7a419e4d6"), Majorname="통계학과" },
+            new(){Id=new("f762ae12-21f7-4943-a78d-ab3931506306"), Majorname="수학과"}
+            ]);
+        role.ToTable("roles").HasIndex(r => r.Rolename).IsUnique();
+        role.HasData([
+            new() { Id = new("c22bc8f7-98b8-45a3-9053-3b779e027649"), Rolename = "학생회" },
+            new() { Id = new("ec62f7d6-069d-4a47-8801-db61b938a299"), Rolename = "교직원" },
+            new() { Id = new("b4114fd1-c9f0-4171-821f-b53a15faba9b"), Rolename = "일반학생" }
+            ]);
+
         guest.ToTable("guest");
 
         users.Property(u => u.Id).HasColumnName("id");

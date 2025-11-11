@@ -130,14 +130,29 @@ namespace RenuxServer.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<string>("MajorName")
+                    b.Property<string>("Majorname")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("major_name");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Majorname")
+                        .IsUnique();
+
                     b.ToTable("majors", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("293e8c9e-5c1d-40d7-adf4-3df7a419e4d6"),
+                            Majorname = "통계학과"
+                        },
+                        new
+                        {
+                            Id = new Guid("f762ae12-21f7-4943-a78d-ab3931506306"),
+                            Majorname = "수학과"
+                        });
                 });
 
             modelBuilder.Entity("RenuxServer.Models.Organization", b =>
@@ -165,7 +180,8 @@ namespace RenuxServer.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("MajorId");
+                    b.HasIndex("MajorId")
+                        .IsUnique();
 
                     b.ToTable("organizations", (string)null);
                 });
@@ -184,7 +200,27 @@ namespace RenuxServer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Rolename")
+                        .IsUnique();
+
                     b.ToTable("roles", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("c22bc8f7-98b8-45a3-9053-3b779e027649"),
+                            Rolename = "학생회"
+                        },
+                        new
+                        {
+                            Id = new Guid("ec62f7d6-069d-4a47-8801-db61b938a299"),
+                            Rolename = "교직원"
+                        },
+                        new
+                        {
+                            Id = new Guid("b4114fd1-c9f0-4171-821f-b53a15faba9b"),
+                            Rolename = "일반학생"
+                        });
                 });
 
             modelBuilder.Entity("RenuxServer.Models.User", b =>

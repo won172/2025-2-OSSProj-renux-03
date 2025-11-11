@@ -14,6 +14,7 @@ using RenuxServer.Dtos.ChatDtos;
 using RenuxServer.Dtos.EtcDtos;
 using RenuxServer.Apis;
 using RenuxServer.Apis.Chat;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder();
 
@@ -71,12 +72,21 @@ var app = builder.Build();
 
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 
-using (var scope = app.Services.CreateScope())
+using (var db = app.Services.GetService<ServerDbContext>()!)
 {
-    var db = scope.ServiceProvider.GetRequiredService<ServerDbContext>();
     try
     {
         await db.Database.MigrateAsync();
+
+        List<Major> majors = await db.Majors.ToListAsync();
+
+        foreach(var m in majors)
+        {
+            if (!await db.Organizations.AnyAsync(o => o.MajorId == m.Id))
+                await db.Organizations.AddAsync(new() { IsActive = true, Major = m });
+        }
+
+        await db.SaveChangesAsync();
     }
     catch(Exception e)
     {
