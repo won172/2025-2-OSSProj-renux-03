@@ -22,7 +22,7 @@ public class User
     public Guid RoleId { get; set; }
 
     [Required]
-    public long CreatedTime { get; init; } = DateTime.Now.Ticks;
+    public DateTime CreatedTime { get; init; } = DateTime.Now.ToUniversalTime();
     [Required]
-    public long UpdatedTime { get; set; }
+    public DateTime UpdatedTime { get; set; } = DateTime.Now.ToUniversalTime();
 }

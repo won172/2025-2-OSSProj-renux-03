@@ -14,7 +14,6 @@ using RenuxServer.Dtos.ChatDtos;
 using RenuxServer.Dtos.EtcDtos;
 using RenuxServer.Apis;
 using RenuxServer.Apis.Chat;
-using System.Text;
 
 var builder = WebApplication.CreateBuilder();
 
@@ -72,10 +71,11 @@ var app = builder.Build();
 
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 
-using (var db = app.Services.GetService<ServerDbContext>()!)
+using (var scope = app.Services.CreateScope())
 {
     try
     {
+        var db = scope.ServiceProvider.GetRequiredService<ServerDbContext>();
         await db.Database.MigrateAsync();
 
         List<Major> majors = await db.Majors.ToListAsync();

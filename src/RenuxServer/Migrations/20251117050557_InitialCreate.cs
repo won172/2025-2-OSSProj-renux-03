@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace RenuxServer.Migrations
 {
     /// <inheritdoc />
-    public partial class IniticalCreate : Migration
+    public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -44,8 +44,8 @@ namespace RenuxServer.Migrations
                     id = table.Column<Guid>(type: "uuid", nullable: false),
                     major_id = table.Column<Guid>(type: "uuid", nullable: false),
                     is_active = table.Column<bool>(type: "boolean", nullable: false),
-                    created_time = table.Column<long>(type: "bigint", nullable: false),
-                    updated_time = table.Column<long>(type: "bigint", nullable: false)
+                    created_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    updated_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -68,8 +68,8 @@ namespace RenuxServer.Migrations
                     user_name = table.Column<string>(type: "text", nullable: false),
                     major_id = table.Column<Guid>(type: "uuid", nullable: false),
                     role = table.Column<Guid>(type: "uuid", nullable: false),
-                    created_time = table.Column<long>(type: "bigint", nullable: false),
-                    updated_time = table.Column<long>(type: "bigint", nullable: false)
+                    created_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    updated_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -95,8 +95,8 @@ namespace RenuxServer.Migrations
                     id = table.Column<Guid>(type: "uuid", nullable: false),
                     organization_id = table.Column<Guid>(type: "uuid", nullable: false),
                     title = table.Column<string>(type: "text", nullable: false),
-                    created_time = table.Column<long>(type: "bigint", nullable: false),
-                    updated_time = table.Column<long>(type: "bigint", nullable: false)
+                    created_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    updated_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -117,8 +117,8 @@ namespace RenuxServer.Migrations
                     user_id = table.Column<Guid>(type: "uuid", nullable: false),
                     organization_id = table.Column<Guid>(type: "uuid", nullable: false),
                     title = table.Column<string>(type: "text", nullable: false),
-                    created_time = table.Column<long>(type: "bigint", nullable: false),
-                    updated_time = table.Column<long>(type: "bigint", nullable: false)
+                    created_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    updated_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -145,7 +145,7 @@ namespace RenuxServer.Migrations
                     chat_id = table.Column<Guid>(type: "uuid", nullable: false),
                     is_ask = table.Column<bool>(type: "boolean", nullable: false),
                     content = table.Column<string>(type: "text", nullable: false),
-                    created_time = table.Column<long>(type: "bigint", nullable: false)
+                    created_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
