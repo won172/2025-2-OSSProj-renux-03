@@ -12,7 +12,7 @@ public class GuestChat
     [Required]
     public string Title { get; set; } = null!;
     [Required]
-    public long CreatedTime { get; init; }
+    public DateTime CreatedTime { get; init; } = DateTime.Now.ToUniversalTime();
     [Required]
-    public long UpdatedTime { get; set; }
+    public DateTime UpdatedTime { get; set; } = DateTime.Now.ToUniversalTime();
 }

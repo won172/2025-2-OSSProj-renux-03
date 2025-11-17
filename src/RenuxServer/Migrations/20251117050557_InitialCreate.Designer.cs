@@ -12,8 +12,8 @@ using RenuxServer.DbContexts;
 namespace RenuxServer.Migrations
 {
     [DbContext(typeof(ServerDbContext))]
-    [Migration("20251111075101_IniticalCreate")]
-    partial class IniticalCreate
+    [Migration("20251117050557_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -32,8 +32,8 @@ namespace RenuxServer.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<long>("CreatedTime")
-                        .HasColumnType("bigint")
+                    b.Property<DateTime>("CreatedTime")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_time");
 
                     b.Property<Guid>("OrganizationId")
@@ -45,8 +45,8 @@ namespace RenuxServer.Migrations
                         .HasColumnType("text")
                         .HasColumnName("title");
 
-                    b.Property<long>("UpdatedTime")
-                        .HasColumnType("bigint")
+                    b.Property<DateTime>("UpdatedTime")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_time");
 
                     b.Property<Guid>("UserId")
@@ -78,8 +78,8 @@ namespace RenuxServer.Migrations
                         .HasColumnType("text")
                         .HasColumnName("content");
 
-                    b.Property<long>("CreatedTime")
-                        .HasColumnType("bigint")
+                    b.Property<DateTime>("CreatedTime")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_time");
 
                     b.Property<bool>("IsAsk")
@@ -102,8 +102,8 @@ namespace RenuxServer.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<long>("CreatedTime")
-                        .HasColumnType("bigint")
+                    b.Property<DateTime>("CreatedTime")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_time");
 
                     b.Property<Guid>("OrganizationId")
@@ -115,8 +115,8 @@ namespace RenuxServer.Migrations
                         .HasColumnType("text")
                         .HasColumnName("title");
 
-                    b.Property<long>("UpdatedTime")
-                        .HasColumnType("bigint")
+                    b.Property<DateTime>("UpdatedTime")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_time");
 
                     b.HasKey("Id");
@@ -165,8 +165,8 @@ namespace RenuxServer.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<long>("CreatedTime")
-                        .HasColumnType("bigint")
+                    b.Property<DateTime>("CreatedTime")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_time");
 
                     b.Property<bool>("IsActive")
@@ -177,8 +177,8 @@ namespace RenuxServer.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("major_id");
 
-                    b.Property<long>("UpdatedTime")
-                        .HasColumnType("bigint")
+                    b.Property<DateTime>("UpdatedTime")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_time");
 
                     b.HasKey("Id");
@@ -233,8 +233,8 @@ namespace RenuxServer.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<long>("CreatedTime")
-                        .HasColumnType("bigint")
+                    b.Property<DateTime>("CreatedTime")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_time");
 
                     b.Property<string>("HashPassword")
@@ -250,8 +250,8 @@ namespace RenuxServer.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("role");
 
-                    b.Property<long>("UpdatedTime")
-                        .HasColumnType("bigint")
+                    b.Property<DateTime>("UpdatedTime")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_time");
 
                     b.Property<string>("UserId")

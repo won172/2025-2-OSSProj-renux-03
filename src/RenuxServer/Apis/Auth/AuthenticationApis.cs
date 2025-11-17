@@ -59,7 +59,7 @@ static public class AuthenticationApis
 
             await db.SaveChangesAsync();
 
-            return Results.Ok(new { Message = "OK" });
+            return Results.Ok(true);
         });
 
         app.MapPost("/signin", async (ServerDbContext db, SigninUserDto signin, IValidator<SigninUserDto> validator,
@@ -108,7 +108,7 @@ static public class AuthenticationApis
             string tokenString = new JwtSecurityTokenHandler().WriteToken(token);
             context.Response.Cookies.Append("renux-server-token", tokenString, copt);
 
-            return Results.Ok(new { Message = "OK" });
+            return Results.Ok(true);
         });
 
         app.MapGet("/signout", (HttpContext context) =>
