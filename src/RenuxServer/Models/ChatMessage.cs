@@ -16,5 +16,5 @@ public class ChatMessage
     [Required]
     public string Content { get; set; } = null!;
     [Required]
-    public long CreatedTime { get; init; } = DateTime.Now.Ticks;
+    public DateTime CreatedTime { get; init; } = DateTime.Now.ToUniversalTime();
 }

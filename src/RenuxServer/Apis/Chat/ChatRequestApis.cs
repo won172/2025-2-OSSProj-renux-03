@@ -5,10 +5,12 @@ using System.Security.Claims;
 using RenuxServer.DbContexts;
 using RenuxServer.Dtos.ChatDtos;
 using RenuxServer.Models;
+using RenuxServer.Dtos.EtcDtos;
 
 namespace RenuxServer.Apis.Chat;
 
-public record StartChat(Guid OrgId, string Title);
+public record StartChat(OrganizationDto Org, string Title);
+public record LoadChat(Guid ChatId, DateTime LastTime);
 
 static public class ChatRequestApis
 {
@@ -33,17 +35,26 @@ static public class ChatRequestApis
 
         app.MapPost("/start", async (ServerDbContext db, HttpContext context, StartChat stch, IMapper mapper) =>
         {
-            long time = DateTime.Now.Ticks;
+            DateTime time = DateTime.Now.ToUniversalTime();
             ActiveChat chat = new()
             {
                 UserId = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!),
-                OrganizationId = stch.OrgId,
+                OrganizationId = stch.Org.Id,
                 Title = stch.Title,
                 CreatedTime = time,
                 UpdatedTime = time
             };
 
+            ChatMessage startChat = new()
+            {
+                ChatId = chat.Id,
+                IsAsk = false,
+                Content = $"안녕하세요. {stch.Org.Major.Majorname} 전문 동똑이입니다. 무엇을 도와드릴까요?",
+                CreatedTime = time
+            };
+
             await db.Chats.AddAsync(chat);
+            await db.ChatMessages.AddAsync(startChat);
             await db.SaveChangesAsync();
 
             ActiveChatDto chatDto = mapper.Map<ActiveChatDto>(chat);
@@ -62,30 +73,29 @@ static public class ChatRequestApis
                 ChatId = ask.ChatId,
                 Content = "대답입니다.",
                 IsAsk = false,
-                CreatedTime = DateTime.Now.Ticks
+                CreatedTime = DateTime.Now.ToUniversalTime()
             };
 
             await db.ChatMessages.AddAsync(apply);
             await db.SaveChangesAsync();
 
-
-            
+            return Results.Ok(apply);
         });
 
-        app.MapPost("/startguest", () =>
+        app.MapPost("/startguest", async (ServerDbContext db, ChatMessageDto askDto, IMapper mapper) =>
         {
 
         });
 
-        app.MapPost("/load", async (ServerDbContext db, Guid chatId, IMapper mapper, long lastTime) =>
+        app.MapPost("/load", async (ServerDbContext db, IMapper mapper, LoadChat load) =>
         {
-            List<ChatMessageDto> chatMessages = await MessagesToList(db, mapper, lastTime, chatId);
+            List<ChatMessageDto> chatMessages = await MessagesToList(db, mapper, load.LastTime, load.ChatId);
 
             return Results.Ok(chatMessages);
         }).RequireAuthorization();
     }
 
-    static public async Task<List<ChatMessageDto>> MessagesToList(ServerDbContext db, IMapper mapper, long lastTime, Guid chatId)
+    static public async Task<List<ChatMessageDto>> MessagesToList(ServerDbContext db, IMapper mapper, DateTime lastTime, Guid chatId)
     {
         List<ChatMessageDto> chatMessages = mapper.Map<List<ChatMessageDto>>(
                 await db.ChatMessages.Where(cm => Equals(cm.ChatId, chatId) && cm.CreatedTime < lastTime)
