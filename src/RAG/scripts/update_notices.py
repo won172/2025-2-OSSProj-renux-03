@@ -1,4 +1,4 @@
-"""Crawl Dongguk notices and append new rows to the CSV/Chroma index."""
+"""동국대 공지를 크롤링해 CSV/Chroma 인덱스에 신규 행을 추가합니다."""
 from __future__ import annotations
 
 import argparse

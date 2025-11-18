@@ -1,4 +1,4 @@
-"""Helpers for notice-category classification and reranking."""
+"""공지 분류와 재순위 지정을 돕는 헬퍼입니다."""
 from __future__ import annotations
 
 from threading import Lock
@@ -30,7 +30,7 @@ def _get_classifier():
 
 
 def classify_notice_query(query: str) -> Optional[str]:
-    """Return the predicted notice category for the given query."""
+    """주어진 질의에 대해 예측된 공지 카테고리를 반환합니다."""
     query = (query or "").strip()
     if not query:
         return None
@@ -49,7 +49,7 @@ def classify_notice_query(query: str) -> Optional[str]:
 
 
 def prioritize_notice_hits(hits: pd.DataFrame, category: str | None) -> pd.DataFrame:
-    """Reorder notice hits so that rows matching the predicted category come first."""
+    """예측된 카테고리와 일치하는 행이 먼저 오도록 공지 결과를 재정렬합니다."""
     if hits.empty or not category:
         return hits
 
@@ -66,7 +66,7 @@ def prioritize_notice_hits(hits: pd.DataFrame, category: str | None) -> pd.DataF
 
 
 def bootstrap_notice_classifier() -> None:
-    """Warm up the classifier at application startup."""
+    """애플리케이션이 시작될 때 분류기를 미리 불러옵니다."""
     classifier = _get_classifier()
     if classifier is None:
         if CLASSIFIER_PATH.exists():

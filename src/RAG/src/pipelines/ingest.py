@@ -1,4 +1,4 @@
-"""Data ingestion routines that build Chroma indices for multiple datasets."""
+"""여러 데이터셋에 대한 Chroma 인덱스를 구축하는 데이터 수집 루틴입니다."""
 from __future__ import annotations
 
 from dataclasses import dataclass

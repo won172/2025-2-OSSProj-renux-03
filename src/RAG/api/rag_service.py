@@ -1,4 +1,4 @@
-"""FastAPI service exposing the campus assistant API."""
+"""캠퍼스 어시스턴트 API를 제공하는 FastAPI 서비스입니다."""
 from __future__ import annotations
 
 import sys

@@ -1,4 +1,4 @@
-"""LangChain-based conversational helper with message history."""
+"""메시지 이력을 다루는 LangChain 기반 대화 헬퍼입니다."""
 from __future__ import annotations
 
 from functools import lru_cache
@@ -49,7 +49,7 @@ def _build_chain() -> RunnableWithMessageHistory:
 
 
 def generate_langchain_answer(question: str, context: str, session_id: str | None = None) -> str:
-    """Return an answer using LangChain message history support."""
+    """LangChain 메시지 이력을 활용해 답변을 생성합니다."""
     chain = _build_chain()
     payload = {
         "question": question,
