@@ -1,4 +1,4 @@
-"""One-off crawler that exports Dongguk University academic schedule."""
+"""동국대 학사 일정을 추출하는 일회성 크롤러입니다."""
 from __future__ import annotations
 
 import re

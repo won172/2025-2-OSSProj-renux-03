@@ -1,4 +1,4 @@
-# settings.py
+# settings.py 설정
 from dotenv import load_dotenv
 import os
 from pathlib import Path

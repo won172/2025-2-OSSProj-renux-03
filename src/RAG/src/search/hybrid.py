@@ -1,4 +1,4 @@
-"""Hybrid search utilities (dense + TF-IDF) translated from the notebook."""
+"""노트북에서 가져온 밀집 임베딩+TF-IDF 하이브리드 검색 유틸리티입니다."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,7 +20,7 @@ def _vectorizer_path(identifier: str) -> Path:
 
 
 def train_tfidf(identifier: str, corpus: Iterable[str]) -> Tuple[TfidfVectorizer, np.ndarray]:
-    """Fit a TF-IDF vectorizer on the provided corpus and persist it."""
+    """주어진 말뭉치에 TF-IDF 벡터라이저를 학습시키고 저장합니다."""
     texts = list(corpus)
     if not texts:
         raise ValueError("Corpus is empty, cannot train TF-IDF vectorizer.")
@@ -31,7 +31,7 @@ def train_tfidf(identifier: str, corpus: Iterable[str]) -> Tuple[TfidfVectorizer
 
 
 def load_tfidf(identifier: str) -> Tuple[TfidfVectorizer, np.ndarray]:
-    """Load a previously trained TF-IDF vectorizer and matrix."""
+    """이미 학습된 TF-IDF 벡터라이저와 행렬을 불러옵니다."""
     data = joblib.load(_vectorizer_path(identifier))
     return data["vectorizer"], data["matrix"]
 
@@ -45,7 +45,7 @@ def hybrid_search(
     top_k: int = DEFAULT_TOP_K,
     alpha: float = HYBRID_ALPHA,
 ) -> pd.DataFrame:
-    """Execute the hybrid search strategy from the notebook."""
+    """노트북에서 사용한 하이브리드 검색 전략을 그대로 실행합니다."""
     if chunks_df.empty:
         return chunks_df.copy()
 
@@ -83,7 +83,7 @@ def hybrid_search_with_meta(
     top_k: int = DEFAULT_TOP_K,
     alpha: float = HYBRID_ALPHA,
 ) -> pd.DataFrame:
-    """Return notebook-style metadata columns alongside the chunk text."""
+    """노트북과 같은 형식으로 메타데이터 열을 청크 텍스트와 함께 반환합니다."""
     hits = hybrid_search(collection_name, chunks_df, tfidf_vectorizer, tfidf_matrix, query, top_k, alpha)
     out = hits.copy()
     out["title"] = out["chunk_text"].apply(_extract_title)

@@ -1,4 +1,4 @@
-"""Chat-oriented wrapper that keeps short-term history."""
+"""단기 대화 이력을 유지하는 챗 전용 래퍼입니다."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

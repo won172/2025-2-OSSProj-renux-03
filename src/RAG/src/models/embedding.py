@@ -1,4 +1,4 @@
-"""Sentence embedding helpers aligned with the notebook configuration."""
+"""노트북 설정에 맞춘 문장 임베딩 헬퍼입니다."""
 from __future__ import annotations
 
 from functools import lru_cache
@@ -12,7 +12,7 @@ from src.config import EMBED_BATCH_SIZE, EMBED_DEVICE, EMBED_MODEL_NAME
 
 @lru_cache(maxsize=1)
 def get_embedder() -> SentenceTransformer:
-    """Return a cached SentenceTransformer instance."""
+    """캐시에 담긴 SentenceTransformer 인스턴스를 반환합니다."""
     model = SentenceTransformer(
         EMBED_MODEL_NAME,
         trust_remote_code=True,
@@ -22,7 +22,7 @@ def get_embedder() -> SentenceTransformer:
 
 
 def encode_texts(texts: Iterable[str], normalize: bool = True) -> np.ndarray:
-    """Encode a list of texts into dense vectors using the project defaults."""
+    """프로젝트 기본 설정으로 텍스트 목록을 밀집 벡터로 변환합니다."""
     embedder = get_embedder()
     vectors = embedder.encode(
         list(texts),

@@ -1,4 +1,4 @@
-"""Helpers for selecting datasets with a trained classifier."""
+"""학습된 분류기로 데이터셋을 고르는 헬퍼 모음입니다."""
 from __future__ import annotations
 
 from threading import Lock
@@ -45,7 +45,7 @@ def route_query(
     min_probability: float = 0.25,
     max_candidates: int = 2,
 ) -> List[str]:
-    """Route a user query to the most relevant datasets."""
+    """사용자 질의를 가장 관련 있는 데이터셋으로 보냅니다."""
     query = (query or "").strip()
     if not query:
         return ["notices"]
@@ -79,7 +79,7 @@ def route_query(
     if not selected:
         selected = _keyword_route(query)
 
-    # Ensure results are unique and valid.
+    # 결과가 중복되지 않고 유효한지 확인한다.
     seen: set[str] = set()
     unique = []
     for label in selected:
@@ -91,7 +91,7 @@ def route_query(
 
 
 def bootstrap_router() -> None:
-    """Warm up the router model early (used at application startup)."""
+    """애플리케이션 시작 시 라우터 모델을 미리 불러옵니다."""
     model = _get_router_model()
     if model is None:
         if ROUTER_MODEL_PATH.exists():

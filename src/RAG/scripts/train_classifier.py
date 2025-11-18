@@ -1,4 +1,4 @@
-"""Train or refresh the notice category classifier with optional augmentation."""
+"""공지 카테고리 분류기를 증강 옵션과 함께 학습하거나 갱신하는 스크립트입니다."""
 from __future__ import annotations
 
 import argparse
@@ -159,9 +159,9 @@ def main() -> None:
 
     sample_text = "장학금 신청 일정 알려줘"
     sample_pred = predict_category(classifier, encode_texts([sample_text]))[0]
-    print(f"✅ Saved classifier to {CLASSIFIER_PATH}")
-    print(f"🎯 Sample prediction for '{sample_text}': {sample_pred}")
-    print(f"📚 Training samples used: {len(texts)} (augment={args.augment})")
+    print(f"Saved classifier to {CLASSIFIER_PATH}")
+    print(f"Sample prediction for '{sample_text}': {sample_pred}")
+    print(f"Training samples used: {len(texts)} (augment={args.augment})")
 
 
 if __name__ == "__main__":

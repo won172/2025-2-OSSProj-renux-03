@@ -1,7 +1,4 @@
-"""Crawler for Dongguk University notice boards.
-
-This module is a scriptified version of ``dongguk_notices.ipynb`` so it can be
-reused by other parts of the project (e.g. scheduled ingestion)."""
+"""동국대학교 공지 게시판을 수집하는 크롤러입니다."""
 from __future__ import annotations
 
 import re
@@ -15,7 +12,6 @@ import requests
 from bs4 import BeautifulSoup, FeatureNotFound
 from bs4.builder import ParserRejectedMarkup
 
-# ===== Constants mirrored from the notebook =====
 BASE_URL = "https://www.dongguk.edu"
 BOARD_CODES = {
     "일반공지": "GENERALNOTICES",
@@ -59,7 +55,7 @@ PARSER_CANDIDATES: Iterable[str] = ("lxml", "html5lib", "html.parser")
 HWPJSON_SECTION_PATTERN = re.compile(r"<!\[[^<]*?data-hwpjson.*?\]>", re.IGNORECASE | re.DOTALL)
 
 
-# ===== HTML helpers =====
+# ===== HTML 처리 헬퍼 =====
 def _strip_hwpjson_sections(markup: str) -> str:
     cleaned = markup
     while True:
@@ -106,9 +102,9 @@ def make_soup(markup: str) -> BeautifulSoup:
     raise RuntimeError("No HTML parser could parse the provided markup.")
 
 
-# ===== Crawling primitives =====
+# ===== 크롤링 기본 함수 =====
 def fetch_notice_list(board_code: str, page: int = 1) -> List[Dict[str, Any]]:
-    """Return a notice summary list from the board list page."""
+    """게시판 목록 페이지에서 공지 요약 목록을 가져옵니다."""
     url = f"{BASE_URL}/article/{board_code}/list"
     response = requests.get(url, params={"pageIndex": page}, headers=HEADERS, timeout=40)
     response.raise_for_status()
@@ -164,7 +160,7 @@ def fetch_notice_list(board_code: str, page: int = 1) -> List[Dict[str, Any]]:
 
 
 def fetch_notice_detail(board_code: str, article_id: int) -> Dict[str, Any]:
-    """Return detail data (HTML+text+attachments) for a single notice."""
+    """단일 공지의 HTML·텍스트·첨부 정보를 가져옵니다."""
     url = f"{BASE_URL}/article/{board_code}/detail/{article_id}"
     response = requests.get(url, headers=HEADERS, timeout=40)
     response.raise_for_status()
@@ -228,7 +224,7 @@ def fetch_notice_detail(board_code: str, article_id: int) -> Dict[str, Any]:
     }
 
 
-# ===== High level helpers =====
+# ===== 상위 헬퍼 =====
 def collect_board(
     board_name: str,
     board_code: str,
@@ -325,7 +321,7 @@ def crawl_notices(
 
 
 def crawl_recent_notices(max_pages: int = 3, delay: float = DEFAULT_REQUEST_DELAY) -> pd.DataFrame:
-    """Convenience wrapper tuned for scheduled runs (crawl first few pages)."""
+    """정기 실행을 염두에 두고 앞쪽 몇 페이지만 수집하는 편의 래퍼입니다."""
     return crawl_notices(max_pages=max_pages, delay=delay)
 
 

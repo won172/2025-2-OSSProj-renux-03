@@ -1,4 +1,4 @@
-"""Utility functions for the notice category classifier."""
+"""공지 카테고리 분류기를 위한 유틸리티 함수입니다."""
 from __future__ import annotations
 
 from pathlib import Path
