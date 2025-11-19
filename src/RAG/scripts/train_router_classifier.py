@@ -1,4 +1,4 @@
-"""Train or refresh the dataset routing classifier."""
+"""데이터셋 라우팅 분류기를 학습하거나 갱신하는 스크립트입니다."""
 from __future__ import annotations
 
 import argparse
@@ -105,14 +105,14 @@ def main() -> None:
         include_keywords=not args.skip_keywords,
     )
 
-    print(f"📚 Collected {len(texts)} training samples across {len(set(labels))} datasets.")
+    print(f"Collected {len(texts)} training samples across {len(set(labels))} datasets.")
 
     model = train_router_classifier(texts, labels)
     save_router_classifier(model, ROUTER_MODEL_PATH)
-    print(f"✅ Saved router classifier to {ROUTER_MODEL_PATH}")
+    print(f"Saved router classifier to {ROUTER_MODEL_PATH}")
 
     report = evaluate_router_classifier(texts, labels)
-    print("📊 Evaluation (hold-out classification report):")
+    print("Evaluation (hold-out classification report):")
     print(report)
 
     sample_questions = [

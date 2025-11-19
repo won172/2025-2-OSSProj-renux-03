@@ -1,4 +1,4 @@
-"""Utilities for training and loading the dataset routing classifier."""
+"""데이터셋 라우팅 분류기를 학습하고 불러오는 유틸리티입니다."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,7 +21,7 @@ def _build_pipeline(
     max_features: int | None = 6000,
     ngram_range: Tuple[int, int] = (1, 2),
 ) -> Pipeline:
-    """Create a TF-IDF + Logistic Regression pipeline."""
+    """TF-IDF와 로지스틱 회귀를 결합한 파이프라인을 생성합니다."""
     return Pipeline(
         [
             (
@@ -50,7 +50,7 @@ def train_router_classifier(
     max_features: int | None = 6000,
     ngram_range: Tuple[int, int] = (1, 2),
 ) -> Pipeline:
-    """Train the router classifier on the provided corpus."""
+    """주어진 말뭉치로 라우터 분류기를 학습합니다."""
     pipeline = _build_pipeline(max_features=max_features, ngram_range=ngram_range)
     pipeline.fit(texts, labels)
     return pipeline
@@ -64,7 +64,7 @@ def evaluate_router_classifier(
     max_features: int | None = 6000,
     ngram_range: Tuple[int, int] = (1, 2),
 ) -> str:
-    """Return a classification report using a hold-out split."""
+    """홀드아웃 분할을 사용해 분류 리포트를 반환합니다."""
     X_train, X_test, y_train, y_test = train_test_split(
         list(texts),
         list(labels),
@@ -79,18 +79,18 @@ def evaluate_router_classifier(
 
 
 def save_router_classifier(model: Pipeline, path: Path = ROUTER_MODEL_PATH) -> None:
-    """Persist the trained pipeline to disk."""
+    """학습된 파이프라인을 디스크에 저장합니다."""
     path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, path)
 
 
 def load_router_classifier(path: Path = ROUTER_MODEL_PATH) -> Pipeline:
-    """Load a previously trained routing pipeline."""
+    """이미 학습된 라우팅 파이프라인을 불러옵니다."""
     return joblib.load(path)
 
 
 def predict_router_proba(model: Pipeline, queries: Iterable[str]) -> np.ndarray:
-    """Return class probabilities for each query."""
+    """각 질의에 대한 클래스 확률을 반환합니다."""
     return model.predict_proba(list(queries))
 
 

@@ -1,4 +1,4 @@
-"""Utilities to merge newly crawled notices and update downstream artifacts."""
+"""새로 수집한 공지를 병합하고 후속 산출물을 갱신하는 유틸리티입니다."""
 from __future__ import annotations
 
 from typing import Tuple, Any
@@ -48,7 +48,7 @@ def save_notices(df: pd.DataFrame) -> None:
 
 
 def append_chunks(new_rows: pd.DataFrame) -> pd.DataFrame:
-    """Build chunks for the provided rows and return them."""
+    """주어진 행을 기반으로 청크를 만들어 반환합니다."""
     if new_rows.empty:
         return pd.DataFrame()
     if "첨부파일" in new_rows.columns:
@@ -131,11 +131,11 @@ def retrain_tfidf(chunks_df: pd.DataFrame) -> None:
 
 
 def sync_notices(incoming: pd.DataFrame) -> int:
-    """Merge *incoming* notices, update CSV/Chroma/TF-IDF, and return # of new rows."""
+    """새 공지를 병합하고 CSV/Chroma/TF-IDF를 갱신한 뒤 신규 행 수를 돌려줍니다."""
     existing = load_existing_notices()
     merged, new_rows = merge_notices(existing, incoming)
     if new_rows.empty:
-        save_notices(merged)  # ensure ordering/encoding stays consistent
+        save_notices(merged)  # 정렬과 인코딩을 일관되게 유지한다.
         return 0
 
     save_notices(merged)

@@ -1,10 +1,10 @@
-"""CLI helper to rebuild the Chroma index from CSV data."""
+"""CSV 데이터를 바탕으로 Chroma 인덱스를 재구축하는 CLI 헬퍼입니다."""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-# Ensure the project root is on the import path when running as a script.
+# 스크립트로 실행할 때 프로젝트 루트를 import 경로에 올려 둔다.
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.pipelines.ingest import (

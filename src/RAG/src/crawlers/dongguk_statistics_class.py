@@ -1,4 +1,4 @@
-"""One-off crawler for Dongguk Statistics department course information."""
+"""동국대 통계학과 교과 정보를 추출하는 일회성 크롤러입니다."""
 from __future__ import annotations
 
 import re
@@ -35,7 +35,7 @@ COURSE_DESCRIPTION_KEYWORDS = {
 
 
 class CoursePageError(RuntimeError):
-    """Raised when the statistics course page cannot be parsed."""
+    """통계 교과 페이지를 파싱하지 못했을 때 발생합니다."""
 
 
 def fetch_page_html(url: str, *, timeout: float = 10.0) -> str:

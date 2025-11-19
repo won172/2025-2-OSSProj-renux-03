@@ -1,4 +1,4 @@
-"""One-shot Selenium crawler for Dongguk staff contact list."""
+"""동국대 직원 연락처를 수집하는 일회성 Selenium 크롤러입니다."""
 from __future__ import annotations
 
 import time

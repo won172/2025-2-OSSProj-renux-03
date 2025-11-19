@@ -1,4 +1,4 @@
-"""Answer generation helpers that wrap the OpenAI chat API."""
+"""OpenAI 채팅 API를 감싸 답변을 생성하는 헬퍼입니다."""
 from __future__ import annotations
 
 from functools import lru_cache

@@ -1,1 +1,1 @@
-"""Crawler packages for Dongguk RAG."""
+"""동국대 RAG용 크롤러 패키지입니다."""

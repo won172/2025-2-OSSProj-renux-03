@@ -1,4 +1,4 @@
-# build_indices.py
+# build_indices.py 스크립트
 import pandas as pd
 import re
 from typing import List, Dict

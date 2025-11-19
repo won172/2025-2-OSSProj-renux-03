@@ -1,4 +1,4 @@
-"""Text cleaning and chunk preparation utilities taken from the notebook."""
+"""노트북에서 가져온 텍스트 정제 및 청크 준비 유틸리티입니다."""
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +17,7 @@ _WHITESPACE = re.compile(r"[ \t\u00A0]+")
 
 
 def strip_html(text: str | None) -> str:
-    """Remove HTML tags and normalise line breaks."""
+    """HTML 태그를 제거하고 줄바꿈을 정리합니다."""
     if not isinstance(text, str):
         return ""
     text = _TAG_SCRIPT_STYLE.sub(" ", text)
@@ -28,7 +28,7 @@ def strip_html(text: str | None) -> str:
 
 
 def normalize_whitespace(text: str | None) -> str:
-    """Apply the whitespace heuristics defined in the notebook."""
+    """노트북에서 정의한 공백 정규화 규칙을 적용합니다."""
     if not isinstance(text, str):
         return ""
     text = _WHITESPACE.sub(" ", text)
@@ -48,7 +48,7 @@ def normalize_whitespace(text: str | None) -> str:
 
 
 def standardize_date(value: str | None) -> Optional[str]:
-    """Normalise date strings into YYYY-MM-DD format."""
+    """날짜 문자열을 YYYY-MM-DD 형식으로 맞춥니다."""
     if not isinstance(value, str):
         return None
     value = value.strip()
@@ -61,19 +61,19 @@ def standardize_date(value: str | None) -> Optional[str]:
 
 
 def make_doc_id(*parts: object) -> str:
-    """Create a deterministic SHA1 identifier for a document."""
+    """문서마다 고정된 SHA1 식별자를 생성합니다."""
     raw = "|".join(str(p) for p in parts if p)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 def make_chunk_id(doc_id: str, index: int) -> str:
-    """Create a deterministic SHA1 identifier for a chunk."""
+    """청크마다 고정된 SHA1 식별자를 생성합니다."""
     raw = f"{doc_id}|{index}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 def apply_cleaning(df: DataFrame, content_col: str, date_col: str | None = None) -> DataFrame:
-    """Return a copy of *df* with `clean_text` and optional `clean_date` columns."""
+    """사본에 `clean_text`와 필요하면 `clean_date` 열을 추가해 반환합니다."""
     out = df.copy()
     out["clean_text"] = out[content_col].apply(strip_html).apply(normalize_whitespace)
     if date_col and date_col in out.columns:
@@ -90,7 +90,7 @@ def build_document_rows(
     url_col: str | None,
     attachment_col: str | None,
 ) -> List[dict]:
-    """Create the list of document dictionaries used for chunking."""
+    """청크 작업에 사용할 문서 딕셔너리 목록을 생성합니다."""
     docs: List[dict] = []
     for _, row in df.iterrows():
         published = row.get("clean_date") if "clean_date" in row else row.get(date_col)
@@ -111,7 +111,7 @@ def build_document_rows(
 
 
 def chunk_text(text: str, size: int, overlap: int) -> List[str]:
-    """Rudimentary character-based chunking used for long documents."""
+    """긴 문서를 단순 문자 단위로 분할합니다."""
     if not text:
         return []
     text = normalize_whitespace(text)
@@ -134,7 +134,7 @@ def to_chunks(
     chunk_overlap: int = 0,
     include_title: bool = True,
 ) -> List[dict]:
-    """Transform document dicts into chunk dicts consumable by Chroma."""
+    """문서 딕셔너리를 Chroma가 사용할 수 있는 청크 딕셔너리로 바꿉니다."""
     chunks: List[dict] = []
     for doc in docs:
         text = doc.get("text") or ""

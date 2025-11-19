@@ -1,4 +1,4 @@
-"""One-off exporter for Dongguk University rulebook HWP files."""
+"""동국대 학칙 HWP 파일을 일괄 추출하는 스크립트입니다."""
 from __future__ import annotations
 
 import re

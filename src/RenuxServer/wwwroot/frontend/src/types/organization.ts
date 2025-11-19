@@ -1,4 +1,5 @@
 export interface DepartmentMajor {
+  id?: string
   majorname?: string | null
 }
 

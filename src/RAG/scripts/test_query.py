@@ -1,4 +1,4 @@
-"""Lightweight CLI to send a sample query through the RAG pipeline."""
+"""RAG 파이프라인에 샘플 질의를 전달하는 간단한 CLI입니다."""
 from __future__ import annotations
 
 import argparse
