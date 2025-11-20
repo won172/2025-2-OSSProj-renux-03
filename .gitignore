@@ -5,3 +5,4 @@ __*/
 *.env
 RenuxServer.csproj.Backup.tmp
 RenuxServer.csproj.user
+.DS_Store
