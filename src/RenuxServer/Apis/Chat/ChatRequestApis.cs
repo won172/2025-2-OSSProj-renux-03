@@ -79,7 +79,9 @@ static public class ChatRequestApis
             await db.ChatMessages.AddAsync(apply);
             await db.SaveChangesAsync();
 
-            return Results.Ok(apply);
+            ChatMessageDto applyDto = mapper.Map<ChatMessageDto>(apply);
+
+            return Results.Ok(applyDto);
         });
 
         app.MapPost("/startguest", async (ServerDbContext db, ChatMessageDto askDto, IMapper mapper) =>
