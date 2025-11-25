@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 import pandas as pd
+import re
 
 from src.config import (
     CHUNK_OVERLAP,
@@ -17,6 +18,7 @@ from src.models.embedding import encode_texts
 from src.search.hybrid import train_tfidf
 from src.utils.preprocess import (
     apply_cleaning,
+    normalize_whitespace,
     make_doc_id,
     to_chunks,
 )
@@ -88,6 +90,15 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
     return chunks_df, vectorizer, matrix
 
 
+def _first_nonempty(row, keys: Iterable[str]) -> str:
+    for key in keys:
+        val = row.get(key, "") if hasattr(row, "get") else row.get(key, "")
+        val_str = str(val).strip()
+        if val_str and val_str.lower() != "nan":
+            return val_str
+    return ""
+
+
 def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
     column = {
         "title": "제목",
@@ -139,23 +150,15 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
     return _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, chunks_df)
 
 
-def ingest_rules() -> Tuple[pd.DataFrame, object, object]:
-    path = DATA_SOURCES["rules"]
-    if not path.exists():
-        raise FileNotFoundError(f"Rule CSV not found: {path}")
-
-    df = pd.read_csv(path).fillna("").astype(str)
-
+def build_rule_chunks(df: pd.DataFrame) -> pd.DataFrame:
     docs: List[dict] = []
     for _, row in df.iterrows():
-        text = str(row.get("text", "")).strip()
-        if not text:
-            text = str(row.get("filename", "")).strip()
+        text = _first_nonempty(row, ["text", "내용", "본문", "article", "조문", "rule_text"])
         if not text:
             continue
-        filename = row.get("filename", "")
-        rel_dir = row.get("relative_dir", "")
-        doc_id = make_doc_id("rules", rel_dir, filename)
+        filename = _first_nonempty(row, ["filename", "파일명", "규정명", "title"])
+        rel_dir = _first_nonempty(row, ["relative_dir", "경로", "folder"])
+        doc_id = make_doc_id("rules", rel_dir, filename or text[:40])
         docs.append(
             {
                 "doc_id": doc_id,
@@ -176,60 +179,58 @@ def ingest_rules() -> Tuple[pd.DataFrame, object, object]:
         chunk_overlap=CHUNK_OVERLAP,
         include_title=True,
     )
-    chunks_df = pd.DataFrame(chunks)
+    return pd.DataFrame(chunks)
+
+
+def ingest_rules() -> Tuple[pd.DataFrame, object, object]:
+    path = DATA_SOURCES["rules"]
+    if not path.exists():
+        raise FileNotFoundError(f"Rule CSV not found: {path}")
+
+    df = pd.read_csv(path).fillna("").astype(str)
+    chunks_df = build_rule_chunks(df)
     return _persist_chunks("rules", DATASET_ARTIFACTS["rules"].collection, chunks_df)
 
 
-def ingest_schedule() -> Tuple[pd.DataFrame, object, object]:
-    path = DATA_SOURCES["schedule"]
-    if not path.exists():
-        raise FileNotFoundError(f"Schedule CSV not found: {path}")
-
-    df = pd.read_csv(path).fillna("").astype(str)
-
+def build_schedule_chunks(df: pd.DataFrame) -> pd.DataFrame:
     docs: List[dict] = []
-    for _, row in df.iterrows():
-        text_segments: List[str] = []
-        for col, value in row.items():
-            col_name = str(col).strip()
-            value_str = str(value).strip()
-            if col_name in {"start", "end"}:
-                continue
-            if col_name.lower().startswith("unnamed"):
-                continue
-            if not value_str:
-                continue
-            if col_name in {"내용", "일정", "event", "2", "description"}:
-                text_segments.append(value_str)
-            else:
-                text_segments.append(f"{col_name}: {value_str}")
+    dept_pattern = re.compile(r"\(주관부서:\s*(.*?)\)")
 
-        text = "\n".join(text_segments).strip()
-        if not text:
+    for _, row in df.iterrows():
+        start_val = _first_nonempty(row, ["start", "start_date", "시작", "시작일"])
+        end_val = _first_nonempty(row, ["end", "end_date", "종료", "종료일"])
+        category = _first_nonempty(row, ["구분", "category", "분류", "0", "카테고리"])
+        
+        description = _first_nonempty(row, ["내용", "일정", "event", "2", "description"])
+        if not description:
             continue
 
-        title = text_segments[0] if text_segments else "학사 일정"
-        category = str(row.get("구분", row.get("0", ""))).strip()
-        if category.lower() == "nan":
-            category = ""
-        department = str(row.get("주관부서", "")).strip()
-        if department.lower() == "nan":
-            department = ""
+        # 설명에서 주관부서 추출
+        dept_match = dept_pattern.search(description)
+        if dept_match:
+            department = dept_match.group(1).strip()
+            # 원본 설명에서 주관부서 괄호 부분 제거
+            description = dept_pattern.sub("", description).strip()
+        else:
+            department = _first_nonempty(row, ["주관부서", "department", "부서"])
 
-        doc_id = make_doc_id("schedule", row.get("start"), row.get("end"), text)
+        text = description
+        title = description.split("\n")[0]
+
+        doc_id = make_doc_id("schedule", start_val, end_val, text)
         docs.append(
             {
                 "doc_id": doc_id,
                 "title": title,
                 "text": text,
-                "schedule_start": row.get("start", ""),
-                "schedule_end": row.get("end", ""),
+                "schedule_start": start_val,
+                "schedule_end": end_val,
                 "category": category,
                 "department": department,
                 "topics": category or "schedule",
                 "source": "schedule",
                 "url": "",
-                "published_at": row.get("start", ""),
+                "published_at": start_val,
             }
         )
 
@@ -239,28 +240,23 @@ def ingest_schedule() -> Tuple[pd.DataFrame, object, object]:
         chunk_overlap=CHUNK_OVERLAP // 2,
         include_title=True,
     )
-    chunks_df = pd.DataFrame(chunks)
+    return pd.DataFrame(chunks)
+
+
+def ingest_schedule() -> Tuple[pd.DataFrame, object, object]:
+    path = DATA_SOURCES["schedule"]
+    if not path.exists():
+        raise FileNotFoundError(f"Schedule CSV not found: {path}")
+
+    df = pd.read_csv(path).fillna("").astype(str)
+    chunks_df = build_schedule_chunks(df)
     return _persist_chunks("schedule", DATASET_ARTIFACTS["schedule"].collection, chunks_df)
 
 
-def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
-    paths = [DATA_SOURCES["courses_desc"], DATA_SOURCES["courses_major"]]
-    frames: List[pd.DataFrame] = []
-    for key, path in zip(["description", "major"], paths):
-        if not path.exists():
-            continue
-        df = pd.read_csv(path).fillna("").astype(str)
-        df["_source_table"] = key
-        frames.append(df)
-
-    if not frames:
-        raise FileNotFoundError("Course CSV files are missing. Run the statistics crawler first.")
-
-    combined = pd.concat(frames, ignore_index=True)
-
+def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
     docs: List[dict] = []
     ignored_exact = {"_source_table"}
-    title_candidates = ["국문교과목명", "과목명", "course_name", "교과목명"]
+    title_candidates = ["국문교과목명", "과목명", "course_name", "교과목명", "title", "교과목"]
     for _, row in combined.iterrows():
         title = next((str(row.get(col, "")).strip() for col in title_candidates if str(row.get(col, "")).strip()), "통계학과 교과")
         code = str(row.get("학수번호", "")).strip()
@@ -276,7 +272,8 @@ def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
             if col in title_candidates:
                 text_parts.append(value_str)
             else:
-                text_parts.append(f"{col}: {value_str}")
+                label = normalize_whitespace(col)
+                text_parts.append(f"{label}: {value_str}")
         text = "\n".join(text_parts).strip()
         if not text:
             continue
@@ -300,7 +297,24 @@ def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
         chunk_overlap=0,
         include_title=True,
     )
-    chunks_df = pd.DataFrame(chunks)
+    return pd.DataFrame(chunks)
+
+
+def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
+    paths = [DATA_SOURCES["courses_desc"], DATA_SOURCES["courses_major"]]
+    frames: List[pd.DataFrame] = []
+    for key, path in zip(["description", "major"], paths):
+        if not path.exists():
+            continue
+        df = pd.read_csv(path).fillna("").astype(str)
+        df["_source_table"] = key
+        frames.append(df)
+
+    if not frames:
+        raise FileNotFoundError("Course CSV files are missing. Run the statistics crawler first.")
+
+    combined = pd.concat(frames, ignore_index=True)
+    chunks_df = build_course_chunks(combined)
     return _persist_chunks("courses", DATASET_ARTIFACTS["courses"].collection, chunks_df)
 
 
@@ -326,6 +340,9 @@ if __name__ == "__main__":
 __all__ = [
     "DATASET_ARTIFACTS",
     "build_notice_chunks",
+    "build_rule_chunks",
+    "build_schedule_chunks",
+    "build_course_chunks",
     "ingest_notices",
     "ingest_rules",
     "ingest_schedule",

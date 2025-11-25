@@ -1,7 +1,8 @@
-"""캠퍼스 어시스턴트 API를 제공하는 FastAPI 서비스입니다."""
-from __future__ import annotations
-
+import functools
+import re
 import sys
+import uuid
+from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
@@ -11,8 +12,15 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
-from src.config import DEFAULT_TOP_K, HYBRID_ALPHA, VECTORIZER_DIR
+from src.config import (
+    DEFAULT_TOP_K,
+    HYBRID_ALPHA,
+    MAX_CONTEXT_LENGTH,
+    RECENCY_WEIGHT,
+    VECTORIZER_DIR,
+)
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
     ingest_courses,
@@ -28,7 +36,8 @@ from src.services.notice_classifier import (
     classify_notice_query,
     prioritize_notice_hits,
 )
-from src.services.router import bootstrap_router, route_query
+from src.services.router import route_query
+from src.utils.date_parser import extract_date_range_from_query
 
 app = FastAPI(
     title="동똑이",
@@ -55,22 +64,15 @@ class DatasetCache:
 _datasets: Dict[str, DatasetCache] = {}
 
 
-class SourceChunk(BaseModel):
-    source: str
-    metadata: Dict
-    snippet: str
-
-
 class AskResponse(BaseModel):
     answer: str
-    citations: str
     route: List[str]
-    sources: List[SourceChunk]
+    source_urls: List[str]
 
 
 class AskRequest(BaseModel):
     question: str = Field(..., description="사용자 질문")
-    # session_id: str | None = Field(None, description="대화 세션 ID (없으면 기본 세션)")
+    session_id: str | None = Field(None, description="대화 세션 ID (없으면 기본 세션)")
 
 
 
@@ -80,7 +82,6 @@ def _ensure_dataset(key: str) -> Tuple[pd.DataFrame, object, object]:
     if artifacts is None:
         raise KeyError(f"Unsupported dataset '{key}'")
     
-
     chunk_path = artifacts.chunk_path
     csv_path = artifacts.csv_path
     vectorizer_path = VECTORIZER_DIR / f"{key}_tfidf.pkl"
@@ -131,77 +132,118 @@ def bootstrap_artifacts() -> None:
     for key in _DATASET_LOADERS:
         try:
             _ensure_dataset(key)
-        except Exception as exc:  # noqa: BLE001
+        except (KeyError, FileNotFoundError, Exception) as exc:
             print(f"⚠️ Failed to warmup dataset '{key}': {exc}")
     try:
-        bootstrap_router()
-    except Exception as exc:  # noqa: BLE001
-        print(f"⚠️ Router bootstrap failed: {exc}")
-    try:
         bootstrap_notice_classifier()
-    except Exception as exc:  # noqa: BLE001
+    except (FileNotFoundError, Exception) as exc:
         print(f"⚠️ Notice classifier bootstrap failed: {exc}")
 
 
 
-@app.post("/ask", response_model=str)
-def ask(req: AskRequest) -> AskResponse:
+@app.post("/ask", response_model=AskResponse)
+async def ask(req: AskRequest) -> AskResponse:
     query = req.question.strip()
     if not query:
         raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
 
-    route = route_query(query)
+    session_id = req.session_id or str(uuid.uuid4())
+    route = await route_query(query)
     notice_category = None
     if "notices" in route:
-        notice_category = classify_notice_query(query)
+        notice_category = await run_in_threadpool(classify_notice_query, query)
     frames: List[pd.DataFrame] = []
+
+    date_range = await run_in_threadpool(extract_date_range_from_query, query)
+    where_filter: Dict | None = None  # None으로 초기화
+    if date_range:
+        start_date_str = date_range[0].strftime('%Y-%m-%d')
+        end_date_str = date_range[1].strftime('%Y-%m-%d')
+        
+        _filter = {}
+        if "notices" in route or "schedule" in route:
+            _filter["published_at"] = {"$gte": start_date_str, "$lte": end_date_str}
+        elif "rules" in route:
+            _filter["updated_at"] = {"$gte": start_date_str, "$lte": end_date_str}
+        
+        if _filter:
+            where_filter = _filter
 
     for dataset in route:
         try:
-            chunks_df, vectorizer, matrix = _ensure_dataset(dataset)
-        except Exception as exc:  # noqa: BLE001
+            chunks_df, vectorizer, matrix = await run_in_threadpool(_ensure_dataset, dataset)
+        except (KeyError, FileNotFoundError) as exc:
             raise HTTPException(status_code=500, detail=f"Dataset '{dataset}' unavailable: {exc}")
 
         artifacts = DATASET_ARTIFACTS[dataset]
-        hits = hybrid_search_with_meta(
-            artifacts.collection,
-            chunks_df,
-            vectorizer,
-            matrix,
-            query,
-            top_k=DEFAULT_TOP_K,
+        
+        current_where_filter = where_filter if dataset in ["notices", "rules", "schedule"] else None
+        
+        search_func = functools.partial(
+            hybrid_search_with_meta,
+            collection_name=artifacts.collection,
+            chunks_df=chunks_df,
+            tfidf_vectorizer=vectorizer,
+            tfidf_matrix=matrix,
+            query=query,
+            top_k=DEFAULT_TOP_K * 3,
             alpha=HYBRID_ALPHA,
+            where_filter=current_where_filter,
         )
+        hits = await run_in_threadpool(search_func)
+
         if not hits.empty:
             hits["dataset"] = dataset
             if dataset == "notices":
-                hits = prioritize_notice_hits(hits, notice_category)
+                hits = await run_in_threadpool(prioritize_notice_hits, hits, notice_category)
             frames.append(hits)
-
+    
     if not frames:
-        return AskResponse(answer="관련 정보를 찾지 못했습니다.", route=route, sources=[])
+        return AskResponse(answer="관련 정보를 찾지 못했습니다.", citations="", route=route, sources=[])
 
     merged = pd.concat(frames, ignore_index=True)
-    if "hybrid_score" in merged.columns:
-        merged.sort_values(by="hybrid_score", ascending=False, inplace=True)
+    
+    if not merged.empty and "hybrid_score" in merged.columns:
+        if "published_at" in merged.columns and "updated_at" in merged.columns:
+             merged["sort_date"] = pd.to_datetime(merged["published_at"].fillna(merged["updated_at"]), errors='coerce')
+        elif "published_at" in merged.columns:
+            merged["sort_date"] = pd.to_datetime(merged["published_at"], errors='coerce')
+        elif "updated_at" in merged.columns:
+            merged["sort_date"] = pd.to_datetime(merged["updated_at"], errors='coerce')
+        else:
+            merged["sort_date"] = pd.NaT
+
+        merged.dropna(subset=["hybrid_score", "sort_date"], inplace=True)
+        if not merged.empty:
+            min_hybrid = merged["hybrid_score"].min()
+            max_hybrid = merged["hybrid_score"].max()
+            if max_hybrid > min_hybrid:
+                merged["norm_hybrid"] = (merged["hybrid_score"] - min_hybrid) / (max_hybrid - min_hybrid)
+            else:
+                merged["norm_hybrid"] = 1.0
+
+            min_date = merged["sort_date"].min().timestamp()
+            max_date = merged["sort_date"].max().timestamp()
+            if max_date > min_date:
+                merged["norm_recency"] = (merged["sort_date"].apply(lambda x: x.timestamp()) - min_date) / (max_date - min_date)
+            else:
+                merged["norm_recency"] = 1.0
+            
+            merged["final_score"] = (1 - RECENCY_WEIGHT) * merged["norm_hybrid"] + RECENCY_WEIGHT * merged["norm_recency"]
+            merged.sort_values(by="final_score", ascending=False, inplace=True)
+        else:
+            merged.sort_values(by="hybrid_score", ascending=False, inplace=True)
+
     merged = merged.head(DEFAULT_TOP_K).reset_index(drop=True)
 
     context_text = "\n\n---\n\n".join(merged["chunk_text"].tolist())
-    context_text = context_text[:8000]
-    answer = generate_langchain_answer(query, context_text, session_id="123")
-    citations = format_citations(merged)
-    sources = [
-        SourceChunk(
-            source=row.get("dataset", ""),
-            metadata={col: row.get(col) for col in row.index if col not in {"chunk_text", "dataset", "title", "hybrid_score"}},
-            snippet=row.get("chunk_text", "")[:300],
-        )
-        for _, row in merged.iterrows()
-    ]
-    print(query)
-    print(answer)
-    return answer
-    # return AskResponse(answer=answer, citations=citations, route=route, sources=sources)
+    context_text = context_text[:MAX_CONTEXT_LENGTH]
+    answer = await run_in_threadpool(generate_langchain_answer, query, context_text, session_id=session_id)
+
+    # URL 목록을 추출하고, 비어있지 않은 고유한 URL만 필터링
+    source_urls = [url for url in merged["url"].unique() if pd.notna(url) and str(url).strip()]
+
+    return AskResponse(answer=answer, route=route, source_urls=source_urls)
 
 
 @app.get("/health")
@@ -211,6 +253,3 @@ def health() -> dict:
         cache = _datasets.get(key)
         status[key] = 0 if cache is None else len(cache.chunks)
     return {"status": "ok", "datasets": status}
-
-
-__all__ = ["app"]
