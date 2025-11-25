@@ -36,8 +36,15 @@ static public class ChatRequestApis
         app.MapPost("/start", async (ServerDbContext db, HttpContext context, StartChat stch, IMapper mapper) =>
         {
             DateTime time = DateTime.Now.ToUniversalTime();
+
+            Guid id = Guid.NewGuid();
+
+            while (await db.Chats.AnyAsync(c => c.Id == id))
+                id = Guid.NewGuid();
+            
             ActiveChat chat = new()
             {
+                Id = id,
                 UserId = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!),
                 OrganizationId = stch.Org.Id,
                 Title = stch.Title,
