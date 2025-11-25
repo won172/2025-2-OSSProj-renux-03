@@ -1,13 +1,15 @@
 # === Core LangChain ecosystem ===
-langchain==1.0.3
 langchain-core>=0.3.0
 langchain-community>=0.3.0
 langchain-openai>=0.2.0
 langchain-chroma>=0.1.0
+langchain-redis>=0.1.0
+langchain-text-splitters>=0.2.0 # RecursiveCharacterTextSplitter for improved chunking
 
 # === Vector store / retriever ===
 chromadb>=0.5.5
 faiss-cpu>=1.8.0.post1        # (optional, 다른 벡터 DB와 병행 가능)
+redis>=5.0.0
 
 # === Embeddings (HuggingFace + KURE-v1) ===
 sentence-transformers>=3.0.1
