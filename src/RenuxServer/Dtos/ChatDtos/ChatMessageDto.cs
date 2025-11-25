@@ -9,5 +9,5 @@ public class ChatMessageDto
 
     public string Content { get; init; } = null!;
 
-    public long  CreatedTime { get; init; }
+    public DateTime CreatedTime { get; init; }
 }
