@@ -28,10 +28,28 @@ CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "120"))
 HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.4"))
 DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "5"))
+RECENCY_WEIGHT = float(os.getenv("RECENCY_WEIGHT", "0.3")) # Re-ranking 가중치 추가
+
+# 컨텍스트 관련 설정
+MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "8000"))
+
+# LLM 라우터가 각 데이터셋의 역할을 이해하는 데 사용하는 설명
+LLM_ROUTER_DESCRIPTIONS = {
+    "notices": "학교 생활 전반에 걸친 공지사항, 모집, 발표, 장학금, 등록금, 입시, 휴학, 복학 관련 안내입니다.",
+    "rules": "학사 운영, 졸업, 성적, 징계 등 학교의 공식적인 학칙, 규정, 시행세칙에 대한 정보입니다.",
+    "schedule": "수강신청, 개강, 종강, 방학, 시험 등 주요 학사일정에 대한 정보입니다.",
+    "courses": "개설된 교과목, 수업, 강의, 전공, 선수과목, 학점, 이수구분 등 교과 과정에 대한 상세 정보입니다.",
+}
 
 # OpenAI/LLM 기본 설정.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# 대화 기록 관련 설정 (인메모리).
+MAX_HISTORY_STORE_SIZE = int(os.getenv("MAX_HISTORY_STORE_SIZE", "1000"))
+
+# Redis 대화 기록 백엔드 설정.
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # 노트북에서 가져온 입력 데이터 소스 경로.
 DATA_SOURCES: Dict[str, Path] = {
@@ -42,13 +60,6 @@ DATA_SOURCES: Dict[str, Path] = {
     "courses_major": DATA_DIR / "dongguk_statistics_major_course.csv",
 }
 
-# 노트북 실험에서 사용한 키워드 라우터 규칙.
-ROUTER_RULES = {
-    "notices": ["공지", "알림", "모집", "합격", "발표", "마감", "장학", "등록금", "휴학", "복학", "입시", "공지사항"],
-    "rules": ["학칙", "규정", "규정집", "조항", "조", "항", "시행세칙", "학사 규정"],
-    "schedule": ["학사일정", "일정", "수강신청", "개강", "종강", "성적", "등록", "휴학기간", "방학"],
-    "courses": ["과목", "강좌", "교과목", "수업", "전공", "선수과목", "학점", "이수구분", "통계학과"],
-}
 
 __all__ = [
     "BASE_DIR",
@@ -65,8 +76,12 @@ __all__ = [
     "CHUNK_OVERLAP",
     "HYBRID_ALPHA",
     "DEFAULT_TOP_K",
+    "MAX_CONTEXT_LENGTH",
+    "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
     "OPENAI_API_KEY",
+    "MAX_HISTORY_STORE_SIZE",
+    "REDIS_URL",
     "DATA_SOURCES",
-    "ROUTER_RULES",
 ]
+

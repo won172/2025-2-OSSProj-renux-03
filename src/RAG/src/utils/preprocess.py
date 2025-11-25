@@ -111,20 +111,37 @@ def build_document_rows(
 
 
 def chunk_text(text: str, size: int, overlap: int) -> List[str]:
-    """긴 문서를 단순 문자 단위로 분할합니다."""
+    """문장 경계를 우선 고려해 분할하고, LangChain 분할기를 우선 시도합니다."""
     if not text:
         return []
-    text = normalize_whitespace(text)
-    if not text:
+
+    normalized = normalize_whitespace(text)
+    if not normalized:
         return []
-    step = max(1, size - overlap)
-    segments: List[str] = []
-    for start in range(0, len(text), step):
-        segment = text[start : start + size]
-        segments.append(segment)
-        if start + size >= len(text):
-            break
-    return segments
+
+    try:
+        # LangChain의 RecursiveCharacterTextSplitter를 사용해 문장 단위로 최대 길이를 지키며 분할
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+        splitter = RecursiveCharacterTextSplitter(
+            separators=["\n\n", "\n", ". ", ".\n", "! ", "? ", " "],
+            chunk_size=size,
+            chunk_overlap=overlap,
+            length_function=len,
+            add_start_index=False,
+        )
+        docs = splitter.split_text(normalized)
+        return [seg.strip() for seg in docs if seg.strip()]
+    except Exception:
+        # 의존성 누락 등 예외 시 기존 단순 슬라이싱으로 폴백
+        step = max(1, size - overlap)
+        segments: List[str] = []
+        for start in range(0, len(normalized), step):
+            segment = normalized[start : start + size]
+            segments.append(segment)
+            if start + size >= len(normalized):
+                break
+        return segments
 
 
 def to_chunks(

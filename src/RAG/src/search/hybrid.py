@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Iterable, Tuple, Dict # Dict 추가
 
 import joblib
 import numpy as np
@@ -44,6 +44,7 @@ def hybrid_search(
     query: str,
     top_k: int = DEFAULT_TOP_K,
     alpha: float = HYBRID_ALPHA,
+    where_filter: Dict | None = None, # where_filter 추가
 ) -> pd.DataFrame:
     """노트북에서 사용한 하이브리드 검색 전략을 그대로 실행합니다."""
     if chunks_df.empty:
@@ -54,7 +55,11 @@ def hybrid_search(
 
     collection = get_collection(collection_name)
     query_embedding = encode_texts([query])
-    results = collection.query(query_embeddings=query_embedding, n_results=len(chunk_ids))
+    results = collection.query(
+        query_embeddings=query_embedding,
+        n_results=len(chunk_ids),
+        where=where_filter, # where_filter 전달
+    )
 
     result_ids = (results.get("ids") or [[]])[0]
     result_distances = (results.get("distances") or [[]])[0]
@@ -82,9 +87,10 @@ def hybrid_search_with_meta(
     query: str,
     top_k: int = DEFAULT_TOP_K,
     alpha: float = HYBRID_ALPHA,
+    where_filter: Dict | None = None, # where_filter 추가
 ) -> pd.DataFrame:
     """노트북과 같은 형식으로 메타데이터 열을 청크 텍스트와 함께 반환합니다."""
-    hits = hybrid_search(collection_name, chunks_df, tfidf_vectorizer, tfidf_matrix, query, top_k, alpha)
+    hits = hybrid_search(collection_name, chunks_df, tfidf_vectorizer, tfidf_matrix, query, top_k, alpha, where_filter) # where_filter 전달
     out = hits.copy()
     out["title"] = out["chunk_text"].apply(_extract_title)
     for column in ("topics", "published_at", "url", "source"):
