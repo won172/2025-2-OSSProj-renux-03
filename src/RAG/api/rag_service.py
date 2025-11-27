@@ -1,4 +1,5 @@
 import functools
+import logging
 import re
 import sys
 import uuid
@@ -33,9 +34,8 @@ from src.services.answer import format_citations
 from src.services.langchain_chat import generate_langchain_answer
 from src.services.notice_classifier import (
     bootstrap_notice_classifier,
-    classify_notice_query,
-    prioritize_notice_hits,
 )
+from src.models.embedding import get_embedder
 from src.services.router import route_query
 from src.utils.date_parser import extract_date_range_from_query
 
@@ -64,10 +64,17 @@ class DatasetCache:
 _datasets: Dict[str, DatasetCache] = {}
 
 
+class SourceChunk(BaseModel):
+    source: str
+    metadata: Dict
+    snippet: str
+
+
 class AskResponse(BaseModel):
     answer: str
-    route: List[str]
-    source_urls: List[str]
+    # citations: str
+    # route: List[str]
+    # sources: List[SourceChunk]
 
 
 class AskRequest(BaseModel):
@@ -129,15 +136,32 @@ def _ensure_dataset(key: str) -> Tuple[pd.DataFrame, object, object]:
 
 @app.on_event("startup")
 def bootstrap_artifacts() -> None:
+    """애플리케이션 시작 시 데이터셋과 분류기 등 주요 아티팩트를 미리 로드합니다."""
+    logging.basicConfig(level=logging.INFO)
+    
     for key in _DATASET_LOADERS:
         try:
             _ensure_dataset(key)
-        except (KeyError, FileNotFoundError, Exception) as exc:
-            print(f"⚠️ Failed to warmup dataset '{key}': {exc}")
+            logging.info(f"✅ Dataset '{key}' successfully loaded.")
+        except (KeyError, FileNotFoundError, ValueError) as exc:
+            logging.error(f"⚠️ Failed to warmup dataset '{key}': {exc}", exc_info=True)
+            # 데이터셋 로드 실패는 심각한 문제일 수 있으므로,
+            # 필요에 따라 여기서 애플리케이션을 종료시키는 로직을 추가할 수 있습니다.
+            # Ex: raise RuntimeError(f"Critical failure loading dataset {key}") from exc
+
     try:
         bootstrap_notice_classifier()
-    except (FileNotFoundError, Exception) as exc:
-        print(f"⚠️ Notice classifier bootstrap failed: {exc}")
+        logging.info("✅ Notice classifier bootstrap process completed.")
+    except Exception as exc:
+        # 이 단계의 실패는 치명적이지 않을 수 있으므로 경고만 로깅합니다.
+        logging.warning(f"⚠️ Notice classifier bootstrap failed: {exc}", exc_info=True)
+
+    try:
+        logging.info("⏳ Warming up embedding model...")
+        get_embedder()
+        logging.info("✅ Embedding model warmup completed.")
+    except Exception as exc:
+        logging.warning(f"⚠️ Embedding model warmup failed: {exc}", exc_info=True)
 
 
 
@@ -148,14 +172,12 @@ async def ask(req: AskRequest) -> AskResponse:
         raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
 
     session_id = req.session_id or str(uuid.uuid4())
+    logging.info(f"Received question: '{query}' for session: '{session_id}'") 
     route = await route_query(query)
-    notice_category = None
-    if "notices" in route:
-        notice_category = await run_in_threadpool(classify_notice_query, query)
     frames: List[pd.DataFrame] = []
 
     date_range = await run_in_threadpool(extract_date_range_from_query, query)
-    where_filter: Dict | None = None  # None으로 초기화
+    where_filter: Dict | None = None
     if date_range:
         start_date_str = date_range[0].strftime('%Y-%m-%d')
         end_date_str = date_range[1].strftime('%Y-%m-%d')
@@ -194,11 +216,11 @@ async def ask(req: AskRequest) -> AskResponse:
 
         if not hits.empty:
             hits["dataset"] = dataset
-            if dataset == "notices":
-                hits = await run_in_threadpool(prioritize_notice_hits, hits, notice_category)
             frames.append(hits)
     
     if not frames:
+        # 이 부분은 AskResponse가 아닌 일반 dict를 반환하면 FastAPI에서 자동으로 JSON으로 변환해줍니다.
+        # 하지만, 일관성을 위해 AskResponse를 사용하되, 일부 필드는 비워둡니다.
         return AskResponse(answer="관련 정보를 찾지 못했습니다.", citations="", route=route, sources=[])
 
     merged = pd.concat(frames, ignore_index=True)
@@ -239,11 +261,20 @@ async def ask(req: AskRequest) -> AskResponse:
     context_text = "\n\n---\n\n".join(merged["chunk_text"].tolist())
     context_text = context_text[:MAX_CONTEXT_LENGTH]
     answer = await run_in_threadpool(generate_langchain_answer, query, context_text, session_id=session_id)
+    
+    citations_raw = await run_in_threadpool(format_citations, merged)
+    citations = re.sub(r'<[^>]+>', '', citations_raw)
 
-    # URL 목록을 추출하고, 비어있지 않은 고유한 URL만 필터링
-    source_urls = [url for url in merged["url"].unique() if pd.notna(url) and str(url).strip()]
+    sources = [
+        SourceChunk(
+            source=row.get("dataset", ""),
+            metadata={col: row.get(col) for col in row.index if col not in {"chunk_text", "dataset", "title", "hybrid_score", "sort_date", "norm_hybrid", "norm_recency", "final_score"}},
+            snippet=row.get("chunk_text", ""),
+        )
+        for _, row in merged.iterrows()
+    ]
 
-    return AskResponse(answer=answer, route=route, source_urls=source_urls)
+    return AskResponse(answer=answer, citations=citations, route=route, sources=sources)
 
 
 @app.get("/health")

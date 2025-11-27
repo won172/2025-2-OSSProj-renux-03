@@ -1,11 +1,12 @@
 "LLM을 사용하여 사용자의 질문을 가장 관련 있는 데이터셋으로 라우팅합니다."
 from __future__ import annotations
 
+import logging
 from typing import List
 
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from langchain_openai import ChatOpenAI
 
 from src.config import LLM_ROUTER_DESCRIPTIONS, OPENAI_MODEL
@@ -65,8 +66,11 @@ async def route_query(query: str) -> List[str]:
         # LLM이 목록에 없는 이름을 지어낼 경우를 대비합니다.
         valid_routes = [name for name in result.names if name in LLM_ROUTER_DESCRIPTIONS]
         return valid_routes or ["notices"]  # 유효한 선택이 없으면 기본값으로 'notices' 반환
-    except Exception:
-        # LLM 호출 실패 등 예외 발생 시 기본값으로 'notices'를 반환합니다.
+    except ValidationError as e:
+        logging.warning(f"LLM 라우터의 Pydantic 검증에 실패했습니다: {e}. 'notices'로 기본 설정합니다.")
+        return ["notices"]
+    except Exception as e:
+        logging.error(f"LLM 라우터에서 예기치 않은 오류가 발생했습니다: {e}. 'notices'로 기본 설정합니다.")
         return ["notices"]
 
 # 이 파일에서 외부에 제공할 함수는 route_query 뿐입니다.

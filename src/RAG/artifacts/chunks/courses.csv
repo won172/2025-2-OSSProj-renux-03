@@ -1,4 +1,4 @@
-﻿chunk_id,doc_id,chunk_text,position,token_len,title,course_code,source_table,topics,source,url,published_at
+﻿chunk_id,doc_id,chunk_text,position,token_len,title,course_code,source_table,topics,source,url,published_at,course_id,notice_id,rule_id,schedule_id
 c92bedf4c895ca4db83eaf1f07ec02dcb4266551,5d59cb8f12b318ac8b8a31622dd57b86e9fb33b6,"[탐색적자료분석]
 
 학수번호: STA2005
@@ -13,7 +13,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,118,탐색적자료분석,STA2005,description,description,courses,,
+비고: nan",0,118,탐색적자료분석,STA2005,description,description,courses,,,1,,,
 02c2da5b3b5156d6668a78c37b6306ea9ae5a135,c8d08221a90d2ebae59ccfd2d07bedf566780bd5,"[프로그래밍 및 실습1]
 
 학수번호: STA2013
@@ -28,7 +28,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,122,프로그래밍 및 실습1,STA2013,description,description,courses,,
+비고: nan",0,122,프로그래밍 및 실습1,STA2013,description,description,courses,,,2,,,
 48378c7d5f41ddc0fbbfc90ed25f7bf8afc8697c,e27d9af5d5665927f3b44079f5cc31fe79461673,"[프로그래밍 및 실습2]
 
 학수번호: STA2014
@@ -43,7 +43,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,86,프로그래밍 및 실습2,STA2014,description,description,courses,,
+비고: nan",0,86,프로그래밍 및 실습2,STA2014,description,description,courses,,,3,,,
 5c63cac2d9baf07f8e64fc63b8f4e9159ffde060,6430573ffa186937721adff8793571411de6f506,"[확률과정론]
 
 학수번호: STA2015
@@ -58,7 +58,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,84,확률과정론,STA2015,description,description,courses,,
+비고: nan",0,84,확률과정론,STA2015,description,description,courses,,,4,,,
 bbbd3f22ee75feff4bf50e742a19052bfc17023b,86685511b0409336e8c8608a9b4df94bc5279e1a,"[수리통계학1]
 
 학수번호: STA2017
@@ -73,7 +73,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,113,수리통계학1,STA2017,description,description,courses,,
+비고: nan",0,113,수리통계학1,STA2017,description,description,courses,,,5,,,
 e196f9e3b40aa0bc8960825eb11689dba144bbd6,e34d7721ee36b3a9713fab8ed1c39806f487e6b8,"[수리통계학2]
 
 학수번호: STA2021
@@ -88,7 +88,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,67,수리통계학2,STA2021,description,description,courses,,
+비고: nan",0,67,수리통계학2,STA2021,description,description,courses,,,6,,,
 9314de199bfb0986e6979d3a2d22f5178dc0341d,8b64495f8090720f7131c4e66d0451bc82f79da7,"[선형계획법]
 
 학수번호: STA2018
@@ -103,7 +103,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,87,선형계획법,STA2018,description,description,courses,,
+비고: nan",0,87,선형계획법,STA2018,description,description,courses,,,7,,,
 d00b924b2129d29ede96599d81c01b717e5b7882,5bba2768058e5594ddd383e9865c01fcae3a9924,"[통계수학 및 R실습]
 
 학수번호: STA2019
@@ -118,7 +118,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,96,통계수학 및 R실습,STA2019,description,description,courses,,
+비고: nan",0,96,통계수학 및 R실습,STA2019,description,description,courses,,,8,,,
 0bd8ac60748396e0254ae54b372df20cb37d3a53,14fd649c7139ba8353f6f7e65264cda5b0bab60f,"[통계계산 및 그래픽실습]
 
 학수번호: STA2020
@@ -133,7 +133,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,118,통계계산 및 그래픽실습,STA2020,description,description,courses,,
+비고: nan",0,118,통계계산 및 그래픽실습,STA2020,description,description,courses,,,9,,,
 ffd7bb4b2d1e05de8c9ca4134830b44dbc4b0f96,11d5afb5386ed9ca93628e62b9e43a66049e53b6,"[다변량해석]
 
 학수번호: STA4004
@@ -148,7 +148,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,114,다변량해석,STA4004,description,description,courses,,
+비고: nan",0,114,다변량해석,STA4004,description,description,courses,,,10,,,
 57c3ff3914c57687cff08b13e0628de8b732925c,0f3505f59da70b8ade2440623cc001fae9ed65d7,"[데이터마이닝]
 
 학수번호: STA4005
@@ -163,7 +163,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,90,데이터마이닝,STA4005,description,description,courses,,
+비고: nan",0,90,데이터마이닝,STA4005,description,description,courses,,,11,,,
 1885739895200be32bffda4ae66df126b86bafc3,8558fe36f6da2f6ee4535df7663c2b48aff37659,"[범주형자료분석]
 
 학수번호: STA4006
@@ -178,7 +178,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,104,범주형자료분석,STA4006,description,description,courses,,
+비고: nan",0,104,범주형자료분석,STA4006,description,description,courses,,,12,,,
 45b512cc9fe7b58040751ba01ec81f230dfb0305,534cf0ad70a3f3ab1ca6983e8a247d2aed978aa1,"[비모수통계학]
 
 학수번호: STA4008
@@ -193,7 +193,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,109,비모수통계학,STA4008,description,description,courses,,
+비고: nan",0,109,비모수통계학,STA4008,description,description,courses,,,13,,,
 bf7be330b1cece9a7a982d4a60d387d678193aef,15c712bfe8dbe042bcab95a80adb29b0ce8b8281,"[시계열해석]
 
 학수번호: STA4011
@@ -208,7 +208,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,101,시계열해석,STA4011,description,description,courses,,
+비고: nan",0,101,시계열해석,STA4011,description,description,courses,,,14,,,
 76e5a1dec593bb01c7ed86457a37c89537a55baa,23cd8e1629d8d35228cb096aae3c5a9d5d4420b0,"[실험계획법]
 
 학수번호: STA4012
@@ -223,7 +223,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,77,실험계획법,STA4012,description,description,courses,,
+비고: nan",0,77,실험계획법,STA4012,description,description,courses,,,15,,,
 2424c979b150935bbd2aefc16d9612bfa4352ca6,523f801487c086bdf41297062ee82292a6471a75,"[통계모델링 및 컨설팅1]
 
 학수번호: STA4016
@@ -238,7 +238,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,164,통계모델링 및 컨설팅1,STA4016,description,description,courses,,
+비고: nan",0,164,통계모델링 및 컨설팅1,STA4016,description,description,courses,,,16,,,
 720c8c3c105af82a018a24411a4f24524c07aceb,bf97b99874e87d85e31a3c3b96411d2fd0df0a22,"[통계모델링 및 컨설팅2]
 
 학수번호: STA4017
@@ -253,7 +253,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,84,통계모델링 및 컨설팅2,STA4017,description,description,courses,,
+비고: nan",0,84,통계모델링 및 컨설팅2,STA4017,description,description,courses,,,17,,,
 6cf37f2ae16b2c550c40ea53aef65a13db02b4f3,20c347002d52050bd4d14c422d0578d581302b9d,"[통계적품질관리]
 
 학수번호: STA4020
@@ -268,7 +268,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,63,통계적품질관리,STA4020,description,description,courses,,
+비고: nan",0,63,통계적품질관리,STA4020,description,description,courses,,,18,,,
 2be8f8c3afd8cec3ed11a38ef5f87b0f7a36b84a,12fd37d65d873b41269d2fc81a98dd808b3076c4,"[회귀해석]
 
 학수번호: STA4034
@@ -283,7 +283,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,74,회귀해석,STA4034,description,description,courses,,
+비고: nan",0,74,회귀해석,STA4034,description,description,courses,,,19,,,
 fb018d73f58aeffd7954a6fd1c2fa19f5d3def47,828b34bdd16485a0e9fd088c8105a5690009251c,"[보험통계학]
 
 학수번호: STA4035
@@ -298,7 +298,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,94,보험통계학,STA4035,description,description,courses,,
+비고: nan",0,94,보험통계학,STA4035,description,description,courses,,,20,,,
 87c6a636e65d2c4afae40d194aa1a5f5c7bd4fac,284f688cc56c0d048c2a3b2de16f3d6f58ee5f4c,"[표본조사방법론 및 실습]
 
 학수번호: STA4037
@@ -313,7 +313,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,146,표본조사방법론 및 실습,STA4037,description,description,courses,,
+비고: nan",0,146,표본조사방법론 및 실습,STA4037,description,description,courses,,,21,,,
 b559a46f04df25731b66733751abaca59c6411f3,97d8a1cd6733e015a5f47abc8fcc153283c8536b,"[표본설계]
 
 학수번호: STA4038
@@ -328,7 +328,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,121,표본설계,STA4038,description,description,courses,,
+비고: nan",0,121,표본설계,STA4038,description,description,courses,,,22,,,
 5330de316d55a4138fe0d35f4b2199ed6bb3ca1a,6401b93a5a51958bebcc2af620cedcceeeb39846,"[생존분석]
 
 학수번호: STA4039
@@ -343,7 +343,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,101,생존분석,STA4039,description,description,courses,,
+비고: nan",0,101,생존분석,STA4039,description,description,courses,,,23,,,
 313e06e44e5ab0da44cc58115c4a11119f361ac4,e0cef7fcaa0af621e28a8c6ffc81e74e1664cd49,"[베이지안통계학]
 
 학수번호: STA4040
@@ -358,7 +358,7 @@ nan
 이수대상: nan
 원어강의: nan
 개설학기: nan
-비고: nan",0,93,베이지안통계학,STA4040,description,description,courses,,
+비고: nan",0,93,베이지안통계학,STA4040,description,description,courses,,,24,,,
 55af9bca3e0703baa1a01b57e6f72c62eeaf09e2,ae8ba778c84e0101d89ef9c847522911d30fa073,"[nan]
 
 학수번호: STA2005
@@ -371,7 +371,7 @@ nan
 전공구분: 기초
 이수대상: 학사2년
 원어강의: 영어
-개설학기: 2",0,21,nan,STA2005,major,major,courses,,
+개설학기: 2",0,21,nan,STA2005,major,major,courses,,,25,,,
 e3699216c683a4c43d7e6db0ae24099f0316ff7a,7e84674999c96aad66a66c50a49bc8fb817fb449,"[nan]
 
 학수번호: STA2013
@@ -384,7 +384,7 @@ nan
 실습: 2.0
 전공구분: 기초
 이수대상: 학사1년
-개설학기: 2",0,21,nan,STA2013,major,major,courses,,
+개설학기: 2",0,21,nan,STA2013,major,major,courses,,,26,,,
 80e96c87ddaf034055cf8d57e152b357eca07c93,c287de2b1c7bdc9e67c9525003cfe727281f68e1,"[nan]
 
 학수번호: STA2014
@@ -397,7 +397,7 @@ nan
 실습: 2.0
 전공구분: 기초
 이수대상: 학사2년
-개설학기: 1",0,21,nan,STA2014,major,major,courses,,
+개설학기: 1",0,21,nan,STA2014,major,major,courses,,,27,,,
 4f8cabd721eada627c83557eccb1ae9071a6b713,73f603d17c9fd5000fcd7a7780b1ab85cfcb06dc,"[nan]
 
 학수번호: STA2015
@@ -409,7 +409,7 @@ nan
 이론: 3
 전공구분: 기초
 이수대상: 학사2년
-개설학기: 2",0,19,nan,STA2015,major,major,courses,,
+개설학기: 2",0,19,nan,STA2015,major,major,courses,,,28,,,
 dc865b8e9075cada74e05897d0366a2cd66c0094,7568096ef8650a930b25296017936c5c9cdf2f4d,"[nan]
 
 학수번호: STA2017
@@ -422,7 +422,7 @@ nan
 이수대상: 기초
 원어강의: 학사2년
 개설학기: 1
-비고: 대학통계및실습1 대학통계및실습2 선수권장",0,23,nan,STA2017,major,major,courses,,
+비고: 대학통계및실습1 대학통계및실습2 선수권장",0,23,nan,STA2017,major,major,courses,,,29,,,
 628e5a95a11d23bf5cc1da3c0451db9d4e2bb01a,58a297918d552d0085c9e2ccd6b4ec3af0c87b5f,"[nan]
 
 학수번호: STA2021
@@ -435,7 +435,7 @@ nan
 전공구분: 기초
 이수대상: 학사2년
 개설학기: 2
-비고: 대학통계및실습1 대학통계및실습2 수리통계학1 선수권장",0,24,nan,STA2021,major,major,courses,,
+비고: 대학통계및실습1 대학통계및실습2 수리통계학1 선수권장",0,24,nan,STA2021,major,major,courses,,,30,,,
 3eecdac5aa4766ecc73854c62afa3c80fa5a791a,adea527aa6af2e3798ab72ccb1aea1e80107ce95,"[nan]
 
 학수번호: STA2018
@@ -447,7 +447,7 @@ nan
 이론: 3
 전공구분: 기초
 이수대상: 학사2년
-개설학기: 1",0,19,nan,STA2018,major,major,courses,,
+개설학기: 1",0,19,nan,STA2018,major,major,courses,,,31,,,
 7d323bbfc92d7e12f67e14725818392be6c95f98,fdf5d14dda332ba8f13cc9a975d414029b52ae3c,"[nan]
 
 학수번호: STA2019
@@ -460,7 +460,7 @@ nan
 실습: 2.0
 전공구분: 기초
 이수대상: 학사2년
-개설학기: 1",0,21,nan,STA2019,major,major,courses,,
+개설학기: 1",0,21,nan,STA2019,major,major,courses,,,32,,,
 fee1f75580f188af490ef0ee0e4c0e992f419dfd,01c6205397e67ebe6c251437a8d751a367c9e494,"[nan]
 
 학수번호: STA2020
@@ -473,7 +473,7 @@ nan
 실습: 2.0
 전공구분: 기초
 이수대상: 학사2년
-개설학기: 2",0,21,nan,STA2020,major,major,courses,,
+개설학기: 2",0,21,nan,STA2020,major,major,courses,,,33,,,
 423065469814cff367e7d3fdf00e4d2f914a1eae,fdb21c1d436987315969605a35d644a33fb5f0a4,"[nan]
 
 학수번호: STA4004
@@ -486,7 +486,7 @@ nan
 전공구분: 전문
 이수대상: 학사3,4년
 개설학기: 1
-비고: 대학통계및실습1 대학통계및실습2 수리통계학1 수리통계학2 선수권장",0,25,nan,STA4004,major,major,courses,,
+비고: 대학통계및실습1 대학통계및실습2 수리통계학1 수리통계학2 선수권장",0,25,nan,STA4004,major,major,courses,,,34,,,
 6aee61081642131a0ecaf157c00b0bbf7836277d,0f6511aeae1103cf9ba96e0e543a3901ea5aa9b2,"[nan]
 
 학수번호: STA4005
@@ -498,7 +498,7 @@ nan
 이론: 3
 전공구분: 전문
 이수대상: 학사3,4년
-개설학기: 1",0,19,nan,STA4005,major,major,courses,,
+개설학기: 1",0,19,nan,STA4005,major,major,courses,,,35,,,
 1e821f169da46b900b6accc3aa743a0acba4e9a4,55aabdb72536629c2cfa711430afb48a241c8728,"[nan]
 
 학수번호: STA4006
@@ -510,7 +510,7 @@ nan
 이론: 3
 전공구분: 전문
 이수대상: 학사3,4년
-개설학기: 2",0,19,nan,STA4006,major,major,courses,,
+개설학기: 2",0,19,nan,STA4006,major,major,courses,,,36,,,
 b05b711b70ca756ec423499afadb4807bf4ac571,fb7dcf1d91c1611155773bdcdeabbf9aae205144,"[nan]
 
 학수번호: STA4008
@@ -523,7 +523,7 @@ nan
 전공구분: 전문
 이수대상: 학사3,4년
 원어강의: 영어
-개설학기: 1",0,21,nan,STA4008,major,major,courses,,
+개설학기: 1",0,21,nan,STA4008,major,major,courses,,,37,,,
 2ae61cf22462cd643142b74680151388491a4350,3d68234fe43738f64346f7da713b46df7f5780bc,"[nan]
 
 학수번호: STA4011
@@ -535,7 +535,7 @@ nan
 이론: 3
 전공구분: 전문
 이수대상: 학사3,4년
-개설학기: 2",0,19,nan,STA4011,major,major,courses,,
+개설학기: 2",0,19,nan,STA4011,major,major,courses,,,38,,,
 38d8cc4809bbd6866b271715c4b765a14b0036c1,337799cd549c5f8d19c72d5587267d17cc11ed59,"[nan]
 
 학수번호: STA4012
@@ -548,7 +548,7 @@ nan
 전공구분: 전문
 이수대상: 학사3,4년
 원어강의: 영어
-개설학기: 2",0,21,nan,STA4012,major,major,courses,,
+개설학기: 2",0,21,nan,STA4012,major,major,courses,,,39,,,
 9d3efdebb9a68dc3ba60127b1788656b0ef6480d,893651b2fea5fcf9022c2e2123282f0b55fce3e5,"[nan]
 
 학수번호: STA4016
@@ -560,7 +560,7 @@ nan
 이론: 3
 전공구분: 전문
 이수대상: 학사3,4년
-개설학기: 1",0,19,nan,STA4016,major,major,courses,,
+개설학기: 1",0,19,nan,STA4016,major,major,courses,,,40,,,
 6721ad32797b73830b78ad77a65dc558c5973bef,4127f7fef3fc1e95f53f7240d6b03ee1453ed288,"[nan]
 
 학수번호: STA4017
@@ -572,7 +572,7 @@ nan
 이론: 3
 전공구분: 전문
 이수대상: 학사3,4년
-개설학기: 2",0,19,nan,STA4017,major,major,courses,,
+개설학기: 2",0,19,nan,STA4017,major,major,courses,,,41,,,
 4a3d2aaac854b5b3c5ec01c23acb01b75bc7cef8,a49174afaa0792ddac4b208c433e69e72d566d1b,"[nan]
 
 학수번호: STA4020
@@ -585,7 +585,7 @@ nan
 전공구분: 전문
 이수대상: 학사3,4년
 원어강의: 영어
-개설학기: 2",0,21,nan,STA4020,major,major,courses,,
+개설학기: 2",0,21,nan,STA4020,major,major,courses,,,42,,,
 ee0b70535db442c8c2fbe56d6c4b8dd51fa54f38,9c0cc875ec0ab241738c8d001c9370c485048515,"[nan]
 
 학수번호: STA4034
@@ -598,7 +598,7 @@ nan
 전공구분: 전문
 이수대상: 학사3,4년
 원어강의: 영어
-개설학기: 1",0,21,nan,STA4034,major,major,courses,,
+개설학기: 1",0,21,nan,STA4034,major,major,courses,,,43,,,
 7d43ef6e6dc3e4785110c88de95dc533a498ecd0,e4aa5661ea5e9ce6034b76eddfacdb36a4905453,"[nan]
 
 학수번호: STA4035
@@ -611,7 +611,7 @@ nan
 전공구분: 전문
 이수대상: 학사3,4년
 원어강의: 영어
-개설학기: 1",0,21,nan,STA4035,major,major,courses,,
+개설학기: 1",0,21,nan,STA4035,major,major,courses,,,44,,,
 3014143f177a45b9df897e884828f4ae441982f2,260fe04901497460c13ae6e4045e19fe36c66441,"[nan]
 
 학수번호: STA4037
@@ -624,7 +624,7 @@ nan
 실습: 2.0
 전공구분: 전문
 이수대상: 학사3,4년
-개설학기: 2",0,21,nan,STA4037,major,major,courses,,
+개설학기: 2",0,21,nan,STA4037,major,major,courses,,,45,,,
 bdf6bcd1013f9a9f981bb20095d0e007116e8110,968c20fbdcbc7450fe80b7fd4411c56b19308ff1,"[nan]
 
 학수번호: STA4038
@@ -636,7 +636,7 @@ nan
 이론: 3
 전공구분: 전문
 이수대상: 학사3,4년
-개설학기: 1",0,19,nan,STA4038,major,major,courses,,
+개설학기: 1",0,19,nan,STA4038,major,major,courses,,,46,,,
 8105d0cbcfc906aa511ab6ee40e5ed987562a091,05d7c697cc1d30c96570ffad7f183e2854a8c082,"[nan]
 
 학수번호: STA4039
@@ -649,7 +649,7 @@ nan
 전공구분: 전문
 이수대상: 학사3,4년
 원어강의: 영어
-개설학기: 2",0,21,nan,STA4039,major,major,courses,,
+개설학기: 2",0,21,nan,STA4039,major,major,courses,,,47,,,
 a9ea38ea9b195d3da3fbb9d59a9cc3a73a1539ab,a1c43874d2f09404f37e8a492bbe0cba5e4839c3,"[nan]
 
 학수번호: STA4040
@@ -662,4 +662,4 @@ nan
 전공구분: 전문
 이수대상: 학사3,4년
 원어강의: 영어
-개설학기: 1",0,21,nan,STA4040,major,major,courses,,
+개설학기: 1",0,21,nan,STA4040,major,major,courses,,,48,,,

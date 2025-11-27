@@ -1,149 +1,143 @@
-"""새로 수집한 공지를 병합하고 후속 산출물을 갱신하는 유틸리티입니다."""
+"""새로 수집한 공지를 DB에 저장하고 후속 산출물을 갱신하는 유틸리티입니다."""
 from __future__ import annotations
 
-from typing import Tuple, Any
-
+from typing import Any
 import json
-
 import pandas as pd
+from sqlalchemy import text
 
-from src.config import DATA_SOURCES
+from src.database import engine
 from src.models.embedding import encode_texts
-from src.pipelines.ingest import DATASET_ARTIFACTS, build_notice_chunks
+from src.pipelines.ingest import build_notice_chunks, DATASET_ARTIFACTS
 from src.search.hybrid import train_tfidf
 from src.vectorstore.chroma_client import add_items
 
-NOTICE_CSV_PATH = DATA_SOURCES["notices"]
+
+def get_existing_notice_urls() -> set[str]:
+    """데이터베이스에서 모든 공지의 상세 URL을 가져옵니다."""
+    with engine.connect() as connection:
+        result = connection.execute(text("SELECT detail_url FROM notices"))
+        return {row[0] for row in result}
 
 
-def load_existing_notices() -> pd.DataFrame:
-    if NOTICE_CSV_PATH.exists():
-        return pd.read_csv(NOTICE_CSV_PATH)
-    columns = ["게시판", "제목", "카테고리", "게시일", "상단고정", "상세URL", "본문", "첨부파일"]
-    return pd.DataFrame(columns=columns)
-
-
-def merge_notices(existing: pd.DataFrame, incoming: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def filter_new_rows(incoming: pd.DataFrame, existing_urls: set[str]) -> pd.DataFrame:
+    """크롤링된 데이터(한글 컬럼)에서 신규 공지만 필터링하여 반환합니다."""
     if incoming.empty:
-        return existing, incoming
-
-    combined = pd.concat([existing, incoming], ignore_index=True)
-    combined.drop_duplicates(subset=["상세URL"], inplace=True, keep="first")
-    combined["게시일"] = pd.to_datetime(combined["게시일"], errors="coerce")
-    combined.sort_values(by=["게시일", "제목"], ascending=[False, True], inplace=True)
-    combined["게시일"] = combined["게시일"].dt.strftime("%Y-%m-%d")
-    combined["게시일"] = combined["게시일"].fillna("")
-    combined.reset_index(drop=True, inplace=True)
-
-    if existing.empty:
-        new_rows = combined
-    else:
-        new_mask = ~combined["상세URL"].isin(existing["상세URL"])
-        new_rows = combined[new_mask].copy()
-    return combined, new_rows
+        return pd.DataFrame()
+    new_mask = ~incoming["상세URL"].isin(existing_urls)
+    return incoming[new_mask].copy()
 
 
-def save_notices(df: pd.DataFrame) -> None:
-    df.to_csv(NOTICE_CSV_PATH, index=False, encoding="utf-8-sig")
-
-
-def append_chunks(new_rows: pd.DataFrame) -> pd.DataFrame:
-    """주어진 행을 기반으로 청크를 만들어 반환합니다."""
+def save_new_notices_to_db(new_rows: pd.DataFrame) -> pd.DataFrame:
+    """
+    새로운 공지들을 데이터베이스의 notices 테이블에 저장하고,
+    저장된 행(DB 컬럼명 기준)을 반환합니다.
+    """
     if new_rows.empty:
         return pd.DataFrame()
-    if "첨부파일" in new_rows.columns:
-        new_rows["첨부파일"] = new_rows["첨부파일"].apply(_serialize_metadata)
-    return build_notice_chunks(new_rows.copy())
+
+    # DB 스키마(영문 컬럼명)에 맞게 이름 변경
+    notices_to_save = new_rows.rename(columns={
+        "게시판": "board", "제목": "title", "카테고리": "category",
+        "게시일": "published_date", "상단고정": "is_fixed", "상세URL": "detail_url",
+        "본문": "content", "첨부파일": "attachments"
+    })
+    notices_to_save["published_date"] = pd.to_datetime(notices_to_save["published_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    notices_to_save["published_date"] = notices_to_save["published_date"].fillna("")
+
+    # attachments 컬럼을 직렬화
+    if "attachments" in notices_to_save.columns:
+        notices_to_save["attachments"] = notices_to_save["attachments"].apply(_serialize_metadata)
+
+    notices_to_save.to_sql("notices", con=engine, if_exists="append", index=False)
+    return notices_to_save
 
 
 def _serialize_metadata(value: Any) -> str:
+    """메타데이터를 JSON 문자열로 직렬화합니다."""
     if isinstance(value, (list, dict)):
         try:
             return json.dumps(value, ensure_ascii=False)
         except TypeError:
             return str(value)
-    if isinstance(value, float) and pd.isna(value):
+    if pd.isna(value):
         return ""
     return str(value)
 
 
-def update_chroma(new_chunks: pd.DataFrame) -> None:
-    if new_chunks.empty:
+def save_chunks_to_db(generated_chunks: pd.DataFrame, saved_notices: pd.DataFrame):
+    """생성된 청크들을 상위 공지와 연결하여 데이터베이스의 chunks 테이블에 저장합니다."""
+    if generated_chunks.empty or saved_notices.empty:
         return
-    embeddings = encode_texts(new_chunks["chunk_text"].tolist())
-    add_items(
-        DATASET_ARTIFACTS["notices"].collection,
-        ids=new_chunks["chunk_id"],
-        documents=new_chunks["chunk_text"],
-        metadatas=new_chunks.drop(columns=["chunk_text"]).to_dict(orient="records"),
-        embeddings=embeddings,
-    )
+
+    # DB에 저장된 공지의 detail_url과 id를 매핑
+    url_to_id_map = saved_notices.set_index("detail_url")["id"].to_dict()
+
+    # `build_notice_chunks`가 생성한 'url' 컬럼을 사용하여 notice_id 매핑
+    generated_chunks["notice_id"] = generated_chunks["url"].map(url_to_id_map)
+
+    chunks_to_save = generated_chunks[["chunk_id", "chunk_text", "notice_id"]].copy()
+    chunks_to_save.dropna(subset=["notice_id"], inplace=True)
+    chunks_to_save["notice_id"] = chunks_to_save["notice_id"].astype(int)
+
+    chunks_to_save.to_sql("chunks", con=engine, if_exists="append", index=False)
 
 
-def update_chunk_artifact(new_chunks: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    artifacts = DATASET_ARTIFACTS["notices"]
-    chunk_path = artifacts.chunk_path
-    csv_path = artifacts.csv_path
+def update_chroma_and_retrain_tfidf(new_chunks: pd.DataFrame):
+    """새로운 청크로 ChromaDB를 업데이트하고, 전체 청크로 TF-IDF를 재학습합니다."""
+    # ChromaDB 업데이트
+    if not new_chunks.empty:
+        embeddings = encode_texts(new_chunks["chunk_text"].tolist())
+        add_items(
+            DATASET_ARTIFACTS["notices"].collection,
+            ids=new_chunks["chunk_id"],
+            documents=new_chunks["chunk_text"],
+            metadatas=new_chunks.drop(columns=["chunk_text"]).to_dict(orient="records"),
+            embeddings=embeddings,
+        )
 
-    if not chunk_path.exists() and csv_path.exists():
-        artifacts.chunk_path = csv_path
-        chunk_path = csv_path
-
-    if chunk_path.exists():
-        if chunk_path.suffix == ".csv":
-            existing_chunks = pd.read_csv(chunk_path)
-        else:
-            existing_chunks = pd.read_parquet(chunk_path)
-    else:
-        existing_chunks = pd.DataFrame()
-
-    if new_chunks.empty:
-        return existing_chunks, pd.DataFrame()
-
-    if not existing_chunks.empty:
-        filtered_new = new_chunks[~new_chunks["chunk_id"].isin(existing_chunks["chunk_id"])].copy()
-    else:
-        filtered_new = new_chunks.copy()
-
-    if existing_chunks.empty:
-        combined = filtered_new.copy()
-    else:
-        combined = pd.concat([existing_chunks, filtered_new], ignore_index=True)
-
-    combined.drop_duplicates(subset=["chunk_id"], inplace=True)
-
-    try:
-        if chunk_path.suffix == ".csv":
-            raise ImportError  # force fallback
-        combined.to_parquet(chunk_path, index=False)
-    except (ImportError, ModuleNotFoundError, ValueError, OSError):
-        fallback_path = chunk_path.with_suffix(".csv")
-        combined.to_csv(fallback_path, index=False, encoding="utf-8-sig")
-        artifacts.chunk_path = fallback_path
-        chunk_path = fallback_path
-
-    return combined, filtered_new
-
-def retrain_tfidf(chunks_df: pd.DataFrame) -> None:
-    if chunks_df.empty:
-        return
-    train_tfidf("notices", chunks_df["chunk_text"].tolist())
+    # TF-IDF 재학습 (DB의 모든 청크 사용)
+    all_chunks_df = pd.read_sql("SELECT chunk_text FROM chunks", engine)
+    if not all_chunks_df.empty:
+        train_tfidf("notices", all_chunks_df["chunk_text"].tolist())
 
 
-def sync_notices(incoming: pd.DataFrame) -> int:
-    """새 공지를 병합하고 CSV/Chroma/TF-IDF를 갱신한 뒤 신규 행 수를 돌려줍니다."""
-    existing = load_existing_notices()
-    merged, new_rows = merge_notices(existing, incoming)
-    if new_rows.empty:
-        save_notices(merged)  # 정렬과 인코딩을 일관되게 유지한다.
+def sync_notices(incoming_df: pd.DataFrame) -> int:
+    """
+    새 공지를 DB에 저장하고, 청크 생성 및 DB 저장,
+    Chroma/TF-IDF 갱신 후 신규 공지 수를 반환합니다.
+    """
+    # 1. DB에서 기존 URL 목록을 가져와 신규 공지 필터링
+    existing_urls = get_existing_notice_urls()
+    new_notices_korean_cols = filter_new_rows(incoming_df, existing_urls)
+
+    if new_notices_korean_cols.empty:
+        print("신규 공지가 없습니다.")
         return 0
 
-    save_notices(merged)
-    new_chunks = append_chunks(new_rows)
-    all_chunks, filtered_new = update_chunk_artifact(new_chunks)
-    update_chroma(filtered_new)
-    retrain_tfidf(all_chunks)
-    return len(new_rows)
+    # 2. 신규 공지를 DB에 저장하고, 저장된 데이터(영문 컬럼)를 반환받음
+    #    이때, ID를 얻기 위해 DB에서 다시 읽어옴
+    save_new_notices_to_db(new_notices_korean_cols)
+    
+    saved_notice_urls = [f"'{url}'" for url in new_notices_korean_cols['상세URL'].unique()]
+    saved_notices_df = pd.read_sql(
+        f"SELECT id, detail_url FROM notices WHERE detail_url IN ({', '.join(saved_notice_urls)})",
+        engine
+    )
 
+    print(f"{len(saved_notices_df)}건의 신규 공지를 데이터베이스에 저장했습니다.")
 
-__all__ = ["sync_notices", "merge_notices", "load_existing_notices"]
+    # 3. 신규 공지(한글 컬럼)로 청크 생성
+    generated_chunks = build_notice_chunks(new_notices_korean_cols)
+
+    # 4. 생성된 청크를 DB에 저장 (이때 부모 공지 ID를 연결)
+    save_chunks_to_db(generated_chunks, saved_notices_df)
+    print(f"{len(generated_chunks)}개의 신규 청크를 데이터베이스에 저장했습니다.")
+
+    # 5. ChromaDB 업데이트 및 TF-IDF 재학습
+    update_chroma_and_retrain_tfidf(generated_chunks)
+    print("ChromaDB 인덱스와 TF-IDF 모델을 업데이트했습니다.")
+
+    return len(saved_notices_df)
+
+__all__ = ["sync_notices"]

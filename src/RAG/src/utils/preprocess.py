@@ -132,7 +132,9 @@ def chunk_text(text: str, size: int, overlap: int) -> List[str]:
         )
         docs = splitter.split_text(normalized)
         return [seg.strip() for seg in docs if seg.strip()]
-    except Exception:
+    except ImportError:
+        import logging
+        logging.warning("langchain_text_splitters is not installed. Falling back to simple text splitting.")
         # 의존성 누락 등 예외 시 기존 단순 슬라이싱으로 폴백
         step = max(1, size - overlap)
         segments: List[str] = []
