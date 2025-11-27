@@ -8,17 +8,15 @@ interface ChatPageMessage {
   chatId: string
   isAsk: boolean
   content: string
-  createdTime: number
+  createdTime: string | number
 }
 
 const epochTicks = 621355968000000000 // .NET DateTime epoch ticks
-const getCurrentTicks = () => epochTicks + Date.now() * 10000
-
 const ticksToDate = (ticks: number) => new Date((ticks - epochTicks) / 10000)
 
-const formatMessageTime = (ticks?: number) => {
-  if (!ticks) return ''
-  const date = ticksToDate(ticks)
+const formatMessageTime = (value?: string | number) => {
+  if (!value) return ''
+  const date = typeof value === 'number' ? ticksToDate(value) : new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   return new Intl.DateTimeFormat('ko-KR', {
     hour: 'numeric',
@@ -46,8 +44,12 @@ const ChatPage = () => {
     const loadInitialData = async () => {
       try {
         setLoading(true)// 로딩 시작
-        const messageData = await apiFetch<ChatPageMessage[]>(`/chat/startload?chatId=${chatId}`, {// 채팅 메시지 불러오기
+        const messageData = await apiFetch<ChatPageMessage[]>('/chat/load', {
+          method: 'POST',
+          json: { chatId, lastTime: new Date().toISOString() },
         })
+        //const messageData = await apiFetch<ChatPageMessage[]>(`/chat/startload?chatId=${chatId}`, {// 채팅 메시지 불러오기
+        //})
 
         if (Array.isArray(messageData)) {
           setMessages(messageData.reverse())
@@ -91,7 +93,7 @@ const ChatPage = () => {
       chatId,
       isAsk: true,
       content: trimmed,
-      createdTime: getCurrentTicks(),
+      createdTime: new Date().toISOString(),
     }
 
     // 서버는 ChatMessageDto 구조를 기대하므로(아이디/시간 포함) 즉시 요청 보내기 전에 낙관적으로 목록에 추가합니다.
@@ -103,17 +105,20 @@ const ChatPage = () => {
       const { id, chatId, content, createdTime } = newMessage
       await apiFetch('/chat/msg', {
         method: 'POST',
-        json: { id, 
-          chatId, 
-          isAsk: true, 
-          content, 
-          createdTime }, // ChatMessageDto와 동일한 필드 셋을 전달해야 서버에서 바로 매핑됩니다.
+        json: {
+          id,
+          chatId,
+          isAsk: true,
+          content,
+          createdTime,
+        }, // CreatedTime은 ISO 문자열로 전달
       })
 
 
       // 새 답변까지 반영하려면 최신 메시지를 다시 불러옵니다. (추후에는 전용 최신 로딩 API로 최적화 가능)
-      const refreshed = await apiFetch<ChatPageMessage[]>(`/chat/startload?chatId=${chatId}`, {
+      const refreshed = await apiFetch<ChatPageMessage[]>('/chat/load', {
         method: 'POST',
+        json: { chatId, lastTime: new Date().toISOString() },
       })
 
 
