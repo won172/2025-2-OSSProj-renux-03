@@ -28,7 +28,7 @@ CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "120"))
 HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.4"))
 DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "5"))
-RECENCY_WEIGHT = float(os.getenv("RECENCY_WEIGHT", "0.3")) # Re-ranking 가중치 추가
+RECENCY_WEIGHT = float(os.getenv("RECENCY_WEIGHT", "0.7")) # Re-ranking 가중치 추가
 
 # 컨텍스트 관련 설정
 MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "8000"))

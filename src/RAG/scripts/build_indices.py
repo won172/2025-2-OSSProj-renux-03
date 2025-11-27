@@ -13,9 +13,11 @@ from src.pipelines.ingest import (
     ingest_rules,
     ingest_schedule,
 )
+from src.database import init_db
 
 
 def main() -> None:
+    init_db()
     loaders = {
         "notices": ingest_notices,
         "rules": ingest_rules,
