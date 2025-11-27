@@ -29,6 +29,7 @@ export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options:
   const { json, headers, ...rest } = options
   const init: RequestInit = {
     ...rest,
+    credentials: 'include',
     headers: {
       ...defaultHeaders,
       ...headers,

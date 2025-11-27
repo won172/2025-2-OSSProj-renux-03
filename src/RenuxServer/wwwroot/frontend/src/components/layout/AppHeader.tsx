@@ -1,3 +1,5 @@
+import donggukLogo from '../../assets/images/dongguk-logo.png'
+
 interface AppHeaderProps {
   isAuthenticated: boolean
   welcomeMessage: string
@@ -34,9 +36,14 @@ const AppHeader = ({
           <span className="hamburger-btn__bar" />
         </button>
         <div>
+          <div className="chatbot-hero__badge">
+                  <img src={donggukLogo} alt="동국대학교 로고" className="chatbot-hero__badge-logo" />
+                </div>
+          {/*}
           <p className="chatbot-hero__badge" aria-hidden="true">
             Dongguk Buddy
           </p>
+            */}
           <h1 style={{ margin: '8px 0 0', fontSize: '1.35rem', letterSpacing: '0.04em' }}>동국대학교 AI 챗봇</h1>
         </div>
       </div>
