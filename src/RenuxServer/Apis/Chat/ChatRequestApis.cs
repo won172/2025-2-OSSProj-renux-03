@@ -11,6 +11,8 @@ namespace RenuxServer.Apis.Chat;
 
 public record StartChat(OrganizationDto Org, string Title);
 public record LoadChat(Guid ChatId, DateTime LastTime);
+public record ToRag(string SessionId, string Question);
+public record Reply(string Answer);
 
 static public class ChatRequestApis
 {
@@ -69,16 +71,24 @@ static public class ChatRequestApis
             return Results.Ok(chatDto);
         }).RequireAuthorization();
 
-        app.MapPost("/msg", async (ServerDbContext db, ChatMessageDto askDto, IMapper mapper) =>
+        app.MapPost("/msg", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper) =>
         {
             ChatMessage ask = mapper.Map<ChatMessage>(askDto);
 
             await db.ChatMessages.AddAsync(ask);
 
+            ToRag toRag = new(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!, askDto.Content);
+
+            HttpClient client = new();
+
+            var res = await client.PostAsJsonAsync("http://192.168.11.29:8000/ask", toRag);
+
+            Reply? re = await res.Content.ReadFromJsonAsync<Reply>();
+
             ChatMessage apply = new()
             {
                 ChatId = ask.ChatId,
-                Content = "대답입니다.",
+                Content = re.Answer,
                 IsAsk = false,
                 CreatedTime = DateTime.Now.ToUniversalTime()
             };
@@ -94,6 +104,11 @@ static public class ChatRequestApis
         app.MapPost("/startguest", async (ServerDbContext db, ChatMessageDto askDto, IMapper mapper) =>
         {
 
+        });
+
+        app.MapPost("/request", (ChatMessageDto askDto) =>
+        {
+            
         });
 
         app.MapPost("/load", async (ServerDbContext db, IMapper mapper, LoadChat load) =>
