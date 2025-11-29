@@ -4,6 +4,8 @@ import SignInPage from './pages/auth/SignInPage'
 import SignUpPage from './pages/auth/SignUpPage'
 import ChatPage from './pages/chat/ChatPage'
 import SettingsPage from './pages/settings/SettingsPage'
+import UniversityAdminPage from './pages/admin/UniversityAdminPage'
+import DepartmentAdminPage from './pages/admin/DepartmentAdminPage'
 
 function App() {
   return (
@@ -15,6 +17,8 @@ function App() {
           <Route path="/auth/up" element={<SignUpPage />} />
           <Route path="/chat/:chatId" element={<ChatPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/admin/university" element={<UniversityAdminPage />} />
+          <Route path="/admin/department" element={<DepartmentAdminPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

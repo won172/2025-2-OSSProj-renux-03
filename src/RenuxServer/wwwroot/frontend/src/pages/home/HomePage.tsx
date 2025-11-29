@@ -1,11 +1,31 @@
-import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
+import donggukLogo from '../../assets/images/dongguk-logo.png'
+import dongddokiLogo from '../../assets/images/dongddoki-logo.png'
 import type { Department } from '../../types/organization'
 import type { ActiveChat } from '../../types/chat'
-import type { AuthNameResponse } from '../../types/auth'
+import type { AuthNameResponse, UserRole } from '../../types/auth'
 
-type InlineMessage = { id: string; isAsk: boolean; content: string; createdAt: number }
+type ChatPageMessage = {
+  id: string
+  chatId: string
+  isAsk: boolean
+  content: string
+  createdTime: string | number
+}
+
+const mapRoleNameToUserRole = (roleName?: string | null): UserRole => {
+  if (!roleName) return 'STUDENT'
+  const normalized = roleName.trim().toLowerCase()
+  if (normalized.includes('총학생회') || normalized.includes('교직원') || normalized.includes('관리자')) {
+    return 'UNIVERSITY_COUNCIL'
+  }
+  if (normalized.includes('학생회')) {
+    return 'DEPARTMENT_COUNCIL'
+  }
+  return 'STUDENT'
+}
 
 const HomePage = () => {
   const navigate = useNavigate()
@@ -19,11 +39,20 @@ const HomePage = () => {
   const [chatRoomTitle, setChatRoomTitle] = useState('')
   const [isCreatingChat, setIsCreatingChat] = useState(false)
   const [createChatError, setCreateChatError] = useState<string | null>(null)
-
-  const [inlineMessages, setInlineMessages] = useState<InlineMessage[]>([])
-  const [inlineInput, setInlineInput] = useState('')
-  const [inlineSending, setInlineSending] = useState(false)
-  const [inlineSendError, setInlineSendError] = useState<string | null>(null)
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
+  const [selectedChatTitle, setSelectedChatTitle] = useState<string | null>(null)
+  const [chatMessages, setChatMessages] = useState<ChatPageMessage[]>([])
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
+  const [chatInput, setChatInput] = useState('')
+  const [chatSending, setChatSending] = useState(false)
+  const [userRole, setUserRole] = useState<UserRole>(() => {
+    if (typeof window === 'undefined') return 'STUDENT'
+    const stored = window.localStorage.getItem('renux-user-role')
+    if (stored === 'DEPARTMENT_COUNCIL' || stored === 'UNIVERSITY_COUNCIL') return stored
+    return 'STUDENT'
+  })
+  const [departmentName, setDepartmentName] = useState<string | null>(null)
 
   const isNewChatDisabled = useMemo(() => {
     if (departmentsLoading) return true
@@ -57,6 +86,16 @@ const HomePage = () => {
         if (data?.name) {
           setIsAuthenticated(true)
           setUserName(data.name)
+          if (data.role) {
+            const resolvedRole = mapRoleNameToUserRole(data.role)
+            setUserRole(resolvedRole)
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem('renux-user-role', resolvedRole)
+            }
+          }
+          if (data.departmentName) {
+            setDepartmentName(data.departmentName)
+          }
         }
       } catch (error) {
         console.log('User is not logged in', error)
@@ -75,6 +114,10 @@ const HomePage = () => {
         const data = await apiFetch<ActiveChat[]>('/chat/active', { method: 'GET' })
         if (Array.isArray(data)) {
           setActiveChats(data)
+          if (!selectedChatId && data.length > 0) {
+            setSelectedChatId(data[0].id)
+            setSelectedChatTitle(data[0].title ?? '채팅방')
+          }
         }
       } catch (error) {
         console.error('Failed to load active chats', error)
@@ -82,7 +125,7 @@ const HomePage = () => {
       }
     }
     fetchActiveChats()
-  }, [isAuthenticated])
+  }, [isAuthenticated, selectedChatId])
 
   useEffect(() => {
     document.body.classList.toggle('modal-open', isModalOpen)
@@ -125,23 +168,23 @@ const HomePage = () => {
       return
     }
 
-    const selectedDept = departments.find((dept) => dept.id === selectedDepartmentId)
-    const orgPayload = {
-      id: selectedDepartmentId,
-      major: {
-        id: selectedDept?.major?.id,
-        majorname: selectedDept?.major?.majorname ?? '',
-      },
+    const selectedOrg = departments.find((dept) => dept.id === selectedDepartmentId)
+    if (!selectedOrg || !selectedOrg.major?.id) {
+      setCreateChatError('선택한 학과 정보를 불러오지 못했습니다.')
+      return
     }
 
     try {
       setIsCreatingChat(true)
       const chatRoom = await apiFetch<ActiveChat>('/chat/start', {
         method: 'POST',
-        json: { org: orgPayload, title: trimmedTitle },
+        json: { org: selectedOrg, title: trimmedTitle },
       })
       toggleModal(false)
-      navigate(`/chat/${chatRoom.id}`)
+      setSelectedChatId(chatRoom.id)
+      setSelectedChatTitle(chatRoom.title ?? trimmedTitle)
+      setChatMessages([])
+      setChatError(null)
     } catch (error) {
       console.error('Failed to create chat room', error)
       setCreateChatError('채팅방을 생성하지 못했습니다. 잠시 후 다시 시도해주세요.')
@@ -165,44 +208,113 @@ const HomePage = () => {
     }
   }
 
+  const handleOpenUniversityAdmin = () => {
+    navigate('/admin/university')
+  }
+
+  const handleOpenDepartmentAdmin = () => {
+    navigate('/admin/department')
+  }
+
   const isHeroPrimaryDisabled = isAuthenticated && isNewChatDisabled
   const displayName = isAuthenticated ? userName ?? '로그인 사용자' : '게스트'
-  const displayDept = isAuthenticated ? departments[0]?.major?.majorname : null
-  const roleLabel = isAuthenticated ? '관리자' : '사용자'
-  const visibleChats = activeChats.length > 0 ? activeChats : []
+  const fallbackDept = departments[0]?.major?.majorname ?? (userRole === 'UNIVERSITY_COUNCIL' ? '총학생회' : null) // 우선 디폴트로 총학생회.
+  const displayDept = departmentName ?? fallbackDept 
+  const roleLabelMap: Record<UserRole, string> = {
+    STUDENT: '일반학생',
+    DEPARTMENT_COUNCIL: '학생회',
+    UNIVERSITY_COUNCIL: '총학생회',
+  }
+  const roleLabel = roleLabelMap[userRole] // '일반학생'
+  const showDeptAdminButton = isAuthenticated && userRole === 'DEPARTMENT_COUNCIL' // '학생회'
+  const showUnivAdminButton = isAuthenticated && userRole === 'UNIVERSITY_COUNCIL' // '총학생회'
+  const visibleChats = activeChats.length > 0 ? activeChats : [] 
 
-  const inlineFormatTime = (timestamp: number) =>
-    new Intl.DateTimeFormat('ko-KR', { hour: 'numeric', minute: '2-digit' }).format(new Date(timestamp))
+  const formatMessageTime = (value?: string | number) => {
+    if (!value) return ''
+    const date = typeof value === 'number' ? new Date(value) : new Date(value)
+    if (Number.isNaN(date.getTime())) return ''
+    return new Intl.DateTimeFormat('ko-KR', { hour: 'numeric', minute: '2-digit' }).format(date)
+  }
 
-  const sendInlineMessage = () => {
-    const trimmed = inlineInput.trim()
-    if (!trimmed) {
-      setInlineSendError('메시지를 입력해주세요.')
+  const loadMessages = async (chatIdToLoad: string) => {
+    try {
+      setChatLoading(true)
+      setChatError(null)
+      const data = await apiFetch<ChatPageMessage[]>('/chat/load', {
+        method: 'POST',
+        json: { chatId: chatIdToLoad, lastTime: new Date().toISOString() },
+      })
+      if (Array.isArray(data)) {
+        setChatMessages(data.reverse())
+      } else {
+        setChatMessages([])
+      }
+    } catch (err) {
+      console.error('Failed to load messages', err)
+      setChatError('채팅 메시지를 불러오지 못했습니다.')
+      setChatMessages([])
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!selectedChatId || !isAuthenticated) return
+    loadMessages(selectedChatId)
+  }, [selectedChatId, isAuthenticated])
+
+  const handleSelectChat = (chat: ActiveChat) => {
+    setSelectedChatId(chat.id)
+    setSelectedChatTitle(chat.title ?? '채팅방')
+    setChatMessages([])
+    setChatError(null)
+  }
+
+  const handleChatSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedChatId || !isAuthenticated) {
+      setChatError('채팅방을 선택하거나 로그인 후 이용해주세요.')
       return
     }
-    setInlineSendError(null)
-    const newMsg: InlineMessage = {
+    const trimmed = chatInput.trim()
+    if (!trimmed) {
+      setChatError('메시지를 입력해주세요.')
+      return
+    }
+
+    const newMsg: ChatPageMessage = {
       id: typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+      chatId: selectedChatId,
       isAsk: true,
       content: trimmed,
-      createdAt: Date.now(),
+      createdTime: new Date().toISOString(),
     }
-    setInlineMessages((prev) => [...prev, newMsg])
-    setInlineInput('')
-    setInlineSending(true)
-    setInlineSending(false)
-  }
 
-  const handleInlineSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    sendInlineMessage()
-  }
+    setChatMessages((prev) => [...prev, newMsg])
+    setChatInput('')
+    setChatSending(true)
+    setChatError(null)
 
-  const handleInlineKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    const isComposing = (event.nativeEvent as any).isComposing
-    if (event.key === 'Enter' && !event.shiftKey && !isComposing) {
-      event.preventDefault()
-      sendInlineMessage()
+    try {
+      await apiFetch('/chat/msg', {
+        method: 'POST',
+        json: {
+          id: newMsg.id,
+          chatId: newMsg.chatId,
+          isAsk: newMsg.isAsk,
+          content: newMsg.content,
+          createdTime: newMsg.createdTime,
+        },
+      })
+      await loadMessages(selectedChatId)
+    } catch (err) {
+      console.error('Failed to send message', err)
+      setChatError('메시지를 전송하지 못했습니다.')
+      setChatMessages((prev) => prev.filter((msg) => msg.id !== newMsg.id))
+      setChatInput(trimmed)
+    } finally {
+      setChatSending(false)
     }
   }
 
@@ -210,10 +322,10 @@ const HomePage = () => {
     <div className="gpt-home">
       <aside className="gpt-home__sidebar">
         <div className="gpt-home__brand">
-          <div className="gpt-home__brand-text">
-            <p className="chatbot-hero__badge">Dongguk GPT</p>
-            <strong>동똑이</strong>
+          <div className="home-logo-row">
+            <img src={donggukLogo} alt="Dongguk University" className="home-logo home-logo--univ" />
           </div>
+
         </div>
 
         <button type="button" className="gpt-home__new" onClick={handleNewChatClick} disabled={isHeroPrimaryDisabled}>
@@ -226,7 +338,7 @@ const HomePage = () => {
           </div>
           <ul className="gpt-home__chat-list">
             {visibleChats.map((chat) => (
-              <li key={chat.id} className="gpt-home__chat-item" onClick={() => navigate(`/chat/${chat.id}`)}>
+              <li key={chat.id} className="gpt-home__chat-item" onClick={() => handleSelectChat(chat)}>
                 <span className="gpt-home__chat-title">{chat.title ?? '제목 없음'}</span>
                 <span className="gpt-home__chat-sub">대화 이어가기</span>
               </li>
@@ -270,23 +382,41 @@ const HomePage = () => {
       <div className="gpt-home__content">
         <div className="buddy-topbar">
           <div className="buddy-topbar__brand">
-            <div className="buddy-topbar__icon">🎓</div>
+            <div className="buddy-topbar__icon buddy-topbar__icon--image">
+              <img src={dongddokiLogo} alt="동똑이 로고" className="buddy-topbar__logo" />
+            </div>
             <div>
               {/* <p className="buddy-topbar__eyebrow">DONGGUK BUDDY AI</p> */}
-              <p className="buddy-topbar__title">동국대학교 AI 챗봇</p>
+              <p className="buddy-topbar__title">동국대학교 동똑이</p>
             </div>
           </div>
           <div className="buddy-topbar__meta">
-            <span className="buddy-topbar__text">{displayName}</span>
-            {displayDept && (
+            {isAuthenticated ? (
               <>
-                <span className="buddy-topbar__dot">·</span>
-                <span className="buddy-topbar__text buddy-topbar__text--muted">{displayDept}</span>
+                <span className="buddy-topbar__text">{displayName}</span>
+                {displayDept && (
+                  <>
+                    <span className="buddy-topbar__dot">·</span>
+                    <span className="buddy-topbar__text buddy-topbar__text--muted">{displayDept}</span>
+                  </>
+                )}
+                <span className="buddy-topbar__badge">{roleLabel}</span>
               </>
+            ) : (
+              <span className="buddy-topbar__text buddy-topbar__text--muted">로그인하면 개인화 정보가 표시됩니다</span>
             )}
-            <span className="buddy-topbar__badge">{roleLabel}</span>
           </div>
-          <div className="buddy-topbar__meta">
+          <div className="buddy-topbar__meta buddy-topbar__meta--actions">
+            {showUnivAdminButton && (
+              <button className="ghost-btn small ghost-btn--accent" type="button" onClick={handleOpenUniversityAdmin}>
+                관리자
+              </button>
+            )}
+            {showDeptAdminButton && (
+              <button className="ghost-btn small" type="button" onClick={handleOpenDepartmentAdmin}>
+                학과 관리자
+              </button>
+            )}
             {isAuthenticated ? (
               <button className="ghost-btn small" type="button" onClick={handleLogout}>
                 로그아웃
@@ -309,38 +439,55 @@ const HomePage = () => {
             <div className="home-chat__header">
               <div>
                 <p className="chatbot-hero__badge">동국대학교 재학생 맞춤형 정보 제공 챗봇</p>
+                {selectedChatTitle && <h2 className="home-chat__title">{selectedChatTitle}</h2>}
               </div>
             </div>
 
             <div className="home-chat__thread-wrapper">
-              <ul className="chat-bubbles">
-                {inlineMessages.map((message) => (
-                  <li
-                    key={message.id}
-                    className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'}`}
-                  >
-                    <span className="chat-bubble__text">{message.content}</span>
-                    <time className="chat-bubble__time">{inlineFormatTime(message.createdAt)}</time>
-                  </li>
-                ))}
-              </ul>
+              {chatLoading ? (
+                <p className="home-chat__status">채팅을 불러오는 중...</p>
+              ) : chatError ? (
+                <p className="home-chat__status home-chat__status--error">{chatError}</p>
+              ) : !selectedChatId ? (
+                <p className="home-chat__status">채팅방을 선택하거나 새로 만드세요.</p>
+              ) : chatMessages.length === 0 ? (
+                <div className="home-chat__empty">아직 메시지가 없습니다. 첫 메시지를 보내보세요.</div>
+              ) : (
+                <ul className="chat-bubbles">
+                  {chatMessages.map((message) => {
+                    const messageTime = formatMessageTime(message.createdTime)
+                    return (
+                      <li
+                        key={message.id}
+                        className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'}`}
+                      >
+                        <span className="chat-bubble__text">{message.content}</span>
+                        {messageTime && <time className="chat-bubble__time">{messageTime}</time>}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </div>
 
-            <form className="home-chat__composer" onSubmit={handleInlineSubmit}>
+            <form className="home-chat__composer" onSubmit={handleChatSubmit}>
               <textarea
                 className="home-chat__input"
-                placeholder="무엇이든 입력하세요"
-                value={inlineInput}
-                onChange={(event) => setInlineInput(event.target.value)}
-                onKeyDown={handleInlineKeyDown}
+                placeholder={isAuthenticated ? '무엇이든 입력하세요' : '로그인 후 이용 가능합니다'}
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
                 rows={3}
-                disabled={inlineSending}
+                disabled={chatSending || !isAuthenticated || !selectedChatId}
               />
               <div className="home-chat__actions">
-                {inlineSendError && <span className="home-chat__error">{inlineSendError}</span>}
+                {chatError && <span className="home-chat__error">{chatError}</span>}
                 <div className="home-chat__buttons">
-                  <button className="hero-btn hero-btn--primary" type="submit" disabled={inlineSending}>
-                    {inlineSending ? '전송 중...' : '보내기'}
+                  <button
+                    className="hero-btn hero-btn--primary"
+                    type="submit"
+                    disabled={chatSending || !isAuthenticated || !selectedChatId}
+                  >
+                    {chatSending ? '전송 중...' : '보내기'}
                   </button>
                 </div>
               </div>
