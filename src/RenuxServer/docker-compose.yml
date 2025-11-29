@@ -27,14 +27,39 @@ services:
         depends_on:
             db:
                 condition: service_healthy
+            rag-service:
+                condition: service_started
         env_file: .env
         environment:
             - ASPNETCORE_ENVIRONMENT=Production
             - ASPNETCORE_URLS=http://+:8080
             - ConnectionStrings__RenuxServer=${CONNECTIONSTRING}
             - Jwt__Key=${JWT_KEY}
+            - RAG_SERVICE_URL=http://rag-service:8000
         restart: on-failure
  
+    rag-service:
+        container_name: renux_rag_test
+        build:
+            context: ../RAG
+            dockerfile: Dockerfile
+        ports:
+            - "8000:8000"
+        depends_on:
+            - redis
+        env_file: .env
+        environment:
+            - OPENAI_API_KEY=${OPENAI_API_KEY}
+            - REDIS_URL=redis://redis:6379/0
+        restart: on-failure
+
+    redis:
+        container_name: renux_redis_internal
+        image: redis:alpine
+        ports:
+            - "6380:6379"
+        restart: always
+
     nginx:
         container_name: renux_nginx_test
         image: nginx:latest
