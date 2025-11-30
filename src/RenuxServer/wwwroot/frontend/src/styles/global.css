@@ -245,7 +245,7 @@
 }
 
 .gpt-home {
-    min-height: 100vh;
+    height: 100vh; /* min-height 대신 height로 고정 */
     display: grid;
     grid-template-columns: 280px 1fr;
     gap: 22px;
@@ -253,6 +253,40 @@
     background: radial-gradient(circle at 15% -10%, rgba(249, 115, 22, 0.16), transparent 36%),
         radial-gradient(circle at 90% 10%, rgba(249, 115, 22, 0.12), transparent 32%),
         linear-gradient(180deg, #fff7ed 0%, #f8fafc 50%, #ffffff 100%);
+    overflow: hidden; /* 전체 스크롤 방지 */
+    box-sizing: border-box;
+}
+
+.gpt-home__content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+    width: 100%;
+    height: 100%; /* 부모 높이 상속 */
+    overflow: hidden; /* 내부 스크롤 제어 */
+}
+
+.gpt-home__main {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    flex: 1; /* 남은 공간 모두 차지 */
+    min-height: 0; /* 중요: Flex 아이템 축소 허용 */
+}
+
+.home-chat {
+    height: 100%; /* 부모 높이에 맞춤 */
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 18px;
+    background: radial-gradient(circle at 10% -10%, rgba(249, 115, 22, 0.12), transparent 38%),
+        radial-gradient(circle at 80% 0%, rgba(249, 115, 22, 0.12), transparent 34%),
+        linear-gradient(180deg, #fff7ed 0%, #f8fafc 45%, #ffffff 100%);
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden; /* 내부 스크롤 제어 */
 }
 
 .gpt-home__sidebar {
@@ -1290,6 +1324,7 @@
     flex: 1;
     overflow-y: auto;
     padding-right: 4px;
+    min-height: 0;
 }
 
 .home-chat__intro h1 {
@@ -1320,7 +1355,7 @@
 
 .home-chat__actions {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end; /* 항상 오른쪽 끝에 위치 */
     align-items: center;
     gap: 10px;
 }

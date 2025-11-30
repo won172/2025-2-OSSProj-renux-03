@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
 import donggukLogo from '../../assets/images/dongguk-logo.png'
@@ -44,6 +44,8 @@ const HomePage = () => {
   const [chatMessages, setChatMessages] = useState<ChatPageMessage[]>([])
   const [chatLoading, setChatLoading] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [hasMoreMessages, setHasMoreMessages] = useState(true)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [chatInput, setChatInput] = useState('')
   const [chatSending, setChatSending] = useState(false)
   const [userRole, setUserRole] = useState<UserRole>(() => {
@@ -53,6 +55,11 @@ const HomePage = () => {
     return 'STUDENT'
   })
   const [departmentName, setDepartmentName] = useState<string | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
 
   const isNewChatDisabled = useMemo(() => {
     if (departmentsLoading) return true
@@ -216,39 +223,29 @@ const HomePage = () => {
     navigate('/admin/department')
   }
 
-  const isHeroPrimaryDisabled = isAuthenticated && isNewChatDisabled
-  const displayName = isAuthenticated ? userName ?? '로그인 사용자' : '게스트'
-  const fallbackDept = departments[0]?.major?.majorname ?? (userRole === 'UNIVERSITY_COUNCIL' ? '총학생회' : null) // 우선 디폴트로 총학생회.
-  const displayDept = departmentName ?? fallbackDept 
-  const roleLabelMap: Record<UserRole, string> = {
-    STUDENT: '일반학생',
-    DEPARTMENT_COUNCIL: '학생회',
-    UNIVERSITY_COUNCIL: '총학생회',
-  }
-  const roleLabel = roleLabelMap[userRole] // '일반학생'
-  const showDeptAdminButton = isAuthenticated && userRole === 'DEPARTMENT_COUNCIL' // '학생회'
-  const showUnivAdminButton = isAuthenticated && userRole === 'UNIVERSITY_COUNCIL' // '총학생회'
-  const visibleChats = activeChats.length > 0 ? activeChats : [] 
-
-  const formatMessageTime = (value?: string | number) => {
-    if (!value) return ''
-    const date = typeof value === 'number' ? new Date(value) : new Date(value)
-    if (Number.isNaN(date.getTime())) return ''
-    return new Intl.DateTimeFormat('ko-KR', { hour: 'numeric', minute: '2-digit' }).format(date)
+  const handleSelectChat = (chat: ActiveChat) => {
+    setSelectedChatId(chat.id)
+    setSelectedChatTitle(chat.title ?? '채팅방')
+    setChatMessages([])
+    setChatError(null)
   }
 
   const loadMessages = async (chatIdToLoad: string) => {
     try {
       setChatLoading(true)
       setChatError(null)
+      setHasMoreMessages(true)
       const data = await apiFetch<ChatPageMessage[]>('/chat/load', {
         method: 'POST',
         json: { chatId: chatIdToLoad, lastTime: new Date().toISOString() },
       })
       if (Array.isArray(data)) {
         setChatMessages(data.reverse())
+        if (data.length < 20) setHasMoreMessages(false)
+        setTimeout(scrollToBottom, 100) 
       } else {
         setChatMessages([])
+        setHasMoreMessages(false)
       }
     } catch (err) {
       console.error('Failed to load messages', err)
@@ -259,17 +256,44 @@ const HomePage = () => {
     }
   }
 
+  const loadMoreMessages = async () => {
+    if (!selectedChatId || isLoadingMore || !hasMoreMessages || chatMessages.length === 0) return
+
+    const firstMessageTime = chatMessages[0].createdTime
+    const container = document.querySelector('.home-chat__thread-wrapper') as HTMLDivElement
+    const prevScrollHeight = container?.scrollHeight ?? 0
+
+    try {
+      setIsLoadingMore(true)
+      const data = await apiFetch<ChatPageMessage[]>('/chat/load', {
+        method: 'POST',
+        json: { chatId: selectedChatId, lastTime: firstMessageTime },
+      })
+      if (Array.isArray(data) && data.length > 0) {
+        const newMessages = data.reverse()
+        setChatMessages((prev) => [...newMessages, ...prev])
+        
+        setTimeout(() => {
+            if (container) {
+                container.scrollTop = container.scrollHeight - prevScrollHeight
+            }
+        }, 0)
+
+        if (data.length < 20) setHasMoreMessages(false)
+      } else {
+        setHasMoreMessages(false)
+      }
+    } catch (err) {
+      console.error('Failed to load older messages', err)
+    } finally {
+      setIsLoadingMore(false)
+    }
+  }
+
   useEffect(() => {
     if (!selectedChatId || !isAuthenticated) return
     loadMessages(selectedChatId)
   }, [selectedChatId, isAuthenticated])
-
-  const handleSelectChat = (chat: ActiveChat) => {
-    setSelectedChatId(chat.id)
-    setSelectedChatTitle(chat.title ?? '채팅방')
-    setChatMessages([])
-    setChatError(null)
-  }
 
   const handleChatSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -295,9 +319,11 @@ const HomePage = () => {
     setChatInput('')
     setChatSending(true)
     setChatError(null)
+    
+    setTimeout(scrollToBottom, 0)
 
     try {
-      await apiFetch('/chat/msg', {
+      const reply = await apiFetch<ChatPageMessage>('/chat/msg', {
         method: 'POST',
         json: {
           id: newMsg.id,
@@ -307,7 +333,11 @@ const HomePage = () => {
           createdTime: newMsg.createdTime,
         },
       })
-      await loadMessages(selectedChatId)
+      
+      if (reply) {
+        setChatMessages((prev) => [...prev, reply])
+        setTimeout(scrollToBottom, 0)
+      }
     } catch (err) {
       console.error('Failed to send message', err)
       setChatError('메시지를 전송하지 못했습니다.')
@@ -316,6 +346,27 @@ const HomePage = () => {
     } finally {
       setChatSending(false)
     }
+  }
+
+  const isHeroPrimaryDisabled = isAuthenticated && isNewChatDisabled
+  const displayName = isAuthenticated ? userName ?? '로그인 사용자' : '게스트'
+  const fallbackDept = departments[0]?.major?.majorname ?? (userRole === 'UNIVERSITY_COUNCIL' ? '총학생회' : null) // 우선 디폴트로 총학생회.
+  const displayDept = departmentName ?? fallbackDept 
+  const roleLabelMap: Record<UserRole, string> = {
+    STUDENT: '일반학생',
+    DEPARTMENT_COUNCIL: '학생회',
+    UNIVERSITY_COUNCIL: '총학생회',
+  }
+  const roleLabel = roleLabelMap[userRole] // '일반학생'
+  const showDeptAdminButton = isAuthenticated && userRole === 'DEPARTMENT_COUNCIL' // '학생회'
+  const showUnivAdminButton = isAuthenticated && userRole === 'UNIVERSITY_COUNCIL' // '총학생회'
+  const visibleChats = activeChats.length > 0 ? activeChats : [] 
+
+  const formatMessageTime = (value?: string | number) => {
+    if (!value) return ''
+    const date = typeof value === 'number' ? new Date(value) : new Date(value)
+    if (Number.isNaN(date.getTime())) return ''
+    return new Intl.DateTimeFormat('ko-KR', { hour: 'numeric', minute: '2-digit' }).format(date)
   }
 
   return (
@@ -443,7 +494,15 @@ const HomePage = () => {
               </div>
             </div>
 
-            <div className="home-chat__thread-wrapper">
+            <div
+              className="home-chat__thread-wrapper"
+              onScroll={(e) => {
+                const target = e.currentTarget
+                if (target.scrollTop === 0 && hasMoreMessages && !isLoadingMore) {
+                  loadMoreMessages()
+                }
+              }}
+            >
               {chatLoading ? (
                 <p className="home-chat__status">채팅을 불러오는 중...</p>
               ) : chatError ? (
@@ -454,6 +513,7 @@ const HomePage = () => {
                 <div className="home-chat__empty">아직 메시지가 없습니다. 첫 메시지를 보내보세요.</div>
               ) : (
                 <ul className="chat-bubbles">
+                  {isLoadingMore && <li className="home-chat__status"><small>이전 대화 불러오는 중...</small></li>}
                   {chatMessages.map((message) => {
                     const messageTime = formatMessageTime(message.createdTime)
                     return (
@@ -466,6 +526,7 @@ const HomePage = () => {
                       </li>
                     )
                   })}
+                  <div ref={messagesEndRef} />
                 </ul>
               )}
             </div>
@@ -476,6 +537,12 @@ const HomePage = () => {
                 placeholder={isAuthenticated ? '무엇이든 입력하세요' : '로그인 후 이용 가능합니다'}
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    handleChatSubmit(event as any) // FormEvent<HTMLFormElement> 타입에 맞춰 캐스팅
+                  }
+                }}
                 rows={3}
                 disabled={chatSending || !isAuthenticated || !selectedChatId}
               />

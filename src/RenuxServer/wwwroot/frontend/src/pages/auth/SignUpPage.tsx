@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch, type ApiError } from '../../api/client'
 import type { MajorOption, RoleOption, ApiMessageResponse } from '../../types/user'
 
@@ -8,6 +8,7 @@ type IdStatus = 'available' | 'unavailable' | null
 type PasswordStatus = 'match' | 'mismatch' | null
 
 const SignUpPage = () => {
+  const navigate = useNavigate()
   const [userId, setUserId] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
@@ -141,7 +142,7 @@ const SignUpPage = () => {
         },
       })
       window.alert('회원가입이 성공적으로 완료되었습니다!')
-      window.location.href = '/auth/in'
+      navigate('/auth/in')
     } catch (submitError) {
       console.error('회원가입 실패:', submitError)
       if (submitError && typeof submitError === 'object' && 'status' in submitError) {
