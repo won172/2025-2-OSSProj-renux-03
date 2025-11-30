@@ -8,3 +8,4 @@ RenuxServer.csproj.user
 .DS_Store
 **/.DS_Store
 **/huggingface_cache
+src/RAG/artifacts/db_chroma/chroma.sqlite3

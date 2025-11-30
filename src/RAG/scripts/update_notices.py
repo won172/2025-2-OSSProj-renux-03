@@ -34,7 +34,12 @@ def _run_once(boards: list[str], max_pages: int | None, delay: float) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Dongguk notice crawler + incremental index updater")
-    parser.add_argument("--max-pages", type=int, default=3, help="Number of pages per board to fetch (default: 3)")
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=5,
+        help="Number of pages per board to fetch (default: 5)",
+    )
     parser.add_argument("--delay", type=float, default=0.2, help="Delay between detail requests in seconds")
     parser.add_argument(
         "--boards",

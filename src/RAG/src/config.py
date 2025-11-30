@@ -24,11 +24,11 @@ EMBED_DEVICE = os.getenv("EMBED_DEVICE", "cpu")
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "8"))
 
 # 청크 분할과 검색 기본값.
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
-CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "120"))
-HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.4"))
-DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "5"))
-RECENCY_WEIGHT = float(os.getenv("RECENCY_WEIGHT", "0.7")) # Re-ranking 가중치 추가
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "300")) # 청크 크기 기본값
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "80")) # 청크 겹침 기본값
+HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.4")) # 하이브리드 검색 가중치 기본값
+DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "10")) # 검색 결과 개수 기본값
+RECENCY_WEIGHT = float(os.getenv("RECENCY_WEIGHT", "0.4")) # Re-ranking 가중치 추가
 
 # 컨텍스트 관련 설정
 MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "8000"))
