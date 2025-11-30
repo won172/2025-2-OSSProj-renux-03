@@ -37,6 +37,35 @@ def add_items(
         embeddings=list(embeddings),
     )
 
+def upsert_items(
+    name: str,
+    ids: Iterable[str],
+    documents: Iterable[str],
+    metadatas: Iterable[Mapping[str, object]],
+    embeddings,
+) -> None:
+    """지정된 Chroma 컬렉션에 항목을 추가하거나 업데이트합니다 (ID 기준)."""
+    collection = get_collection(name)
+    collection.upsert(
+        ids=list(ids),
+        documents=list(documents),
+        metadatas=list(metadatas),
+        embeddings=list(embeddings),
+    )
+
+def delete_items(name: str, ids: Iterable[str]) -> None:
+    """지정된 Chroma 컬렉션에서 항목을 삭제합니다."""
+    collection = get_collection(name)
+    collection.delete(ids=list(ids))
+
+
+def get_all_ids(name: str) -> list[str]:
+    """지정된 Chroma 컬렉션에 저장된 모든 문서의 ID를 반환합니다."""
+    collection = get_collection(name)
+    # include=[]를 전달하여 메타데이터나 문서를 가져오지 않고 ID만 빠르게 조회
+    result = collection.get(include=[]) 
+    return result.get("ids", [])
+
 
 def reset_collection(name: str) -> None:
     """컬렉션을 삭제한 뒤 다시 만들어 재빌드에 활용합니다."""
@@ -48,4 +77,4 @@ def reset_collection(name: str) -> None:
     client.create_collection(name=name)
 
 
-__all__ = ["get_client", "get_collection", "add_items", "reset_collection"]
+__all__ = ["get_client", "get_collection", "add_items", "upsert_items", "delete_items", "get_all_ids", "reset_collection"]

@@ -27,7 +27,7 @@ def _build_chain() -> RunnableWithMessageHistory:
         [
             (
                 "system",
-                "당신은 동국대학교 캠퍼스 정보를 제공하는 친절하고 간결한 어시스턴트입니다. 제공된 [컨텍스트]를 바탕으로 사용자의 [질문]에 대해 핵심 정보를 명확하고 간단하게 요약하여 한국어로 답변하세요. 만약 컨텍스트에 여러 날짜의 정보가 있다면, 가장 최신 날짜의 정보를 우선적으로 사용하세요. 컨텍스트에 답변이 없으면 '정보를 찾을 수 없습니다.'라고만 답하세요.\n\n[컨텍스트]\n{context}\n",
+                "당신은 동국대학교 AI 어시스턴트 '동똑이'입니다. 오늘 날짜: {current_date}\n\n[지침]\n1. [컨텍스트] 내용만으로 답변하세요. 없는 정보는 지어내지 마세요.\n2. 답변에서 특정 정보를 언급할 때, 그 정보의 출처 URL이 [컨텍스트]에 있다면 해당 설명 바로 아래에 \"URL: (링크주소)\" 형식으로 적어주세요. 절대 마크다운 링크([텍스트](URL))로 변환하지 말고 주소만 그대로 쓰세요.\n3. 친절한 한국어(해요체)로 답변하세요.\n4. 절차나 방법은 번호를 매겨 단계별로 설명하세요.\n5. 정보가 없으면 정중히 사과하고 재검색을 유도하세요.\n6. {current_date} 기준 최신 정보를 우선하세요.\n7. 답변에 볼드체(**) 등 마크다운 서식을 절대 사용하지 마세요.\n8. 이전 대화 맥락을 고려하되, 현재 질문이 주제가 바뀌었다면 이전 내용은 무시하고 현재 질문에 집중하세요.\n9. 질문에 '최근', '어제' 등 시간 표현이 있다면, 제공된 [컨텍스트] 내 문서의 '게시일'과 현재 날짜({current_date})를 비교하여 정확히 계산하고 답변하세요.\n\n[컨텍스트]\n{context}",
             ),
             MessagesPlaceholder(variable_name="history"),
             ("human", "{question}"),
@@ -45,12 +45,13 @@ def _build_chain() -> RunnableWithMessageHistory:
     )
 
 
-def generate_langchain_answer(question: str, context: str, session_id: str | None = None) -> str:
+def generate_langchain_answer(question: str, context: str, session_id: str | None = None, current_date: str = "") -> str:
     """LangChain 메시지 이력을 활용해 답변을 생성합니다."""
     chain = _build_chain()
     payload = {
         "question": question,
         "context": context or "컨텍스트가 제공되지 않았습니다.",
+        "current_date": current_date, 
     }
     config = {"configurable": {"session_id": session_id or "default_session"}}
     return chain.invoke(payload, config=config)

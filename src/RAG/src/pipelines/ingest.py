@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 import json
+import argparse # argparse 추가
 
 import pandas as pd
 import re
@@ -24,7 +25,7 @@ from src.utils.preprocess import (
     make_doc_id,
     to_chunks,
 )
-from src.vectorstore.chroma_client import add_items, reset_collection
+from src.vectorstore.chroma_client import add_items, reset_collection, upsert_items, get_all_ids, delete_items
 from src.database import (
     SessionLocal, engine, init_db,
     Notice, Rule, Schedule, Course, Chunk
@@ -73,13 +74,25 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
 
     embeddings = encode_texts(chunks_df["chunk_text"].tolist())
 
-    reset_collection(collection)
-    
     # 메타데이터 준비 (None 처리)
     metadatas = chunks_df.drop(columns=["chunk_text"]).to_dict(orient="records")
     metadatas = [{k: (v if v is not None else "") for k, v in m.items()} for m in metadatas]
 
-    add_items(
+    # 1. 기존 ID 목록 가져오기
+    existing_ids = set(get_all_ids(collection))
+    
+    # 2. 새로운 ID 목록
+    new_ids = set(chunks_df["chunk_id"].astype(str))
+    
+    # 3. 삭제할 ID 계산 (기존에는 있었으나 이번엔 없는 것)
+    ids_to_delete = list(existing_ids - new_ids)
+    
+    if ids_to_delete:
+        print(f"🗑️ Deleting {len(ids_to_delete)} obsolete chunks from {collection}")
+        delete_items(collection, ids_to_delete)
+
+    # 4. 추가 및 업데이트 (Upsert)
+    upsert_items(
         collection,
         ids=chunks_df["chunk_id"],
         documents=chunks_df["chunk_text"],
@@ -153,6 +166,13 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
         published = row.get("clean_date")
         doc_id = make_doc_id(row.get(column["title"]), row.get(column["topic"]), published)
         
+        # attachments 리스트를 JSON 문자열로 변환
+        raw_attachments = row.get(column["attachment"], [])
+        if isinstance(raw_attachments, list):
+            attachments_str = json.dumps(raw_attachments, ensure_ascii=False)
+        else:
+            attachments_str = str(raw_attachments)
+
         docs.append(
             {
                 "doc_id": doc_id,
@@ -161,7 +181,7 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 "topics": row.get(column["topic"], ""),
                 "published_at": published or "",
                 "url": row.get(column["url"], ""),
-                "attachments": row.get(column["attachment"], ""),
+                "attachments": attachments_str,
                 "source": "notices",
                 "notice_id": row.get("db_id"), # DB ID from ingest_notices
             }
@@ -302,11 +322,21 @@ def build_schedule_chunks(df: pd.DataFrame) -> pd.DataFrame:
         if not obj: continue
 
         doc_id = make_doc_id("schedule", obj.start_date, obj.end_date, obj.content)
+        
+        # 날짜 정보 텍스트에 포함
+        date_str = f"{obj.start_date}"
+        if obj.end_date and obj.end_date != obj.start_date:
+            date_str += f" ~ {obj.end_date}"
+        
+        rich_text = f"{obj.content}\n\n기간: {date_str}"
+        if obj.department:
+            rich_text += f"\n\n주관부서: {obj.department}"
+
         docs.append(
             {
                 "doc_id": doc_id,
                 "title": obj.title,
-                "text": obj.content,
+                "text": rich_text,
                 "schedule_start": obj.start_date,
                 "schedule_end": obj.end_date,
                 "category": obj.category,
@@ -387,7 +417,7 @@ def ingest_schedule() -> Tuple[pd.DataFrame, object, object]:
 
 def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
     docs: List[dict] = []
-    ignored_exact = {"_source_table", "db_id", "db_object"}
+    ignored_exact = {"_source_table", "db_id", "db_object", "major"}
     title_candidates = ["국문교과목명", "과목명", "course_name", "교과목명", "title", "교과목"]
     
     for _, row in combined.iterrows():
@@ -423,7 +453,8 @@ def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
                 "source": "courses",
                 "url": "",
                 "published_at": "",
-                "course_id": db_id
+                "course_id": db_id,
+                "major": row.get("major", ""), # 메타데이터에 major 추가
             }
         )
 
@@ -437,20 +468,25 @@ def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
 
 
 def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
-    paths = [DATA_SOURCES["courses_desc"], DATA_SOURCES["courses_major"]]
-    frames: List[pd.DataFrame] = []
-    for key, path in zip(["description", "major"], paths):
-        if not path.exists():
-            continue
-        df = pd.read_csv(path).fillna("").astype(str)
-        df["_source_table"] = key
-        frames.append(df)
+    desc_path = DATA_SOURCES["courses_desc"]
+    major_path = DATA_SOURCES["courses_major"]
 
-    if not frames:
+    if not desc_path.exists() or not major_path.exists():
         raise FileNotFoundError("Course CSV files are missing.")
 
-    combined = pd.concat(frames, ignore_index=True)
-    
+    # 1. 두 데이터셋 로드
+    desc_df = pd.read_csv(desc_path).fillna("").astype(str)
+    major_df = pd.read_csv(major_path).fillna("").astype(str)
+
+    # 2. '학수번호' 기준으로 병합 (Outer join으로 누락 방지)
+    # suffixes는 충돌 시 붙는데, 여기서는 서로 다른 컬럼이 많아 유용함.
+    combined = pd.merge(major_df, desc_df, on="학수번호", how="outer", suffixes=("", "_desc"))
+    combined = combined.fillna("")
+
+    # 3. 메타데이터 및 공통 필드 정리
+    combined["_source_table"] = "combined_statistics"
+    combined["major"] = "통계학과"
+
     session = SessionLocal()
     try:
         session.query(Chunk).filter(Chunk.course_id.isnot(None)).delete()
@@ -458,23 +494,26 @@ def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
         session.commit()
         
         course_objs = []
-        title_candidates = ["국문교과목명", "과목명", "course_name", "교과목명", "title", "교과목"]
+        title_candidates = ["교과목명", "국문교과목명", "course_name", "title", "교과목"]
         
         for _, row in combined.iterrows():
+            # 제목 찾기 (교과목명 우선, 없으면 국문교과목명 등)
             title = next((str(row.get(col, "")).strip() for col in title_candidates if str(row.get(col, "")).strip()), "통계학과 교과")
             code = str(row.get("학수번호", "")).strip()
             
-            # Pandas Series를 dict로 변환 시 int64 등이 json serializable 하지 않을 수 있음
+            # 전체 데이터를 JSON으로 저장
             row_dict = row.to_dict()
-            # 간단한 타입 변환
             safe_dict = {k: str(v) for k, v in row_dict.items()}
             raw_json = json.dumps(safe_dict, ensure_ascii=False)
             
+            # 해설(Description) 필드 확보
+            description = str(row.get("해설", "")).strip()
+
             obj = Course(
                 course_code=code, title=title, 
                 source_table=row.get("_source_table"),
                 raw_data=raw_json,
-                description="" 
+                description=description
             )
             course_objs.append(obj)
             
@@ -502,11 +541,156 @@ def ingest_all() -> Dict[str, Tuple[pd.DataFrame, object, object]]:
     return results
 
 
+def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, object, object]]:
+    """SQLite DB에 저장된 데이터를 기반으로 ChromaDB 인덱스와 TF-IDF를 재구축합니다."""
+    session = SessionLocal()
+    results = {}
+    
+    try:
+        # 1. Notices
+        if not target or target == "notices":
+            print("🔄 Re-indexing notices from DB...")
+            query = session.query(Chunk, Notice).join(Notice, Chunk.notice_id == Notice.id)
+            data = []
+            for chunk, notice in query.all():
+                # attachments 리스트 처리 (문자열로 저장된 것을 다시 파싱하거나 그대로 사용)
+                # ingest 시 json.dumps로 저장했을 수 있으므로 확인 필요. 
+                # 여기서는 이미 문자열로 DB에 저장되어 있다고 가정하고 그대로 사용.
+                data.append({
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_text": chunk.chunk_text,
+                    "title": notice.title,
+                    "topics": notice.board,
+                    "published_at": notice.published_date,
+                    "url": notice.detail_url,
+                    "attachments": notice.attachments,
+                    "source": "notices",
+                    "notice_id": notice.id
+                })
+            if data:
+                df = pd.DataFrame(data)
+                results["notices"] = _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, df)
+        
+        # 2. Rules
+        if not target or target == "rules":
+            print("🔄 Re-indexing rules from DB...")
+            query = session.query(Chunk, Rule).join(Rule, Chunk.rule_id == Rule.id)
+            data = []
+            for chunk, rule in query.all():
+                data.append({
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_text": chunk.chunk_text,
+                    "title": rule.filename,
+                    "topics": "규정",
+                    "relative_dir": rule.relative_dir,
+                    "filename": rule.filename,
+                    "source": "rules",
+                    "url": "",
+                    "published_at": "",
+                    "rule_id": rule.id
+                })
+            if data:
+                df = pd.DataFrame(data)
+                results["rules"] = _persist_chunks("rules", DATASET_ARTIFACTS["rules"].collection, df)
+
+        # 3. Schedule
+        if not target or target == "schedule":
+            print("🔄 Re-indexing schedule from DB...")
+            query = session.query(Chunk, Schedule).join(Schedule, Chunk.schedule_id == Schedule.id)
+            data = []
+            for chunk, sch in query.all():
+                data.append({
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_text": chunk.chunk_text,
+                    "title": sch.title,
+                    "schedule_start": sch.start_date,
+                    "schedule_end": sch.end_date,
+                    "category": sch.category,
+                    "department": sch.department,
+                    "topics": sch.category or "schedule",
+                    "source": "schedule",
+                    "url": "",
+                    "published_at": sch.start_date,
+                    "schedule_id": sch.id
+                })
+            if data:
+                df = pd.DataFrame(data)
+                results["schedule"] = _persist_chunks("schedule", DATASET_ARTIFACTS["schedule"].collection, df)
+
+        # 4. Courses
+        if not target or target == "courses":
+            print("🔄 Re-indexing courses from DB...")
+            query = session.query(Chunk, Course).join(Course, Chunk.course_id == Course.id)
+            data = []
+            for chunk, course in query.all():
+                # Course의 raw_data(JSON)에서 major 정보 등을 추출해야 할 수도 있음
+                # 여기서는 간단하게 필수 필드만 구성
+                try:
+                    raw_data = json.loads(course.raw_data) if course.raw_data else {}
+                except:
+                    raw_data = {}
+                
+                data.append({
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_text": chunk.chunk_text,
+                    "title": course.title,
+                    "course_code": course.course_code,
+                    "source_table": course.source_table,
+                    "topics": course.source_table,
+                    "source": "courses",
+                    "url": "",
+                    "published_at": "",
+                    "course_id": course.id,
+                    "major": raw_data.get("major", "") # raw_data에서 major 추출 시도
+                })
+            if data:
+                df = pd.DataFrame(data)
+                results["courses"] = _persist_chunks("courses", DATASET_ARTIFACTS["courses"].collection, df)
+
+    finally:
+        session.close()
+        
+    return results
+
+
 def main() -> None:
     # CLI 실행 시 초기화
     init_db()
-    artifacts = ingest_all()
-    for key, (chunks_df, _, _) in artifacts.items():
+    
+    parser = argparse.ArgumentParser(description="RAG Data Ingestion Pipeline")
+    parser.add_argument(
+        "--target",
+        type=str,
+        choices=["notices", "rules", "schedule", "courses"],
+        help="Specify a single dataset to ingest (e.g., notices). If omitted, all datasets are ingested.",
+    )
+    parser.add_argument(
+        "--from-db",
+        action="store_true",
+        help="Rebuild index from SQLite database instead of raw CSV files.",
+    )
+    args = parser.parse_args()
+
+    results = {}
+    
+    if args.from_db:
+        print("🚀 Starting Re-indexing from SQLite DB...")
+        results = reindex_from_db(args.target)
+    elif args.target:
+        print(f"🚀 Ingesting only: {args.target}")
+        if args.target == "notices":
+            results["notices"] = ingest_notices()
+        elif args.target == "rules":
+            results["rules"] = ingest_rules()
+        elif args.target == "schedule":
+            results["schedule"] = ingest_schedule()
+        elif args.target == "courses":
+            results["courses"] = ingest_courses()
+    else:
+        print("🚀 Ingesting ALL datasets...")
+        results = ingest_all()
+
+    for key, (chunks_df, _, _) in results.items():
         print(f"✅ {key}: {len(chunks_df)} chunks indexed")
 
 

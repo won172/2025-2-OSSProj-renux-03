@@ -18,7 +18,8 @@ BOARD_CODES = {
     "학사공지": "HAKSANOTICE",
     "장학공지": "JANGHAKNOTICE",
     "입학공지": "IPSINOTICE",
-    "국제공지": "GLOBALNOLTICE",
+    "국제교류공지": "INTEXNOTICE",
+    "유학생공지": "INTSTUNOTICE",
     "학술공지": "HAKSULNOTICE",
     "안전공지": "SAFENOTICE",
     "행사공지": "BUDDHISTEVENT",
@@ -48,8 +49,8 @@ COLUMN_LABELS = {
     "attachments": "첨부파일",
 }
 TARGET_BOARDS = list(BOARD_CODES.keys())
-DEFAULT_MAX_PAGES = 5
-DEFAULT_REQUEST_DELAY = 0.2
+DEFAULT_MAX_PAGES = 10 # 5 -> 30으로 증가 (더 많은 과거 공지 수집)
+DEFAULT_REQUEST_DELAY = 0.5
 
 PARSER_CANDIDATES: Iterable[str] = ("lxml", "html5lib", "html.parser")
 HWPJSON_SECTION_PATTERN = re.compile(r"<!\[[^<]*?data-hwpjson.*?\]>", re.IGNORECASE | re.DOTALL)
@@ -230,7 +231,7 @@ def collect_board(
     board_code: str,
     max_pages: Optional[int] = None,
     delay: float = DEFAULT_REQUEST_DELAY,
-    earliest_year: int = 2024,
+    earliest_year: int = 2024, # 2024 -> 2023으로 변경
 ) -> pd.DataFrame:
     records: List[Dict[str, Any]] = []
     seen_ids: set[int] = set()

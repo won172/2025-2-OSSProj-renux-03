@@ -38,6 +38,7 @@ from src.services.notice_classifier import (
 from src.models.embedding import get_embedder
 from src.services.router import route_query
 from src.utils.date_parser import extract_date_range_from_query
+from src.utils.query_expansion import expand_query # 새로 추가
 
 app = FastAPI(
     title="동똑이",
@@ -72,14 +73,16 @@ class SourceChunk(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
-    # citations: str
-    # route: List[str]
-    # sources: List[SourceChunk]
+    citations: str
+    route: List[str]
+    sources: List[SourceChunk]
 
 
 class AskRequest(BaseModel):
     question: str = Field(..., description="사용자 질문")
     session_id: str | None = Field(None, description="대화 세션 ID (없으면 기본 세션)")
+    major: str | None = Field(None, description="사용자 학과") # 새로 추가
+
 
 
 
@@ -167,30 +170,48 @@ def bootstrap_artifacts() -> None:
 
 @app.post("/ask", response_model=AskResponse)
 async def ask(req: AskRequest) -> AskResponse:
-    query = req.question.strip()
-    if not query:
+    raw_query = req.question.strip()
+    if not raw_query:
         raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
 
-    session_id = req.session_id or str(uuid.uuid4())
-    logging.info(f"Received question: '{query}' for session: '{session_id}'") 
-    route = await route_query(query)
-    frames: List[pd.DataFrame] = []
+    # 쿼리 확장 로직 적용
+    query = expand_query(raw_query)
+    logging.info(f"Original query: '{raw_query}', Expanded query: '{query}'")
 
+    session_id = req.session_id or str(uuid.uuid4())
+
+    # 로그에 처리된 질문과 세션 ID를 출력하여 디버깅을 돕습니다.
+    logging.info(f"session: '{session_id}'")
+
+    user_major = req.major
+    
+    # --- 날짜 및 학과 필터링 로직 ---
+    final_where_filter: Dict = {}
+    
+    # 1. 날짜 범위 필터링 (기존 로직)
     date_range = await run_in_threadpool(extract_date_range_from_query, query)
-    where_filter: Dict | None = None
     if date_range:
         start_date_str = date_range[0].strftime('%Y-%m-%d')
         end_date_str = date_range[1].strftime('%Y-%m-%d')
         
-        _filter = {}
-        if "notices" in route or "schedule" in route:
-            _filter["published_at"] = {"$gte": start_date_str, "$lte": end_date_str}
-        elif "rules" in route:
-            _filter["updated_at"] = {"$gte": start_date_str, "$lte": end_date_str}
-        
-        if _filter:
-            where_filter = _filter
+        # 'notices', 'schedule', 'rules'는 'published_at' 또는 'updated_at' 필터 가능
+        # 'courses'는 날짜 필터링이 일반적이지 않으므로 제외
+        final_where_filter["published_at"] = {"$gte": start_date_str, "$lte": end_date_str} # 모든 데이터셋에 적용될 수 있는 임시 키
+    
+    # 2. 학과 필터링 (새로운 로직)
+    if user_major and user_major != "Default": # 'Default'는 RenuxServer의 기본값, 실제 학과명일 때만 적용
+        # 주의: ChromaDB의 메타데이터에 'major' 필드가 존재하고,
+        # 해당 필드에 정확한 학과명이 저장되어 있어야 필터링이 작동합니다.
+        # 데이터 수집 시 메타데이터에 학과 정보가 포함되어야 합니다.
+        final_where_filter["major"] = {"$eq": user_major} # 예시: 메타데이터에 'major' 필드가 있다고 가정
 
+    # 로깅 추가 (디버깅 용이)
+    logging.info(f"Applying filters: {final_where_filter}")
+    
+    route = await route_query(query)
+    frames: List[pd.DataFrame] = []
+
+    # 각 데이터셋별로 필터를 적용
     for dataset in route:
         try:
             chunks_df, vectorizer, matrix = await run_in_threadpool(_ensure_dataset, dataset)
@@ -199,7 +220,20 @@ async def ask(req: AskRequest) -> AskResponse:
 
         artifacts = DATASET_ARTIFACTS[dataset]
         
-        current_where_filter = where_filter if dataset in ["notices", "rules", "schedule"] else None
+        # 데이터셋별로 적용될 필터 조정
+        current_dataset_filter = final_where_filter.copy()
+        
+        # 날짜 필터: notices, schedule, rules만 지원
+        if dataset not in ["notices", "schedule", "rules"]:
+            current_dataset_filter.pop("published_at", None)
+            
+        # 학과 필터: courses만 지원 (현재 구현상)
+        if dataset != "courses":
+            current_dataset_filter.pop("major", None)
+            
+        # 필터가 비어있으면 None으로 설정
+        final_filter = current_dataset_filter if current_dataset_filter else None
+            
         
         search_func = functools.partial(
             hybrid_search_with_meta,
@@ -210,9 +244,11 @@ async def ask(req: AskRequest) -> AskResponse:
             query=query,
             top_k=DEFAULT_TOP_K * 3,
             alpha=HYBRID_ALPHA,
-            where_filter=current_where_filter,
+            where_filter=final_filter, # 수정된 필터 전달
         )
         hits = await run_in_threadpool(search_func)
+        
+        logging.info(f"Dataset: {dataset}, Filter: {final_filter}, Hits: {len(hits)}")
 
         if not hits.empty:
             hits["dataset"] = dataset
@@ -258,9 +294,27 @@ async def ask(req: AskRequest) -> AskResponse:
 
     merged = merged.head(DEFAULT_TOP_K).reset_index(drop=True)
 
-    context_text = "\n\n---\n\n".join(merged["chunk_text"].tolist())
-    context_text = context_text[:MAX_CONTEXT_LENGTH]
-    answer = await run_in_threadpool(generate_langchain_answer, query, context_text, session_id=session_id)
+    context_parts = []
+    for idx, row in merged.iterrows():
+        part = f"문서 {idx+1} [출처: {row.get('source', '알 수 없음')}]:\n"
+        if row.get('title'):
+            part += f"제목: {row.get('title')}\n"
+        if row.get('published_at'): # 공지사항, 일정 등 날짜 정보가 있는 경우
+            part += f"게시일: {row.get('published_at')}\n"
+        if row.get('url'): # URL 정보가 있는 경우
+            part += f"URL: {row.get('url')}\n"
+        part += f"내용:\n{row['chunk_text']}\n"
+        context_parts.append(part)
+    
+    context_text = "\n\n---\n\n".join(context_parts)
+    context_text = context_text[:MAX_CONTEXT_LENGTH] # 최대 길이 제한 유지
+    
+    # LLM에게 현재 날짜를 전달하여 "오늘", "이번 학기" 등의 표현을 해석하도록 돕습니다.
+    current_date = datetime.utcnow().strftime('%Y년 %m월 %d일')
+    answer = await run_in_threadpool(generate_langchain_answer, query, context_text, session_id=session_id, current_date=current_date)
+    
+    # 후처리: 볼드체(**) 서식 강제 제거
+    answer = answer.replace("**", "")
     
     citations_raw = await run_in_threadpool(format_citations, merged)
     citations = re.sub(r'<[^>]+>', '', citations_raw)

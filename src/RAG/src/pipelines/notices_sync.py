@@ -7,10 +7,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from src.database import engine
-from src.models.embedding import encode_texts
-from src.pipelines.ingest import build_notice_chunks, DATASET_ARTIFACTS
-from src.search.hybrid import train_tfidf
-from src.vectorstore.chroma_client import add_items
+from src.pipelines.ingest import build_notice_chunks, reindex_from_db # reindex_from_db 추가
 
 
 def get_existing_notice_urls() -> set[str]:
@@ -83,25 +80,6 @@ def save_chunks_to_db(generated_chunks: pd.DataFrame, saved_notices: pd.DataFram
     chunks_to_save.to_sql("chunks", con=engine, if_exists="append", index=False)
 
 
-def update_chroma_and_retrain_tfidf(new_chunks: pd.DataFrame):
-    """새로운 청크로 ChromaDB를 업데이트하고, 전체 청크로 TF-IDF를 재학습합니다."""
-    # ChromaDB 업데이트
-    if not new_chunks.empty:
-        embeddings = encode_texts(new_chunks["chunk_text"].tolist())
-        add_items(
-            DATASET_ARTIFACTS["notices"].collection,
-            ids=new_chunks["chunk_id"],
-            documents=new_chunks["chunk_text"],
-            metadatas=new_chunks.drop(columns=["chunk_text"]).to_dict(orient="records"),
-            embeddings=embeddings,
-        )
-
-    # TF-IDF 재학습 (DB의 모든 청크 사용)
-    all_chunks_df = pd.read_sql("SELECT chunk_text FROM chunks", engine)
-    if not all_chunks_df.empty:
-        train_tfidf("notices", all_chunks_df["chunk_text"].tolist())
-
-
 def sync_notices(incoming_df: pd.DataFrame) -> int:
     """
     새 공지를 DB에 저장하고, 청크 생성 및 DB 저장,
@@ -134,8 +112,10 @@ def sync_notices(incoming_df: pd.DataFrame) -> int:
     save_chunks_to_db(generated_chunks, saved_notices_df)
     print(f"{len(generated_chunks)}개의 신규 청크를 데이터베이스에 저장했습니다.")
 
-    # 5. ChromaDB 업데이트 및 TF-IDF 재학습
-    update_chroma_and_retrain_tfidf(generated_chunks)
+    # 5. ChromaDB 업데이트 및 TF-IDF 재학습 (DB 기반 재색인)
+    # 이제 CSV가 아닌 DB에 저장된 청크 데이터를 기반으로 인덱스를 업데이트합니다.
+    # 증분 색인(upsert/delete) 로직이 reindex_from_db 내부에 구현되어 있습니다.
+    reindex_from_db("notices")
     print("ChromaDB 인덱스와 TF-IDF 모델을 업데이트했습니다.")
 
     return len(saved_notices_df)

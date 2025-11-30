@@ -58,7 +58,6 @@ def run(dataset: str, query: str, top_k: int, alpha: float) -> None:
     answer, citations = answer_with_citations(query, hits)
     print("Q:", query)
     print("A:", answer)
-    print("\nSources:\n", citations)
 
 
 def main() -> None:
