@@ -46,7 +46,7 @@
         * 회원가입/로그인: 학생 인증을 통한 맞춤형 서비스 제공 기반 마련.
         * 채팅 내역 관리: 과거 대화 내용을 저장하고 조회할 수 있는 기능.
 
-![Renux Chatbot Screenshot](doc/동똑이 예시 화면.png)
+![Renux Chatbot Screenshot]("doc/동똑이 예시 화면.png")
 
 ### 3. 프로젝트 추진 내용
 
