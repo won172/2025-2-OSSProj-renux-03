@@ -28,17 +28,15 @@ from src.pipelines.ingest import (
     ingest_notices,
     ingest_rules,
     ingest_schedule,
+    ingest_staff, # 추가
 )
 from src.search.hybrid import load_tfidf, hybrid_search_with_meta
 from src.services.answer import format_citations
 from src.services.langchain_chat import generate_langchain_answer
-from src.services.notice_classifier import (
-    bootstrap_notice_classifier,
-)
 from src.models.embedding import get_embedder
 from src.services.router import route_query
 from src.utils.date_parser import extract_date_range_from_query
-from src.utils.query_expansion import expand_query # 새로 추가
+from src.utils.query_expansion import expand_query
 
 app = FastAPI(
     title="동똑이",
@@ -50,6 +48,7 @@ _DATASET_LOADERS = {
     "rules": ingest_rules,
     "schedule": ingest_schedule,
     "courses": ingest_courses,
+    "staff": ingest_staff, # 추가
 }
 
 @dataclass
@@ -153,13 +152,6 @@ def bootstrap_artifacts() -> None:
             # Ex: raise RuntimeError(f"Critical failure loading dataset {key}") from exc
 
     try:
-        bootstrap_notice_classifier()
-        logging.info("✅ Notice classifier bootstrap process completed.")
-    except Exception as exc:
-        # 이 단계의 실패는 치명적이지 않을 수 있으므로 경고만 로깅합니다.
-        logging.warning(f"⚠️ Notice classifier bootstrap failed: {exc}", exc_info=True)
-
-    try:
         logging.info("⏳ Warming up embedding model...")
         get_embedder()
         logging.info("✅ Embedding model warmup completed.")
@@ -187,26 +179,14 @@ async def ask(req: AskRequest) -> AskResponse:
     
     # --- 날짜 및 학과 필터링 로직 ---
     final_where_filter: Dict = {}
-    
-    # 1. 날짜 범위 필터링 (기존 로직)
     date_range = await run_in_threadpool(extract_date_range_from_query, query)
-    if date_range:
-        start_date_str = date_range[0].strftime('%Y-%m-%d')
-        end_date_str = date_range[1].strftime('%Y-%m-%d')
-        
-        # 'notices', 'schedule', 'rules'는 'published_at' 또는 'updated_at' 필터 가능
-        # 'courses'는 날짜 필터링이 일반적이지 않으므로 제외
-        final_where_filter["published_at"] = {"$gte": start_date_str, "$lte": end_date_str} # 모든 데이터셋에 적용될 수 있는 임시 키
     
-    # 2. 학과 필터링 (새로운 로직)
-    if user_major and user_major != "Default": # 'Default'는 RenuxServer의 기본값, 실제 학과명일 때만 적용
-        # 주의: ChromaDB의 메타데이터에 'major' 필드가 존재하고,
-        # 해당 필드에 정확한 학과명이 저장되어 있어야 필터링이 작동합니다.
-        # 데이터 수집 시 메타데이터에 학과 정보가 포함되어야 합니다.
-        final_where_filter["major"] = {"$eq": user_major} # 예시: 메타데이터에 'major' 필드가 있다고 가정
+    # 1. 학과 필터링 (ChromaDB where 절 사용)
+    if user_major and user_major != "Default": 
+        final_where_filter["major"] = {"$eq": user_major}
 
     # 로깅 추가 (디버깅 용이)
-    logging.info(f"Applying filters: {final_where_filter}")
+    logging.info(f"Applying ChromaDB filters: {final_where_filter}")
     
     route = await route_query(query)
     frames: List[pd.DataFrame] = []
@@ -223,18 +203,13 @@ async def ask(req: AskRequest) -> AskResponse:
         # 데이터셋별로 적용될 필터 조정
         current_dataset_filter = final_where_filter.copy()
         
-        # 날짜 필터: notices, schedule, rules만 지원
-        if dataset not in ["notices", "schedule", "rules"]:
-            current_dataset_filter.pop("published_at", None)
-            
-        # 학과 필터: courses만 지원 (현재 구현상)
+        # 학과 필터: courses만 지원
         if dataset != "courses":
             current_dataset_filter.pop("major", None)
             
         # 필터가 비어있으면 None으로 설정
         final_filter = current_dataset_filter if current_dataset_filter else None
             
-        
         search_func = functools.partial(
             hybrid_search_with_meta,
             collection_name=artifacts.collection,
@@ -244,10 +219,31 @@ async def ask(req: AskRequest) -> AskResponse:
             query=query,
             top_k=DEFAULT_TOP_K * 3,
             alpha=HYBRID_ALPHA,
-            where_filter=final_filter, # 수정된 필터 전달
+            where_filter=final_filter,
         )
         hits = await run_in_threadpool(search_func)
         
+        # 2. 날짜 필터링 (Pandas DataFrame 후처리)
+        # ChromaDB의 복합 연산자 제한을 피하기 위해 메모리 상에서 필터링
+        if date_range and not hits.empty and dataset in ["notices", "schedule", "rules"]:
+            start_date_str = date_range[0].strftime('%Y-%m-%d')
+            end_date_str = date_range[1].strftime('%Y-%m-%d')
+            
+            # 날짜 컬럼 확인 (published_at 또는 updated_at)
+            # schedule 데이터셋은 'schedule_start' 등을 사용할 수 있으나 
+            # 현재 ingest 로직상 'published_at'에 시작일이 매핑되어 있음.
+            if "published_at" in hits.columns:
+                # 날짜 형식 변환 및 필터링
+                hits["_temp_date"] = pd.to_datetime(hits["published_at"], errors='coerce')
+                # NaT(날짜 없음)는 필터링 대상에서 제외할지 포함할지 결정해야 함. 
+                # 여기서는 날짜 질문이므로 날짜가 있는 것만 남김.
+                hits = hits[
+                    (hits["_temp_date"] >= start_date_str) & 
+                    (hits["_temp_date"] <= end_date_str)
+                ]
+                hits.drop(columns=["_temp_date"], inplace=True)
+                logging.info(f"Date filtered {dataset}: {len(hits)} remaining")
+
         logging.info(f"Dataset: {dataset}, Filter: {final_filter}, Hits: {len(hits)}")
 
         if not hits.empty:
@@ -255,11 +251,10 @@ async def ask(req: AskRequest) -> AskResponse:
             frames.append(hits)
     
     if not frames:
-        # 이 부분은 AskResponse가 아닌 일반 dict를 반환하면 FastAPI에서 자동으로 JSON으로 변환해줍니다.
-        # 하지만, 일관성을 위해 AskResponse를 사용하되, 일부 필드는 비워둡니다.
-        return AskResponse(answer="관련 정보를 찾지 못했습니다.", citations="", route=route, sources=[])
-
-    merged = pd.concat(frames, ignore_index=True)
+        logging.info("No search results found. Falling back to LLM with empty context.")
+        merged = pd.DataFrame()
+    else:
+        merged = pd.concat(frames, ignore_index=True)
     
     if not merged.empty and "hybrid_score" in merged.columns:
         if "published_at" in merged.columns and "updated_at" in merged.columns:
@@ -271,7 +266,9 @@ async def ask(req: AskRequest) -> AskResponse:
         else:
             merged["sort_date"] = pd.NaT
 
-        merged.dropna(subset=["hybrid_score", "sort_date"], inplace=True)
+        # sort_date가 NaT여도 데이터를 버리지 않도록 수정
+        merged.dropna(subset=["hybrid_score"], inplace=True)
+        
         if not merged.empty:
             min_hybrid = merged["hybrid_score"].min()
             max_hybrid = merged["hybrid_score"].max()
@@ -280,12 +277,22 @@ async def ask(req: AskRequest) -> AskResponse:
             else:
                 merged["norm_hybrid"] = 1.0
 
-            min_date = merged["sort_date"].min().timestamp()
-            max_date = merged["sort_date"].max().timestamp()
-            if max_date > min_date:
-                merged["norm_recency"] = (merged["sort_date"].apply(lambda x: x.timestamp()) - min_date) / (max_date - min_date)
+            # 날짜 점수 계산: 날짜가 있는 행만 계산하고 나머지는 0점 처리
+            valid_dates = merged["sort_date"].dropna()
+            if not valid_dates.empty:
+                min_date = valid_dates.min().timestamp()
+                max_date = valid_dates.max().timestamp()
+                
+                # 날짜가 없는 행은 최하점(min_date)으로 채움
+                merged["sort_timestamp"] = merged["sort_date"].apply(lambda x: x.timestamp() if pd.notnull(x) else min_date)
+                
+                if max_date > min_date:
+                    merged["norm_recency"] = (merged["sort_timestamp"] - min_date) / (max_date - min_date)
+                else:
+                    merged["norm_recency"] = 1.0
             else:
-                merged["norm_recency"] = 1.0
+                # 날짜 정보가 아예 없는 데이터셋(예: courses)인 경우 최신성 점수 0 또는 1로 통일 (하이브리드 점수만 반영됨)
+                merged["norm_recency"] = 0.0
             
             merged["final_score"] = (1 - RECENCY_WEIGHT) * merged["norm_hybrid"] + RECENCY_WEIGHT * merged["norm_recency"]
             merged.sort_values(by="final_score", ascending=False, inplace=True)
@@ -306,9 +313,8 @@ async def ask(req: AskRequest) -> AskResponse:
         part += f"내용:\n{row['chunk_text']}\n"
         context_parts.append(part)
     
-    context_text = "\n\n---\n\n".join(context_parts)
-    context_text = context_text[:MAX_CONTEXT_LENGTH] # 최대 길이 제한 유지
-    
+    context_text = "\n\n---\n\n".join(context_parts) if context_parts else "검색된 관련 문서가 없습니다. 일반적인 대화로 응답해주세요."
+    context_text = context_text[:MAX_CONTEXT_LENGTH] # 최대 길이 제한 유지 
     # LLM에게 현재 날짜를 전달하여 "오늘", "이번 학기" 등의 표현을 해석하도록 돕습니다.
     current_date = datetime.utcnow().strftime('%Y년 %m월 %d일')
     answer = await run_in_threadpool(generate_langchain_answer, query, context_text, session_id=session_id, current_date=current_date)

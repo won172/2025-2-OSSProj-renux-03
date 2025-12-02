@@ -30,12 +30,22 @@ def add_items(
 ) -> None:
     """지정된 Chroma 컬렉션에 항목을 추가합니다."""
     collection = get_collection(name)
-    collection.add(
-        ids=list(ids),
-        documents=list(documents),
-        metadatas=list(metadatas),
-        embeddings=list(embeddings),
-    )
+    
+    ids_list = list(ids)
+    documents_list = list(documents)
+    metadatas_list = list(metadatas)
+    embeddings_list = list(embeddings)
+    
+    batch_size = 5000
+    total = len(ids_list)
+    
+    for i in range(0, total, batch_size):
+        collection.add(
+            ids=ids_list[i : i + batch_size],
+            documents=documents_list[i : i + batch_size],
+            metadatas=metadatas_list[i : i + batch_size],
+            embeddings=embeddings_list[i : i + batch_size],
+        )
 
 def upsert_items(
     name: str,
@@ -46,12 +56,22 @@ def upsert_items(
 ) -> None:
     """지정된 Chroma 컬렉션에 항목을 추가하거나 업데이트합니다 (ID 기준)."""
     collection = get_collection(name)
-    collection.upsert(
-        ids=list(ids),
-        documents=list(documents),
-        metadatas=list(metadatas),
-        embeddings=list(embeddings),
-    )
+    
+    ids_list = list(ids)
+    documents_list = list(documents)
+    metadatas_list = list(metadatas)
+    embeddings_list = list(embeddings)
+    
+    batch_size = 5000
+    total = len(ids_list)
+    
+    for i in range(0, total, batch_size):
+        collection.upsert(
+            ids=ids_list[i : i + batch_size],
+            documents=documents_list[i : i + batch_size],
+            metadatas=metadatas_list[i : i + batch_size],
+            embeddings=embeddings_list[i : i + batch_size],
+        )
 
 def delete_items(name: str, ids: Iterable[str]) -> None:
     """지정된 Chroma 컬렉션에서 항목을 삭제합니다."""
