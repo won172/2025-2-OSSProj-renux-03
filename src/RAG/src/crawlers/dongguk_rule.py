@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from zipfile import BadZipFile, ZipFile
@@ -9,13 +10,10 @@ import xml.etree.ElementTree as ET
 
 import pandas as pd
 
-try:
-    import olefile  # type: ignore
-except ImportError:  # pragma: no cover
-    olefile = None
+from src.config import BASE_DIR, DATA_DIR
 
-RULE_ROOT = Path("dongguk_rule")
-OUTPUT_PATH = Path("./data/dongguk_rule_texts.csv")
+RULE_ROOT = BASE_DIR / "dongguk_rule"
+OUTPUT_PATH = DATA_DIR / "dongguk_rule_texts.csv"
 
 
 def list_hwp_files(root: Path) -> List[Path]:
@@ -49,35 +47,52 @@ def extract_text_from_zip_hwp(path: Path) -> Optional[str]:
         return None
 
 
-def extract_text_from_ole_hwp(path: Path) -> Optional[str]:
-    if olefile is None:
-        return None
+def extract_text_using_hwp5txt(path: Path) -> Optional[str]:
+    """
+    Uses the hwp5txt command line tool to extract text from HWP files.
+    Requires 'pyhwp' package to be installed.
+    """
     try:
-        with olefile.OleFileIO(path) as ole:
-            if ole.exists("PrvText"):
-                stream = ole.openstream("PrvText")
-                data = stream.read()
-                if data:
-                    return data.decode("utf-16-le", errors="ignore")
-    except OSError:
+        # Run hwp5txt with output to stdout
+        result = subprocess.run(
+            ["hwp5txt", str(path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        )
+        
+        if result.returncode == 0:
+            return result.stdout
+        else:
+            # If hwp5txt fails, it might output empty string or error
+            return None
+    except FileNotFoundError:
+        # hwp5txt command not found
         return None
-    return None
+    except Exception:
+        return None
 
 
 def extract_text_from_hwp(path: Path) -> Tuple[str, Optional[str], List[str]]:
     failures: List[str] = []
+    
+    # 1. Try hwp5txt (Best method for HWP 5.0)
+    text = extract_text_using_hwp5txt(path)
+    if text and len(text.strip()) > 0:
+        return "hwp5txt", text, failures
+    else:
+        failures.append("hwp5txt_failed")
+
+    # 2. Try zip method (For HWPX or if hwp5txt fails on zip-based format)
     text = extract_text_from_zip_hwp(path)
     if text:
         return "zip", text, failures
+    else:
+        failures.append("zip_failed")
 
-    text = extract_text_from_ole_hwp(path)
-    if text:
-        return "ole", text, failures
-
-    if olefile is None:
-        failures.append("olefile_not_installed")
-    failures.append("unsupported_format")
     return "unknown", None, failures
+
 
 
 def summarise_relative_path(path: Path, root: Path) -> Tuple[str, str]:
@@ -93,8 +108,6 @@ def clean_text(text: str) -> str:
 def main() -> None:
     hwp_paths = list_hwp_files(RULE_ROOT)
     print(f"총 {len(hwp_paths)}개의 HWP 파일 발견")
-    if olefile is None:
-        print("⚠️ olefile 라이브러리가 설치되어 있지 않습니다. 구형 HWP 파일은 텍스트를 추출하지 못할 수 있습니다.")
 
     records: List[Dict[str, object]] = []
     failure_details: List[Dict[str, object]] = []
