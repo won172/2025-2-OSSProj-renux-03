@@ -81,14 +81,19 @@ static public class ChatRequestApis
 
             HttpClient client = new();
 
-            var res = await client.PostAsJsonAsync("http://192.168.11.29:8000/ask", toRag);
+            var res = await client.PostAsJsonAsync("http://rag-service:8000/ask", toRag);
 
-            Reply? re = await res.Content.ReadFromJsonAsync<Reply>();
+            string reply = "대답이여";
+
+            if (res.IsSuccessStatusCode)
+            {
+                reply = (await res.Content.ReadFromJsonAsync<Reply>()).Answer;
+            }
 
             ChatMessage apply = new()
             {
                 ChatId = ask.ChatId,
-                Content = re.Answer,
+                Content = reply,
                 IsAsk = false,
                 CreatedTime = DateTime.Now.ToUniversalTime()
             };
