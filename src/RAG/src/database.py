@@ -79,7 +79,23 @@ class Course(Base):
     chunks = relationship("Chunk", back_populates="course")
 
 
-# 5. 통합 청크 (Chunks)
+# 5. 교직원 (Staff) - 새로 추가
+class Staff(Base):
+    __tablename__ = "staff"
+
+    id = Column(Integer, primary_key=True, index=True)
+    department = Column(String, index=True) # 소속 (트리상 부서)
+    name = Column(String, index=True)
+    position = Column(String)
+    role = Column(String) # 담당업무
+    phone = Column(String)
+    email = Column(String)
+    raw_data = Column(Text) # 전체 데이터 JSON
+
+    chunks = relationship("Chunk", back_populates="staff")
+
+
+# 6. 통합 청크 (Chunks)
 class Chunk(Base):
     __tablename__ = "chunks"
 
@@ -92,12 +108,14 @@ class Chunk(Base):
     rule_id = Column(Integer, ForeignKey("rules.id"), nullable=True)
     schedule_id = Column(Integer, ForeignKey("schedule.id"), nullable=True)
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=True)
+    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True) # 새로 추가
     
     # Relationships
     notice = relationship("Notice", back_populates="chunks")
     rule = relationship("Rule", back_populates="chunks")
     schedule = relationship("Schedule", back_populates="chunks")
     course = relationship("Course", back_populates="chunks")
+    staff = relationship("Staff", back_populates="chunks") # 새로 추가
 
 
 def init_db():

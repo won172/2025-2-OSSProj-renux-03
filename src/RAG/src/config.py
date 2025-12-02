@@ -39,6 +39,7 @@ LLM_ROUTER_DESCRIPTIONS = {
     "rules": "학사 운영, 졸업, 성적, 징계 등 학교의 공식적인 학칙, 규정, 시행세칙에 대한 정보입니다.",
     "schedule": "수강신청, 개강, 종강, 방학, 시험 등 주요 학사일정에 대한 정보입니다.",
     "courses": "개설된 교과목, 수업, 강의, 전공, 선수과목, 학점, 이수구분 등 교과 과정에 대한 상세 정보입니다.",
+    "staff": "교직원, 교수, 행정 부서의 연락처, 이메일, 담당 업무, 위치 정보입니다.",
 }
 
 # OpenAI/LLM 기본 설정.
@@ -58,6 +59,7 @@ DATA_SOURCES: Dict[str, Path] = {
     "schedule": DATA_DIR / "dongguk_schedule.csv",
     "courses_desc": DATA_DIR / "dongguk_statistics_course_descriptions.csv",
     "courses_major": DATA_DIR / "dongguk_statistics_major_course.csv",
+    "staff": DATA_DIR / "dongguk_staff_contacts.csv",
 }
 
 
