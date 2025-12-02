@@ -560,6 +560,8 @@ def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
 
 def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
     docs = []
+    exclude_cols = {"조직(트리)", "db_id", "raw_data"}
+    
     for _, row in df.iterrows():
         # row는 [조직(트리), Data_0, Data_1, ...] 형태
         
@@ -568,10 +570,18 @@ def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
         
         # 2. 나머지 데이터
         info_parts = []
+        phone_number = ""
+        
         for col in df.columns:
-            if col == "조직(트리)": continue
+            if col in exclude_cols or col.startswith("Unnamed"): continue
             val = str(row.get(col, "")).strip()
-            if val and val != "nan":
+            if not val or val.lower() == "nan":
+                continue
+            
+            # 전화번호 감지 (간단한 패턴)
+            if re.match(r'^\d{2,3}[-.]?\d{3,4}[-.]?\d{4}$', val):
+                phone_number = val
+            else:
                 info_parts.append(val)
         
         content = " ".join(info_parts)
@@ -580,9 +590,11 @@ def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
         name_candidate = info_parts[0] if info_parts else "교직원"
         title = f"{dept} - {name_candidate}"
         
-        full_text = f"소속: {dept}\n정보: {content}"
+        full_text = f"소속: {dept}\n\n정보: {content}"
+        if phone_number:
+            full_text += f"\n\n전화번호: {phone_number}"
         
-        doc_id = make_doc_id("staff", dept, content)
+        doc_id = make_doc_id("staff", dept, full_text)
         
         docs.append({
             "doc_id": doc_id,

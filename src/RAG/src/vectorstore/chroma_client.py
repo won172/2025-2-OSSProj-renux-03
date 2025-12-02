@@ -83,7 +83,8 @@ def get_all_ids(name: str) -> list[str]:
     """지정된 Chroma 컬렉션에 저장된 모든 문서의 ID를 반환합니다."""
     collection = get_collection(name)
     # include=[]를 전달하여 메타데이터나 문서를 가져오지 않고 ID만 빠르게 조회
-    result = collection.get(include=[]) 
+    # limit=None을 명시해야 모든 ID를 가져옴 (기본값이 있을 수 있음)
+    result = collection.get(include=[], limit=None) 
     return result.get("ids", [])
 
 

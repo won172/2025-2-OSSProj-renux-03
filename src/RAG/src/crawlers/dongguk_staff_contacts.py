@@ -138,6 +138,14 @@ def crawl_staff_contacts() -> pd.DataFrame:
 
 def main() -> None:
     df = crawl_staff_contacts()
+
+    # Data_1 열이 비어있는 행 제거
+    if "Data_1" in df.columns:
+        # None/NaN 제거
+        df = df[df["Data_1"].notna()]
+        # 빈 문자열 제거
+        df = df[df["Data_1"] != ""]
+
     df.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
     print(f"총 {len(df)}건의 데이터 저장 완료! ({OUTPUT_PATH.resolve()})")
 

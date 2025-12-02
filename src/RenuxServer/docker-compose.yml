@@ -46,7 +46,7 @@ services:
         ports:
             - "8000:8000"
         volumes:
-            - ./huggingface_cache:/root/.cache/huggingface
+            - ../RAG/huggingface_cache:/root/.cache/huggingface
         depends_on:
             - redis
         env_file: .env
