@@ -1560,22 +1560,118 @@
     }
 }
 
+/* Mobile Sidebar & Responsive Fixes */
+.mobile-menu-btn {
+    display: none; /* Hidden by default for desktop */
+    background: transparent;
+    border: none;
+    padding: 4px;
+    margin-right: 8px;
+    cursor: pointer;
+    color: #0f172a;
+}
+
+.mobile-only {
+    display: none;
+}
+
+.mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+.mobile-backdrop.open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
 @media (max-width: 1080px) {
+    .mobile-only {
+        display: block;
+    }
+
+    .buddy-topbar__meta {
+        display: none; /* Hide topbar user info/actions on mobile */
+    }
+
     .gpt-home {
         grid-template-columns: 1fr;
+        grid-template-areas:
+            "topbar"
+            "main";
+        padding: 0; /* Remove padding for full width on mobile */
+        gap: 0;
+        background: #f0f2f5; /* Simplified bg for mobile performance */
+    }
+
+    .gpt-home__sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 280px;
+        z-index: 1000;
+        transform: translateX(-100%); /* Hidden by default */
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        margin: 0;
+        border-radius: 0;
+        box-shadow: 2px 0 12px rgba(0,0,0,0.15); /* Shadow for drawer effect */
+        
+        /* Flex layout for sidebar content */
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .gpt-home__sidebar-footer {
+        margin-top: auto; /* Push footer to bottom */
+    }
+    
+    .gpt-home__sidebar.mobile-open {
+        transform: translateX(0); /* Slide in */
+    }
+
+    .buddy-topbar {
+        border-radius: 0;
+        border: none;
+        border-bottom: 1px solid rgba(0,0,0,0.06);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: rgba(255, 255, 255, 0.95); /* Slightly transparent background */
+        backdrop-filter: blur(10px); /* Glassmorphism effect */
+        padding: 12px 16px; /* Reduce padding */
+    }
+
+    .gpt-home__main {
+        padding: 0;
+        gap: 0;
+        height: auto;
+        min-height: calc(100vh - 65px); /* Adjust based on topbar height */
+    }
+    
+    .home-chat {
+        border-radius: 0;
+        border: none;
+        height: calc(100vh - 65px); /* Fill remaining height */
         padding: 16px;
+    }
+
+    .mobile-menu-btn {
+        display: block; /* Show menu button on mobile */
     }
 
     .gpt-hero {
         grid-template-columns: 1fr;
+        padding: 24px;
+        border-radius: 0;
     }
-
-    .gpt-home__sidebar {
-        order: 2;
-    }
-
-    .gpt-home__main {
-        order: 1;
+    
+    .chatbot-hero__title {
+        font-size: 2rem;
     }
 }
 
