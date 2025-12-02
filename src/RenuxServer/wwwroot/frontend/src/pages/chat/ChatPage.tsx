@@ -195,17 +195,19 @@ const ChatPage = () => {
         </div>
 
         <form className="chat-page-v2__composer glass-panel" onSubmit={handleSubmit}>
-          <input
-            className="chat-page-v2__input"
-            type="text"
-            placeholder="메시지를 입력하세요"
-            value={inputValue}
-            onChange={(event) => setInputValue(event.target.value)}
-            disabled={isSending}
-          />
-          <button type="submit" className="chat-page-v2__send" disabled={isSending}>
-            {isSending ? '전송 중...' : '전송'}
-          </button>
+          <div className="chat-page-v2__input-wrapper">
+            <textarea
+              className="chat-page-v2__input"
+              placeholder="메시지를 입력하세요"
+              value={inputValue}
+              onChange={(event) => setInputValue(event.target.value)}
+              disabled={isSending}
+              rows={1}
+            />
+            <button type="submit" className="chat-page-v2__send" disabled={isSending}>
+              {isSending ? '전송 중...' : '전송'}
+            </button>
+          </div>
         </form>
 
         {sendError && <p className="chat-page-v2__status chat-page-v2__status--error">{sendError}</p>}
