@@ -248,33 +248,29 @@
     height: 100vh; /* min-height 대신 height로 고정 */
     display: grid;
     grid-template-columns: 280px 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+        "sidebar topbar"
+        "sidebar main";
     gap: 22px;
     padding: 24px;
     background: radial-gradient(circle at 15% -10%, rgba(249, 115, 22, 0.16), transparent 36%),
         radial-gradient(circle at 90% 10%, rgba(249, 115, 22, 0.12), transparent 32%),
-        linear-gradient(180deg, #fff7ed 0%, #f8fafc 50%, #ffffff 100%);
+        linear-gradient(180deg, #FFF7ED 0%, #FFF7ED 50%, #FFF7ED 100%);
     overflow: hidden; /* 전체 스크롤 방지 */
     box-sizing: border-box;
 }
 
-.gpt-home__content {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    min-width: 0;
-    width: 100%;
-    height: 100%; /* 부모 높이 상속 */
-    overflow: hidden; /* 내부 스크롤 제어 */
-}
+/* .gpt-home__content style removed */
 
 .gpt-home__main {
+    grid-area: main;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 10px;
     flex: 1; /* 남은 공간 모두 차지 */
     min-height: 0; /* 중요: Flex 아이템 축소 허용 */
 }
-
 .home-chat {
     height: 100%; /* 부모 높이에 맞춤 */
     display: flex;
@@ -290,6 +286,7 @@
 }
 
 .gpt-home__sidebar {
+    grid-area: sidebar;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -476,6 +473,7 @@
 }
 
 .buddy-topbar {
+    grid-area: topbar;
     display: grid;
     grid-template-columns: auto 1fr auto;
     align-items: center;
@@ -876,26 +874,33 @@
 
 .chat-page-v2__composer {
     display: flex;
-    align-items: center;
-    gap: 16px;
+    align-items: flex-end; /* Align items to the bottom */
     padding: 18px 20px;
 }
 
+.chat-page-v2__input-wrapper {
+    flex: 1; /* Allow the wrapper to take available space */
+    position: relative; /* Establish positioning context for children */
+    display: flex;
+    align-items: flex-end;
+}
+
 .chat-page-v2__input {
-    flex: 1;
-    padding: 14px;
+    width: 100%;
+    padding: 12px 70px 12px 14px; /* Adjusted padding-top and padding-bottom for textarea */
     border-radius: 16px;
     border: 1px solid rgba(15, 23, 42, 0.18);
     font-size: 0.95rem;
-}
-
-.chat-page-v2__input:disabled {
-    opacity: 0.6;
+    min-height: 56px;
+    resize: vertical;
 }
 
 .chat-page-v2__send {
-    padding: 12px 24px;
-    border-radius: 16px;
+    position: absolute;
+    right: 8px;
+    bottom: 10px; /* Adjusted bottom for textarea alignment */
+    padding: 8px 16px;
+    border-radius: 12px;
     border: none;
     background: linear-gradient(135deg, var(--buddy-primary), #fb923c);
     color: white;
@@ -903,6 +908,7 @@
     letter-spacing: 0.03em;
     cursor: pointer;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
+    z-index: 10;
 }
 
 .chat-page-v2__send:disabled {
@@ -1340,34 +1346,40 @@
 .home-chat__composer {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
+}
+
+.home-chat__input-wrapper {
+    position: relative;
+    display: flex;
+    width: 100%;
 }
 
 .home-chat__input {
     width: 100%;
-    padding: 12px 14px;
-    border-radius: 14px;
-    border: 1px solid rgba(15, 23, 42, 0.08);
+    padding: 14px 100px 14px 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(15, 23, 42, 0.18);
     min-height: 60px;
     resize: vertical;
     font-family: inherit;
+    font-size: 1rem;
 }
 
-.home-chat__actions {
-    display: flex;
-    justify-content: flex-end; /* 항상 오른쪽 끝에 위치 */
-    align-items: center;
-    gap: 10px;
+.home-chat__send-btn {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    padding: 8px 20px;
+    font-size: 0.95rem;
+    box-shadow: 0 4px 12px rgba(249, 115, 22, 0.25);
+    z-index: 10;
 }
 
 .home-chat__error {
     color: #f87171;
-    font-size: 0.9rem;
-}
-
-.home-chat__buttons {
-    display: flex;
-    gap: 8px;
+    font-size: 0.85rem;
+    margin-left: 4px;
 }
 
 .chat-preview-card {
@@ -1931,4 +1943,31 @@
     margin: 6px 0 0;
     color: var(--buddy-muted);
     font-size: 0.95rem;
+}
+
+/* Typing Indicator Styles */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 2px;
+  min-width: 40px;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--buddy-muted);
+  border-radius: 50%;
+  animation: typingBounce 1.4s infinite ease-in-out both;
+}
+
+.typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.typing-dot:nth-child(2) { animation-delay: -0.16s; }
+.typing-dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.6; }
+  40% { transform: scale(1); opacity: 1; }
 }

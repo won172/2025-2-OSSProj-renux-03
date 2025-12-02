@@ -61,6 +61,12 @@ const HomePage = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  useEffect(() => {
+    if (!isLoadingMore) {
+      scrollToBottom()
+    }
+  }, [chatMessages, isLoadingMore])
+
   const isNewChatDisabled = useMemo(() => {
     if (departmentsLoading) return true
     return departments.length === 0
@@ -430,8 +436,7 @@ const HomePage = () => {
         </div> */}
       </aside>
 
-      <div className="gpt-home__content">
-        <div className="buddy-topbar">
+      <div className="buddy-topbar">
           <div className="buddy-topbar__brand">
             <div className="buddy-topbar__icon buddy-topbar__icon--image">
               <img src={dongddokiLogo} alt="동똑이 로고" className="buddy-topbar__logo" />
@@ -526,42 +531,48 @@ const HomePage = () => {
                       </li>
                     )
                   })}
+                  {chatSending && (
+                    <li className="chat-bubble chat-bubble--bot">
+                      <div className="typing-indicator">
+                        <div className="typing-dot"></div>
+                        <div className="typing-dot"></div>
+                        <div className="typing-dot"></div>
+                      </div>
+                    </li>
+                  )}
                   <div ref={messagesEndRef} />
                 </ul>
               )}
             </div>
 
             <form className="home-chat__composer" onSubmit={handleChatSubmit}>
-              <textarea
-                className="home-chat__input"
-                placeholder={isAuthenticated ? '무엇이든 입력하세요' : '로그인 후 이용 가능합니다'}
-                value={chatInput}
-                onChange={(event) => setChatInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault()
-                    handleChatSubmit(event as any) // FormEvent<HTMLFormElement> 타입에 맞춰 캐스팅
-                  }
-                }}
-                rows={3}
-                disabled={chatSending || !isAuthenticated || !selectedChatId}
-              />
-              <div className="home-chat__actions">
-                {chatError && <span className="home-chat__error">{chatError}</span>}
-                <div className="home-chat__buttons">
-                  <button
-                    className="hero-btn hero-btn--primary"
-                    type="submit"
-                    disabled={chatSending || !isAuthenticated || !selectedChatId}
-                  >
-                    {chatSending ? '전송 중...' : '보내기'}
-                  </button>
-                </div>
+              <div className="home-chat__input-wrapper">
+                <textarea
+                  className="home-chat__input"
+                  placeholder={isAuthenticated ? '무엇이든 입력하세요' : '로그인 후 이용 가능합니다'}
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      handleChatSubmit(event as any)
+                    }
+                  }}
+                  rows={3}
+                  disabled={chatSending || !isAuthenticated || !selectedChatId}
+                />
+                <button
+                  className="hero-btn hero-btn--primary home-chat__send-btn"
+                  type="submit"
+                  disabled={chatSending || !isAuthenticated || !selectedChatId}
+                >
+                  {chatSending ? '전송' : '보내기'}
+                </button>
               </div>
+              {chatError && <span className="home-chat__error">{chatError}</span>}
             </form>
           </section>
         </main>
-      </div>
       {isModalOpen && (
         <div className="modal fade show" style={{ display: 'block' }} role="dialog">
           <div className="modal-dialog">
