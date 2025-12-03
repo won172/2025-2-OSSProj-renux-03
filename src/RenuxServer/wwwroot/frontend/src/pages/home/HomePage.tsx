@@ -57,6 +57,9 @@ const HomePage = () => {
   const [departmentName, setDepartmentName] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  // Mobile sidebar state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
@@ -66,6 +69,11 @@ const HomePage = () => {
       scrollToBottom()
     }
   }, [chatMessages, isLoadingMore])
+  
+  // Close sidebar when switching chats on mobile
+  useEffect(() => {
+    setIsSidebarOpen(false)
+  }, [selectedChatId])
 
   const isNewChatDisabled = useMemo(() => {
     if (departmentsLoading) return true
@@ -377,7 +385,13 @@ const HomePage = () => {
 
   return (
     <div className="gpt-home">
-      <aside className="gpt-home__sidebar">
+      {/* Mobile Backdrop */}
+      <div 
+        className={`mobile-backdrop ${isSidebarOpen ? 'open' : ''}`} 
+        onClick={() => setIsSidebarOpen(false)}
+      />
+
+      <aside className={`gpt-home__sidebar ${isSidebarOpen ? 'mobile-open' : ''}`}>
         <div className="gpt-home__brand">
           <div className="home-logo-row">
             <img src={donggukLogo} alt="Dongguk University" className="home-logo home-logo--univ" />
@@ -406,38 +420,58 @@ const HomePage = () => {
           </ul>
         </div>
 
-        {/* <div className="gpt-home__section">
-          <div className="gpt-home__section-head">
-            <h3>내 계정</h3>
-            <span className="gpt-home__pill">{isAuthenticated ? '로그인됨' : '게스트'}</span>
-          </div>
-          <p className="gpt-home__muted">{welcomeMessage}</p>
-          <div className="gpt-home__actions">
-            {isAuthenticated ? (
-              <>
-                <button className="ghost-btn" type="button" onClick={handleLogout}>
-                  로그아웃
-                </button>
-                <button className="ghost-btn" type="button" onClick={handleOpenSettings}>
-                  설정
-                </button>
-              </>
-            ) : (
-              <>
-                <button className="ghost-btn" type="button" onClick={handleLogin}>
-                  로그인
-                </button>
-                <button className="ghost-btn" type="button" onClick={handleSignup}>
-                  회원가입
-                </button>
-              </>
-            )}
-          </div>
-        </div> */}
+        {/* Mobile Sidebar Footer (Account Actions) */}
+        <div className="gpt-home__sidebar-footer mobile-only">
+            <div className="gpt-home__section">
+                <div className="gpt-home__section-head">
+                    <h3>내 계정</h3>
+                    {isAuthenticated && <span className="gpt-home__pill">{roleLabel}</span>}
+                </div>
+                <div className="gpt-home__actions">
+                    {isAuthenticated ? (
+                        <>
+                            {showUnivAdminButton && (
+                                <button className="ghost-btn small ghost-btn--accent" type="button" onClick={handleOpenUniversityAdmin}>
+                                    관리자
+                                </button>
+                            )}
+                            {showDeptAdminButton && (
+                                <button className="ghost-btn small" type="button" onClick={handleOpenDepartmentAdmin}>
+                                    학과 관리자
+                                </button>
+                            )}
+                            <button className="ghost-btn small" type="button" onClick={handleLogout}>
+                                로그아웃
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <button className="ghost-btn small" type="button" onClick={handleLogin}>
+                                로그인
+                            </button>
+                            <button className="ghost-btn small" type="button" onClick={handleSignup}>
+                                회원가입
+                            </button>
+                        </>
+                    )}
+                </div>
+            </div>
+        </div>
       </aside>
 
       <div className="buddy-topbar">
           <div className="buddy-topbar__brand">
+            <button 
+              type="button" 
+              className="mobile-menu-btn"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+              </svg>
+            </button>
             <div className="buddy-topbar__icon buddy-topbar__icon--image">
               <img src={dongddokiLogo} alt="동똑이 로고" className="buddy-topbar__logo" />
             </div>
