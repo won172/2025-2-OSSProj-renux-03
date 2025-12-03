@@ -60,7 +60,6 @@ static public class ChatRequestApis
 
                 CookieOptions opt = new()
                 {
-                    Expires = DateTime.Now.AddMinutes(60),
                     HttpOnly = true,
                     SameSite = SameSiteMode.Strict
                 };
