@@ -43,11 +43,37 @@ static public class ChatRequestApis
 
             while (await db.Chats.AnyAsync(c => c.Id == id))
                 id = Guid.NewGuid();
+
+            Guid userId;
+
+            if (context.Request.Cookies.ContainsKey("renux-server-token"))
+            {
+                userId = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            }
+            else if (context.Request.Cookies.ContainsKey("renux-server-guest"))
+            {
+                userId = Guid.Parse(context.Request.Cookies["renux-server-guest"]!);
+            }
+            else
+            {
+                userId = Guid.NewGuid();
+
+                CookieOptions opt = new()
+                {
+                    Expires = DateTime.Now.AddMinutes(60),
+                    HttpOnly = true,
+                    SameSite = SameSiteMode.Strict
+                };
+
+                context.Response.Cookies.Append("renux-server-guest", userId.ToString(), opt);
+            }
+
+
             
             ActiveChat chat = new()
             {
                 Id = id,
-                UserId = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!),
+                UserId = userId,
                 OrganizationId = stch.Org.Id,
                 Title = stch.Title,
                 CreatedTime = time,
@@ -69,7 +95,7 @@ static public class ChatRequestApis
             ActiveChatDto chatDto = mapper.Map<ActiveChatDto>(chat);
 
             return Results.Ok(chatDto);
-        }).RequireAuthorization();
+        });
 
         app.MapPost("/msg", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper) =>
         {
