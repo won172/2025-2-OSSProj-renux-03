@@ -22,9 +22,7 @@ static public class AuthenticationApis
         app.MapGet("/name", async (HttpContext context, ServerDbContext db) =>
         {
             string name = context.User.FindFirstValue(JwtRegisteredClaimNames.Name)!;
-            Guid roleId = Guid.Parse(context.User.FindFirstValue("Role")!);
-
-            string roleName = (await db.Roles.FindAsync(roleId))!.Rolename;
+            string roleName = context.User.FindFirstValue("Role")!;
 
             return Results.Ok(new { Name = name, RoleName = roleName });
         }).RequireAuthorization();
@@ -77,7 +75,8 @@ static public class AuthenticationApis
                 return Results.Unauthorized();
             }
 
-            User? user = await db.Users.FirstOrDefaultAsync(u => u.UserId == signin.UserId);
+            //User? user = await db.Users.FirstOrDefaultAsync(u => u.UserId == signin.UserId);
+            User? user = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == signin.UserId);
 
             if (user == null || !BCrypt.Net.BCrypt.Verify(signin.Password, user.HashPassword))
             {
@@ -93,7 +92,7 @@ static public class AuthenticationApis
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
                 new Claim(JwtRegisteredClaimNames.Name, user.Username),
-                new Claim("Role", user.RoleId.ToString())
+                new Claim("Role", user.Role!.Rolename)
             };
 
             JwtSecurityToken token = new(
