@@ -108,7 +108,7 @@ static public class ChatRequestApis
 
             await db.ChatMessages.AddAsync(ask);
 
-            ToRag toRag = new(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!, askDto.Content);
+            ToRag toRag = new(askDto.ChatId.ToString(), askDto.Content);
 
             HttpClient client = new();
 
