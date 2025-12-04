@@ -19,10 +19,14 @@ static public class AuthenticationApis
     {
         var app = application.MapGroup("/auth");
 
-        app.MapGet("/name", (HttpContext context) =>
+        app.MapGet("/name", async (HttpContext context, ServerDbContext db) =>
         {
             string name = context.User.FindFirstValue(JwtRegisteredClaimNames.Name)!;
-            return Results.Ok(new { Name = name });
+            Guid roleId = Guid.Parse(context.User.FindFirstValue("Role")!);
+
+            string roleName = (await db.Roles.FindAsync(roleId))!.Rolename;
+
+            return Results.Ok(new { Name = name, RoleName = roleName });
         }).RequireAuthorization();
 
         app.MapGet("/up", async (HttpContext context) =>
@@ -88,7 +92,8 @@ static public class AuthenticationApis
             Claim[] claims_ =
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-                new Claim(JwtRegisteredClaimNames.Name, user.Username)
+                new Claim(JwtRegisteredClaimNames.Name, user.Username),
+                new Claim("Role", user.RoleId.ToString())
             };
 
             JwtSecurityToken token = new(

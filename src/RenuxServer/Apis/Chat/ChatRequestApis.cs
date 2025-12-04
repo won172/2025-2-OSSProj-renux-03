@@ -102,6 +102,8 @@ static public class ChatRequestApis
             return Results.Ok(chatDto);
         });
 
+        
+
         app.MapPost("/msg", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper) =>
         {
             ChatMessage ask = mapper.Map<ChatMessage>(askDto);
