@@ -56,6 +56,8 @@ const HomePage = () => {
   })
   const [departmentName, setDepartmentName] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const skipLoadOnSelectRef = useRef(false)
+  const isLoadingMoreRef = useRef(false)
 
   // Mobile sidebar state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -64,11 +66,8 @@ const HomePage = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  useEffect(() => {
-    if (!isLoadingMore) {
-      scrollToBottom()
-    }
-  }, [chatMessages, isLoadingMore])
+  // Removed useEffect for auto-scrolling to bottom on chatMessages change
+  // to prevent scrolling to bottom when loading older messages.
   
   // Close sidebar when switching chats on mobile
   useEffect(() => {
@@ -128,25 +127,28 @@ const HomePage = () => {
   }, [])
 
   useEffect(() => {
-    if (!isAuthenticated) return
-
     const fetchActiveChats = async () => {
-      try {
-        const data = await apiFetch<ActiveChat[]>('/chat/active', { method: 'GET' })
-        if (Array.isArray(data)) {
-          setActiveChats(data)
-          if (!selectedChatId && data.length > 0) {
-            setSelectedChatId(data[0].id)
-            setSelectedChatTitle(data[0].title ?? '채팅방')
+      if (isAuthenticated) {
+        try {
+          const data = await apiFetch<ActiveChat[]>('/chat/active', { method: 'GET' })
+          if (Array.isArray(data)) {
+            setActiveChats(data)
+            if (!selectedChatId && data.length > 0) {
+              // 로그인 시에는 기존 선택 로직 유지 또는 필요 시 변경
+            }
           }
+        } catch (error) {
+          console.error('Failed to load active chats', error)
+          setActiveChats([])
         }
-      } catch (error) {
-        console.error('Failed to load active chats', error)
-        setActiveChats([])
+      } else {
+        // 게스트인 경우 로컬 스토리지에서 불러옴
+        const guestChats = loadGuestChats()
+        setActiveChats(guestChats)
       }
     }
     fetchActiveChats()
-  }, [isAuthenticated, selectedChatId])
+  }, [isAuthenticated])
 
   useEffect(() => {
     document.body.classList.toggle('modal-open', isModalOpen)
@@ -163,10 +165,6 @@ const HomePage = () => {
   }
 
   const handleNewChatClick = () => {
-    if (!isAuthenticated) {
-      navigate('/auth/in')
-      return
-    }
     toggleModal(true)
   }
 
@@ -201,6 +199,12 @@ const HomePage = () => {
         method: 'POST',
         json: { org: selectedOrg, title: trimmedTitle },
       })
+      if (!isAuthenticated) {
+        saveGuestChat(chatRoom)
+      }
+
+      setActiveChats((prev) => [chatRoom, ...prev])
+      
       toggleModal(false)
       setSelectedChatId(chatRoom.id)
       setSelectedChatTitle(chatRoom.title ?? trimmedTitle)
@@ -271,7 +275,7 @@ const HomePage = () => {
   }
 
   const loadMoreMessages = async () => {
-    if (!selectedChatId || isLoadingMore || !hasMoreMessages || chatMessages.length === 0) return
+    if (!selectedChatId || isLoadingMoreRef.current || !hasMoreMessages || chatMessages.length === 0) return
 
     const firstMessageTime = chatMessages[0].createdTime
     const container = document.querySelector('.home-chat__thread-wrapper') as HTMLDivElement
@@ -279,6 +283,8 @@ const HomePage = () => {
 
     try {
       setIsLoadingMore(true)
+      isLoadingMoreRef.current = true
+      
       const data = await apiFetch<ChatPageMessage[]>('/chat/load', {
         method: 'POST',
         json: { chatId: selectedChatId, lastTime: firstMessageTime },
@@ -301,34 +307,93 @@ const HomePage = () => {
       console.error('Failed to load older messages', err)
     } finally {
       setIsLoadingMore(false)
+      // 약간의 지연을 두어 상태 업데이트가 완료된 후 플래그를 해제 (안전장치)
+      setTimeout(() => {
+        isLoadingMoreRef.current = false
+      }, 100)
     }
   }
 
   useEffect(() => {
-    if (!selectedChatId || !isAuthenticated) return
+    if (!selectedChatId) return
+    if (skipLoadOnSelectRef.current) {
+      skipLoadOnSelectRef.current = false
+      return
+    }
     loadMessages(selectedChatId)
-  }, [selectedChatId, isAuthenticated])
+  }, [selectedChatId])
 
   const handleChatSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!selectedChatId || !isAuthenticated) {
-      setChatError('채팅방을 선택하거나 로그인 후 이용해주세요.')
-      return
-    }
+    
     const trimmed = chatInput.trim()
     if (!trimmed) {
       setChatError('메시지를 입력해주세요.')
       return
     }
 
+    let currentChatId = selectedChatId
+
+    // 채팅방이 없으면 자동 생성
+    if (!currentChatId) {
+      if (departments.length === 0) {
+        setChatError('채팅을 시작할 수 있는 학과 정보가 없습니다.')
+        return
+      }
+
+      try {
+        setChatSending(true)
+        const defaultOrg = departments[0]
+        const title = trimmed.length > 20 ? trimmed.substring(0, 20) + '...' : trimmed
+        
+        const chatRoom = await apiFetch<ActiveChat>('/chat/start', {
+          method: 'POST',
+          json: { org: defaultOrg, title },
+        })
+
+        if (!isAuthenticated) {
+          saveGuestChat(chatRoom)
+        }
+
+        currentChatId = chatRoom.id
+        setActiveChats((prev) => [chatRoom, ...prev])
+        
+        // 중요: useEffect에 의한 loadMessages가 실행되지 않도록 플래그 설정
+        skipLoadOnSelectRef.current = true
+        setSelectedChatId(chatRoom.id)
+        setSelectedChatTitle(chatRoom.title ?? title)
+
+        // 방금 생성된 방의 환영 메시지를 수동으로 가져옴
+        const initialData = await apiFetch<ChatPageMessage[]>('/chat/load', {
+          method: 'POST',
+          json: { chatId: chatRoom.id, lastTime: new Date().toISOString() },
+        })
+        
+        // 환영 메시지 설정 (있다면)
+        if (Array.isArray(initialData)) {
+           setChatMessages(initialData.reverse())
+        } else {
+           setChatMessages([])
+        }
+
+      } catch (error) {
+        console.error('Failed to auto-create chat room', error)
+        setChatError('채팅방을 생성하지 못했습니다.')
+        setChatSending(false)
+        return
+      }
+    }
+
+    // 여기부터는 currentChatId가 반드시 존재함
     const newMsg: ChatPageMessage = {
       id: typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
-      chatId: selectedChatId,
+      chatId: currentChatId,
       isAsk: true,
       content: trimmed,
       createdTime: new Date().toISOString(),
     }
 
+    // 기존 메시지 목록 뒤에 내 메시지 추가
     setChatMessages((prev) => [...prev, newMsg])
     setChatInput('')
     setChatSending(true)
@@ -350,7 +415,7 @@ const HomePage = () => {
       
       if (reply) {
         setChatMessages((prev) => [...prev, reply])
-        setTimeout(scrollToBottom, 0)
+        setTimeout(scrollToBottom, 100)
       }
     } catch (err) {
       console.error('Failed to send message', err)
@@ -362,7 +427,7 @@ const HomePage = () => {
     }
   }
 
-  const isHeroPrimaryDisabled = isAuthenticated && isNewChatDisabled
+  const isHeroPrimaryDisabled = isNewChatDisabled
   const displayName = isAuthenticated ? userName ?? '로그인 사용자' : '게스트'
   const fallbackDept = departments[0]?.major?.majorname ?? (userRole === 'UNIVERSITY_COUNCIL' ? '총학생회' : null) // 우선 디폴트로 총학생회.
   const displayDept = departmentName ?? fallbackDept 
@@ -381,6 +446,30 @@ const HomePage = () => {
     const date = typeof value === 'number' ? new Date(value) : new Date(value)
     if (Number.isNaN(date.getTime())) return ''
     return new Intl.DateTimeFormat('ko-KR', { hour: 'numeric', minute: '2-digit' }).format(date)
+  }
+
+  const loadGuestChats = (): ActiveChat[] => {
+    if (typeof window === 'undefined') return []
+    try {
+      const stored = window.localStorage.getItem('renux-guest-chats')
+      return stored ? JSON.parse(stored) : []
+    } catch (e) {
+      console.error('Failed to load guest chats', e)
+      return []
+    }
+  }
+
+  const saveGuestChat = (chat: ActiveChat) => {
+    if (typeof window === 'undefined') return
+    try {
+      const current = loadGuestChats()
+      // 중복 방지
+      if (current.find((c) => c.id === chat.id)) return
+      const updated = [chat, ...current]
+      window.localStorage.setItem('renux-guest-chats', JSON.stringify(updated))
+    } catch (e) {
+      console.error('Failed to save guest chat', e)
+    }
   }
 
   return (
@@ -583,7 +672,7 @@ const HomePage = () => {
               <div className="home-chat__input-wrapper">
                 <textarea
                   className="home-chat__input"
-                  placeholder={isAuthenticated ? '무엇이든 입력하세요' : '로그인 후 이용 가능합니다'}
+                  placeholder={selectedChatId ? '무엇이든 물어보세요' : '무엇이든 물어보세요 (새 대화가 자동으로 시작됩니다)'}
                   value={chatInput}
                   onChange={(event) => setChatInput(event.target.value)}
                   onKeyDown={(event) => {
@@ -593,12 +682,12 @@ const HomePage = () => {
                     }
                   }}
                   rows={3}
-                  disabled={chatSending || !isAuthenticated || !selectedChatId}
+                  disabled={chatSending || (departmentsLoading && !selectedChatId)}
                 />
                 <button
                   className="hero-btn hero-btn--primary home-chat__send-btn"
                   type="submit"
-                  disabled={chatSending || !isAuthenticated || !selectedChatId}
+                  disabled={chatSending || (departmentsLoading && !selectedChatId)}
                 >
                   {chatSending ? '전송' : '보내기'}
                 </button>
