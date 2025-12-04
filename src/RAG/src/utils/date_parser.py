@@ -1,11 +1,12 @@
 """사용자 질문에서 날짜 관련 정보를 추출하는 유틸리티."""
 
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 import re
 from typing import Optional, Tuple
 
 def _parse_relative_date(query: str) -> Optional[Tuple[date, date]]:
-    today = date.today()
+    KST = timezone(timedelta(hours=9))
+    today = datetime.now(KST).date()
     
     if "오늘" in query:
         return today, today

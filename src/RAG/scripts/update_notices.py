@@ -11,6 +11,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.crawlers.dongguk_notices import TARGET_BOARDS, crawl_notices
 from src.pipelines.notices_sync import sync_notices
+from src.pipelines.ingest import ingest_notices, reindex_from_db
+from src.database import init_db
 
 
 def _run_once(boards: list[str], max_pages: int | None, delay: float) -> None:
@@ -29,10 +31,12 @@ def _run_once(boards: list[str], max_pages: int | None, delay: float) -> None:
         return
     end_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{end_ts}] ✅ 신규 공지 {added}건 반영 완료.")
+
     print("(CSV, Chroma 컬렉션, TF-IDF 모두 최신 상태입니다.)")
 
 
 def main() -> None:
+    init_db() # DB 초기화
     parser = argparse.ArgumentParser(description="Dongguk notice crawler + incremental index updater")
     parser.add_argument(
         "--max-pages",

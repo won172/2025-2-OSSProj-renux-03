@@ -21,6 +21,11 @@ load_dotenv()
 _REDIS_CLIENT = redis.from_url(REDIS_URL)
 
 
+import logging
+
+# 로거 설정
+logger = logging.getLogger(__name__)
+
 @lru_cache(maxsize=1)
 def _build_chain() -> RunnableWithMessageHistory:
     prompt = ChatPromptTemplate.from_messages(
@@ -45,16 +50,28 @@ def _build_chain() -> RunnableWithMessageHistory:
     )
 
 
-def generate_langchain_answer(question: str, context: str, session_id: str | None = None, current_date: str = "") -> str:
+async def generate_langchain_answer(question: str, context: str, session_id: str | None = None, current_date: str = "") -> str:
     """LangChain 메시지 이력을 활용해 답변을 생성합니다."""
+    actual_session_id = session_id or "default_session"
+    logger.info(f"Generating answer for session_id: {actual_session_id}")
+    
     chain = _build_chain()
     payload = {
         "question": question,
         "context": context or "컨텍스트가 제공되지 않았습니다.",
         "current_date": current_date, 
     }
-    config = {"configurable": {"session_id": session_id or "default_session"}}
-    return chain.invoke(payload, config=config)
+    config = {"configurable": {"session_id": actual_session_id}}
+    
+    # 디버깅: 현재 세션의 히스토리 조회 시도 (Redis 직접 확인)
+    try:
+        history_instance = RedisChatMessageHistory(actual_session_id, redis_client=_REDIS_CLIENT)
+        messages = history_instance.messages
+        logger.info(f"Current history for session {actual_session_id}: {len(messages)} messages found.")
+    except Exception as e:
+        logger.error(f"Failed to fetch history for debug: {e}")
+
+    return await chain.ainvoke(payload, config=config)
 
 
 __all__ = ["generate_langchain_answer"]

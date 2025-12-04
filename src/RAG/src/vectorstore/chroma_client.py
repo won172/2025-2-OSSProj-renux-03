@@ -88,6 +88,20 @@ def get_all_ids(name: str) -> list[str]:
     return result.get("ids", [])
 
 
+def get_existing_ids(name: str, ids: Iterable[str]) -> set[str]:
+    """주어진 ID 목록 중 컬렉션에 이미 존재하는 ID들만 반환합니다."""
+    if not ids:
+        return set()
+    
+    collection = get_collection(name)
+    # ids 필터로 조회하여 존재하는지 확인
+    ids_list = list(ids)
+    # ChromaDB get은 존재하지 않는 ID에 대해 에러를 내지 않고 존재하는 것만 반환함 (버전에 따라 다를 수 있으니 확인 필요)
+    # 최신 버전에서는 get(ids=[...]) 시 존재하는 것만 반환됨.
+    result = collection.get(ids=ids_list, include=[])
+    return set(result.get("ids", []))
+
+
 def reset_collection(name: str) -> None:
     """컬렉션을 삭제한 뒤 다시 만들어 재빌드에 활용합니다."""
     client = get_client()
