@@ -18,7 +18,7 @@ type ChatPageMessage = {
 const mapRoleNameToUserRole = (roleName?: string | null): UserRole => {
   if (!roleName) return 'STUDENT'
   const normalized = roleName.trim().toLowerCase()
-  if (normalized.includes('총학생회') || normalized.includes('교직원') || normalized.includes('관리자')) {
+  if (normalized.includes('교직원')) {
     return 'UNIVERSITY_COUNCIL'
   }
   if (normalized.includes('학생회')) {
@@ -106,8 +106,10 @@ const HomePage = () => {
         if (data?.name) {
           setIsAuthenticated(true)
           setUserName(data.name)
-          if (data.role) {
-            const resolvedRole = mapRoleNameToUserRole(data.role)
+          
+          const rawRole = data.roleName || data.role
+          if (rawRole) {
+            const resolvedRole = mapRoleNameToUserRole(rawRole)
             setUserRole(resolvedRole)
             if (typeof window !== 'undefined') {
               window.localStorage.setItem('renux-user-role', resolvedRole)

@@ -31,3 +31,14 @@ export interface PendingAnswerReview {
   question: string
   answer: string
 }
+
+export type KnowledgeStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
+
+export interface DepartmentKnowledge {
+  id: string
+  title: string
+  content: string
+  status: KnowledgeStatus
+  createdAt: string
+  rejectionReason?: string
+}
