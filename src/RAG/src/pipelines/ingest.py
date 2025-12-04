@@ -25,12 +25,11 @@ from src.utils.preprocess import (
     make_doc_id,
     to_chunks,
 )
-from src.vectorstore.chroma_client import add_items, reset_collection, upsert_items, get_all_ids, delete_items
+from src.vectorstore.chroma_client import add_items, reset_collection, upsert_items, get_all_ids, delete_items, get_existing_ids
 from src.database import (
     SessionLocal, engine, init_db,
     Notice, Rule, Schedule, Course, Staff, Chunk
 )
-
 
 @dataclass
 class DatasetArtifacts:
@@ -77,26 +76,31 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
         print(f"⚠️ Warning: No chunks generated for {key}")
         return chunks_df, None, None
 
-    embeddings = encode_texts(chunks_df["chunk_text"].tolist())
-
-    # 메타데이터 준비 (None 처리)
+    # 메타데이터 준비
     metadatas = chunks_df.drop(columns=["chunk_text"]).to_dict(orient="records")
     metadatas = [{k: (v if v is not None else "") for k, v in m.items()} for m in metadatas]
 
-    # 1. 기존 ID 목록 가져오기
-    existing_ids = set(get_all_ids(collection))
+    # 1. 기존 ID 조회 (전체가 아닌, 현재 chunks_df에 있는 ID들만 확인)
+    target_ids = chunks_df["chunk_id"].astype(str).tolist()
+    existing_ids = get_existing_ids(collection, target_ids)
     
-    # 2. 새로운 ID 목록
-    new_ids = set(chunks_df["chunk_id"].astype(str))
-    
-    # 3. 삭제할 ID 계산 (기존에는 있었으나 이번엔 없는 것)
-    ids_to_delete = list(existing_ids - new_ids)
-    
-    if ids_to_delete:
-        print(f"🗑️ Deleting {len(ids_to_delete)} obsolete chunks from {collection}")
-        delete_items(collection, ids_to_delete)
+    # 2. 신규 또는 업데이트가 필요한 청크 식별
+    # 여기서는 간단하게 existing_ids에 없는 것만 추가(Add)하는 전략을 사용하거나
+    # 항상 덮어쓰기(Upsert)를 할 수 있습니다. 
+    # 효율성을 위해 '없는 것만 추가' + '기존 것은 무시' 전략을 선택할 수도 있지만,
+    # 내용이 변경되었을 수 있으므로 Upsert가 안전합니다.
+    # 하지만 Upsert는 모든 청크에 대해 임베딩을 다시 계산해야 하므로 비용이 듭니다.
+    # 데이터 무결성을 위해 Upsert를 유지하되, 임베딩 계산을 최적화합니다.
 
-    # 4. 추가 및 업데이트 (Upsert)
+    # 임베딩 계산 (전체 다 계산)
+    # 최적화: 이미 존재하는 ID에 대해서는 임베딩 계산을 건너뛰고 싶다면?
+    # -> 내용이 바뀌었는지 알 수 없으므로 위험함.
+    # -> 하지만 chunk_id가 내용 해시를 포함한다면 건너뛰어도 됨.
+    # -> 현재 make_doc_id는 (제목, 날짜 등)만 포함하므로 내용 변경 감지 불가.
+    # -> 따라서 안전하게 전체 Upsert 수행.
+    
+    embeddings = encode_texts(chunks_df["chunk_text"].tolist())
+
     upsert_items(
         collection,
         ids=chunks_df["chunk_id"],
@@ -105,18 +109,19 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
         embeddings=embeddings,
     )
 
+    # 3. 파일 저장 (Parquet/CSV)
     artifacts = DATASET_ARTIFACTS[key]
     artifacts.chunk_path.parent.mkdir(parents=True, exist_ok=True)
 
     write_path = artifacts.chunk_path
     try:
-        # object 타입 문제 방지 위해 string 변환
         chunks_df.astype(str).to_parquet(write_path, index=False)
     except Exception:
         write_path = artifacts.csv_path
         chunks_df.to_csv(write_path, index=False, encoding="utf-8-sig")
     artifacts.chunk_path = write_path
 
+    # 4. TF-IDF 학습 (여전히 전체 데이터 필요)
     vectorizer, matrix = train_tfidf(key, chunks_df["chunk_text"].tolist())
     return chunks_df, vectorizer, matrix
 
@@ -168,13 +173,21 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(text_content, str) or not text_content.strip():
             continue
         
-        # 게시판 유형을 텍스트에 포함
+        # 게시판 유형과 게시일을 텍스트에 포함
         topic_type = row.get(column["topic"], "")
+        published_date = row.get("clean_date", "") # "clean_date" 필드에서 게시일 가져오기
+
+        prefix_parts = []
         if topic_type:
-            text_content = f"[게시판: {topic_type}]\n\n{text_content}"
+            prefix_parts.append(f"게시판: {topic_type}")
+        if published_date:
+            prefix_parts.append(f"게시일: {published_date}")
+            
+        if prefix_parts:
+            text_content = f"[{', '.join(prefix_parts)}]\n\n{text_content}"
         
-        published = row.get("clean_date")
-        doc_id = make_doc_id(row.get(column["title"]), row.get(column["topic"]), published)
+        # published = row.get("clean_date") # 위에서 이미 가져옴
+        doc_id = make_doc_id(row.get(column["title"]), row.get(column["topic"]), published_date)
         
         # attachments 리스트를 JSON 문자열로 변환
         raw_attachments = row.get(column["attachment"], [])
@@ -189,7 +202,7 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 "title": row.get(column["title"], ""),
                 "text": text_content,
                 "topics": row.get(column["topic"], ""),
-                "published_at": published or "",
+                "published_at": published_date or "",
                 "url": row.get(column["url"], ""),
                 "attachments": attachments_str,
                 "source": "notices",
@@ -859,4 +872,6 @@ __all__ = [
     "ingest_courses",
     "ingest_staff",
     "ingest_all",
+    "SessionLocal",
+    "reindex_from_db",
 ]

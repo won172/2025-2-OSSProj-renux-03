@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime
+from datetime import datetime, date
 from typing import Iterable, List, Optional
 
 from pandas import DataFrame
@@ -47,10 +47,17 @@ def normalize_whitespace(text: str | None) -> str:
     return text.strip()
 
 
-def standardize_date(value: str | None) -> Optional[str]:
+def standardize_date(value: Any | None) -> Optional[str]: # Type hint changed to Any for flexibility
     """날짜 문자열을 YYYY-MM-DD 형식으로 맞춥니다."""
+    if value is None:
+        return None
+    
+    if isinstance(value, date): # datetime.date 객체인 경우 처리
+        return value.strftime("%Y-%m-%d")
+    
     if not isinstance(value, str):
         return None
+    
     value = value.strip()
     for pattern in ("%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d", "%Y년 %m월 %d일"):
         try:

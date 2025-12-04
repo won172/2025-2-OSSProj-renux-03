@@ -47,6 +47,10 @@ services:
             - "8000:8000"
         volumes:
             - ../RAG/huggingface_cache:/root/.cache/huggingface
+            - ../RAG/artifacts:/app/artifacts
+            - ../RAG/data:/app/data
+            - ../RAG/rag_database.db:/app/rag_database.db
+            - ../RAG/data:/app/data
         depends_on:
             - redis
         env_file: .env
@@ -60,6 +64,8 @@ services:
         image: redis:alpine
         ports:
             - "6380:6379"
+        volumes:
+            - redis_data:/data
         restart: always
 
     nginx:
@@ -72,6 +78,5 @@ services:
         depends_on:
             - api
 volumes:
-    postgres_data_test:    
-    
-    
+    postgres_data_test:
+    redis_data:
