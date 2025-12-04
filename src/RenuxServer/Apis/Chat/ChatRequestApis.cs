@@ -22,9 +22,17 @@ static public class ChatRequestApis
 
         app.MapGet("/active", async (ServerDbContext db, HttpContext context, IMapper mapper) =>
         {
-            Guid id = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            Guid id;
+            if (context.Request.Cookies.ContainsKey("renux-server-token"))
+            {
+                id = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            }
+            else
+            {
+                id = Guid.NewGuid();
+            }
 
-            List<ActiveChatDto> chats = 
+            List<ActiveChatDto> chats =
             mapper.Map<List<ActiveChatDto>>(
                 await db.Chats
                 .Include(ch => ch.Organization)
@@ -33,7 +41,7 @@ static public class ChatRequestApis
                 );
 
             return Results.Ok(chats);
-        }).RequireAuthorization();
+        });
 
         app.MapPost("/start", async (ServerDbContext db, HttpContext context, StartChat stch, IMapper mapper) =>
         {
@@ -67,8 +75,6 @@ static public class ChatRequestApis
                 context.Response.Cookies.Append("renux-server-guest", userId.ToString(), opt);
             }
 
-
-            
             ActiveChat chat = new()
             {
                 Id = id,
@@ -112,7 +118,7 @@ static public class ChatRequestApis
 
             if (res.IsSuccessStatusCode)
             {
-                reply = (await res.Content.ReadFromJsonAsync<Reply>()).Answer;
+                reply = (await res.Content.ReadFromJsonAsync<Reply>())!.Answer;
             }
 
             ChatMessage apply = new()
@@ -131,22 +137,12 @@ static public class ChatRequestApis
             return Results.Ok(applyDto);
         });
 
-        app.MapPost("/startguest", async (ServerDbContext db, ChatMessageDto askDto, IMapper mapper) =>
-        {
-
-        });
-
-        app.MapPost("/request", (ChatMessageDto askDto) =>
-        {
-            
-        });
-
         app.MapPost("/load", async (ServerDbContext db, IMapper mapper, LoadChat load) =>
         {
             List<ChatMessageDto> chatMessages = await MessagesToList(db, mapper, load.LastTime, load.ChatId);
 
             return Results.Ok(chatMessages);
-        }).RequireAuthorization();
+        });
     }
 
     static public async Task<List<ChatMessageDto>> MessagesToList(ServerDbContext db, IMapper mapper, DateTime lastTime, Guid chatId)
