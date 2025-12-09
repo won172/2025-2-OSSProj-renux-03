@@ -174,7 +174,7 @@ namespace RenuxServer.Migrations
                 {
                     { new Guid("b4114fd1-c9f0-4171-821f-b53a15faba9b"), "일반학생" },
                     { new Guid("c22bc8f7-98b8-45a3-9053-3b779e027649"), "학생회" },
-                    { new Guid("ec62f7d6-069d-4a47-8801-db61b938a299"), "교직원" }
+                    { new Guid("ec62f7d6-069d-4a47-8801-db61b938a299"), "관리자" }
                 });
 
             migrationBuilder.CreateIndex(
