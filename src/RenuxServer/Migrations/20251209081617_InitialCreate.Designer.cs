@@ -12,7 +12,7 @@ using RenuxServer.DbContexts;
 namespace RenuxServer.Migrations
 {
     [DbContext(typeof(ServerDbContext))]
-    [Migration("20251117050557_InitialCreate")]
+    [Migration("20251209081617_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -217,7 +217,7 @@ namespace RenuxServer.Migrations
                         new
                         {
                             Id = new Guid("ec62f7d6-069d-4a47-8801-db61b938a299"),
-                            Rolename = "교직원"
+                            Rolename = "관리자"
                         },
                         new
                         {

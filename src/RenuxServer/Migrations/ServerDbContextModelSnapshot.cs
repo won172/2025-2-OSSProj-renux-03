@@ -214,7 +214,7 @@ namespace RenuxServer.Migrations
                         new
                         {
                             Id = new Guid("ec62f7d6-069d-4a47-8801-db61b938a299"),
-                            Rolename = "교직원"
+                            Rolename = "관리자"
                         },
                         new
                         {
