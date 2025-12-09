@@ -2067,3 +2067,103 @@
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.6; }
   40% { transform: scale(1); opacity: 1; }
 }
+
+.admin-page-wrapper {
+    height: 100vh; /* Use height for full viewport fill */
+    width: 100%;
+    background: radial-gradient(circle at 15% -10%, rgba(249, 115, 22, 0.16), transparent 36%),
+        radial-gradient(circle at 90% 10%, rgba(249, 115, 22, 0.12), transparent 32%),
+        linear-gradient(180deg, #FFF7ED 0%, #FFF7ED 50%, #FFF7ED 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center horizontally */
+    justify-content: flex-start; /* Align content to the top within the wrapper */
+    overflow: hidden; /* Prevent body scroll */
+}
+
+/* Admin Dashboard Compact Layout */
+.admin-shell.compact-mode {
+    height: 100%; /* Take full height of parent (admin-page-wrapper) */
+    width: 100%;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 16px 32px; /* Slightly reduce vertical padding to give more content space */
+    gap: 12px; /* Slightly reduce gap to save vertical space */
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+}
+
+.admin-header.compact {
+    padding: 12px 20px;
+    flex-shrink: 0;
+}
+
+.admin-title.compact {
+    font-size: 1.4rem;
+    margin: 4px 0;
+}
+
+.admin-subtitle.compact {
+    font-size: 0.9rem;
+}
+
+.admin-metrics.compact {
+    flex-shrink: 0;
+}
+
+.admin-dashboard-grid {
+    display: grid;
+    grid-template-columns: 500px 1fr; /* Increased width for the left column */
+    gap: 16px;
+    flex: 1;
+    min-height: 0; /* Important for nested scrolling */
+}
+
+.admin-panel.full-height {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 20px;
+    box-sizing: border-box;
+}
+
+.admin-panel-content-scroll {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.admin-panel--split.full-height {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 20px;
+    padding: 16px 20px;
+}
+
+.admin-panel__column.full-height {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.admin-review-list-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.admin-review-detail-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+/* Adjust table in compact mode */
+.admin-table__head, .admin-table__row {
+    padding: 8px 4px;
+}

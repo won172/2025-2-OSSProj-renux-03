@@ -27,18 +27,6 @@ static public class AuthenticationApis
             return Results.Ok(new { Name = name, RoleName = roleName });
         }).RequireAuthorization();
 
-        app.MapGet("/up", async (HttpContext context) =>
-        {
-            context.Response.ContentType = "text/html";
-            await context.Response.SendFileAsync("wwwroot/signup.html");
-        });
-
-        app.MapGet("/in", async (HttpContext context) =>
-        {
-            context.Response.ContentType = "text/html";
-            await context.Response.SendFileAsync("wwwroot/signin.html");
-        });
-
         app.MapPost("/idcheck", async (ServerDbContext db, IdCheck id) 
             => Results.Ok(await db.Users.AnyAsync(u => u.UserId==id.Id)));
 
