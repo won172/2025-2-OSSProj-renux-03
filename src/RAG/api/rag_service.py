@@ -78,9 +78,12 @@ class AskResponse(BaseModel):
 
 
 class AskRequest(BaseModel):
-    question: str = Field(..., description="사용자 질문")
-    session_id: str | None = Field(None, description="대화 세션 ID (없으면 기본 세션)")
+    question: str = Field(..., description="사용자 질문", alias="question")
+    session_id: str | None = Field(None, description="대화 세션 ID (없으면 기본 세션)", alias="sessionId")
     major: str | None = Field(None, description="사용자 학과") # 새로 추가
+
+    class Config:
+        populate_by_name = True
 
 
 
@@ -316,8 +319,15 @@ async def ask(req: AskRequest) -> AskResponse:
     context_text = "\n\n---\n\n".join(context_parts) if context_parts else "검색된 관련 문서가 없습니다. 일반적인 대화로 응답해주세요."
     context_text = context_text[:MAX_CONTEXT_LENGTH] # 최대 길이 제한 유지 
     # LLM에게 현재 날짜를 전달하여 "오늘", "이번 학기" 등의 표현을 해석하도록 돕습니다.
-    current_date = datetime.utcnow().strftime('%Y년 %m월 %d일')
-    answer = await run_in_threadpool(generate_langchain_answer, query, context_text, session_id=session_id, current_date=current_date)
+    from datetime import timedelta, timezone
+    KST = timezone(timedelta(hours=9))
+    current_date = datetime.now(KST).strftime('%Y년 %m월 %d일')
+    answer = await generate_langchain_answer(
+        question=query, 
+        context=context_text, 
+        session_id=session_id, 
+        current_date=current_date
+    )
     
     # 후처리: 볼드체(**) 서식 강제 제거
     answer = answer.replace("**", "")

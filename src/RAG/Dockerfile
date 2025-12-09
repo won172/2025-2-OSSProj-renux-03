@@ -1,24 +1,32 @@
-FROM python:3.11-slim-bookworm
+# === Stage 1: Builder ===
+FROM python:3.11-slim-bookworm AS builder
 
-# Install system dependencies (OpenJDK for Konlpy, build tools)
-RUN apt-get update && apt-get install -y \
-    default-jdk-headless \
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Set JAVA_HOME for Konlpy
-ENV JAVA_HOME=/usr/lib/jvm/default-java
+WORKDIR /app
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# === Stage 2: Runtime ===
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
-# Copy requirements first to leverage cache
-COPY requirements.txt .
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the rest of the application
+# Copy application code
 COPY . .
 
 # Expose the port

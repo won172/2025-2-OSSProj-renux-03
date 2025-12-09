@@ -50,7 +50,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MAX_HISTORY_STORE_SIZE = int(os.getenv("MAX_HISTORY_STORE_SIZE", "1000"))
 
 # Redis 대화 기록 백엔드 설정.
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.getenv("REDIS_URL", "redis://renux_redis_internal:6379/0")
 
 # 노트북에서 가져온 입력 데이터 소스 경로.
 DATA_SOURCES: Dict[str, Path] = {

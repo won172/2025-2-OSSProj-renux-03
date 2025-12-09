@@ -6,7 +6,7 @@ import json
 import pandas as pd
 from sqlalchemy import text
 
-from src.database import engine
+from src.database import engine, SessionLocal
 from src.pipelines.ingest import build_notice_chunks, reindex_from_db # reindex_from_db 추가
 
 
@@ -25,15 +25,37 @@ def filter_new_rows(incoming: pd.DataFrame, existing_urls: set[str]) -> pd.DataF
     return incoming[new_mask].copy()
 
 
+from src.config import DATA_SOURCES
+
 def save_new_notices_to_db(new_rows: pd.DataFrame) -> pd.DataFrame:
     """
     새로운 공지들을 데이터베이스의 notices 테이블에 저장하고,
     저장된 행(DB 컬럼명 기준)을 반환합니다.
+    동시에 로컬 CSV 파일에도 데이터를 추가합니다.
     """
     if new_rows.empty:
         return pd.DataFrame()
 
-    # DB 스키마(영문 컬럼명)에 맞게 이름 변경
+    csv_path = DATA_SOURCES["notices"]
+    
+    # 1. 기존 CSV 파일 로드 (파일이 없으면 빈 DataFrame)
+    if csv_path.exists():
+        existing_df = pd.read_csv(csv_path)
+    else:
+        existing_df = pd.DataFrame(columns=new_rows.columns) # 새 파일 생성 시 컬럼명 일치
+        
+    # 2. 신규 데이터를 기존 데이터 위에 추가
+    combined_df = pd.concat([new_rows, existing_df], ignore_index=True)
+    combined_df.drop_duplicates(subset=['상세URL'], inplace=True) # 중복 제거
+    
+    # 3. CSV 파일 전체 덮어쓰기
+    try:
+        combined_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+        print(f"CSV 파일 업데이트 완료. 총 {len(combined_df)}건.")
+    except Exception as e:
+        print(f"⚠️ CSV 파일 업데이트 실패: {e}")
+
+    # 4. DB 스키마(영문 컬럼명)에 맞게 이름 변경
     notices_to_save = new_rows.rename(columns={
         "게시판": "board", "제목": "title", "카테고리": "category",
         "게시일": "published_date", "상단고정": "is_fixed", "상세URL": "detail_url",
@@ -77,7 +99,37 @@ def save_chunks_to_db(generated_chunks: pd.DataFrame, saved_notices: pd.DataFram
     chunks_to_save.dropna(subset=["notice_id"], inplace=True)
     chunks_to_save["notice_id"] = chunks_to_save["notice_id"].astype(int)
 
-    chunks_to_save.to_sql("chunks", con=engine, if_exists="append", index=False)
+    # --- 중복 방지 로직 추가 ---
+    # 1. 현재 DB에 저장된 chunk_id 목록을 가져옵니다.
+    existing_chunk_ids = set()
+    if not chunks_to_save.empty:
+        chunk_ids_to_check = chunks_to_save["chunk_id"].tolist()
+        # chunk_ids_to_check가 너무 많으면 IN 절이 실패할 수 있으므로 나눠서 조회하거나 전체를 조회해야 함.
+        # 여기서는 간단하게 전체 청크 ID를 가져오지 않고, 저장하려는 ID 중에서 이미 있는 것만 확인.
+        
+        # 청크 ID 리스트를 문자열로 변환하여 쿼리에 사용
+        id_list_str = ",".join([f"'{cid}'" for cid in chunk_ids_to_check])
+        
+        # 데이터가 많을 경우를 대비해 chunk_id만 조회
+        # (SQLite에서는 IN 절 제한이 있을 수 있으나 수천 개 수준은 괜찮음)
+        with engine.connect() as conn:
+             # 간단하게, 저장하려는 ID들 중 이미 존재하는 ID만 조회
+             # 너무 길어질 수 있으니, 그냥 chunks 테이블의 모든 chunk_id를 가져오는 것은 비효율적일 수 있지만,
+             # 현재 구조상 update_notices.py는 '신규' 공지만 처리하므로 여기서 중복이 발생하는 건
+             # 이전 실행 실패 등으로 찌꺼기가 남았을 때임.
+             # 안전하게 처리하기 위해, 반복문으로 처리하거나 temp 테이블을 쓸 수 있으나,
+             # 여기서는 pandas의 read_sql로 현재 저장하려는 ID들이 있는지 확인함.
+             
+             # 청크가 너무 많으면(예: 1000개 이상) 나눠서 처리해야 함.
+             existing_df = pd.read_sql(f"SELECT chunk_id FROM chunks WHERE chunk_id IN ({id_list_str})", conn)
+             existing_chunk_ids = set(existing_df["chunk_id"].tolist())
+
+    # 2. 이미 존재하는 ID는 제외
+    if existing_chunk_ids:
+        chunks_to_save = chunks_to_save[~chunks_to_save["chunk_id"].isin(existing_chunk_ids)]
+
+    if not chunks_to_save.empty:
+        chunks_to_save.to_sql("chunks", con=engine, if_exists="append", index=False)
 
 
 def sync_notices(incoming_df: pd.DataFrame) -> int:
