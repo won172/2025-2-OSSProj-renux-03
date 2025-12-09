@@ -20,6 +20,7 @@ static public class ChatRequestApis
     {
         var app = application.MapGroup("/chat");
 
+        // 활성화된 채팅 조회
         app.MapGet("/active", async (ServerDbContext db, HttpContext context, IMapper mapper) =>
         {
             Guid id;
@@ -43,6 +44,7 @@ static public class ChatRequestApis
             return Results.Ok(chats);
         });
 
+        // 채팅 시작
         app.MapPost("/start", async (ServerDbContext db, HttpContext context, StartChat stch, IMapper mapper) =>
         {
             DateTime time = DateTime.Now.ToUniversalTime();
@@ -103,7 +105,7 @@ static public class ChatRequestApis
         });
 
         
-
+        // 메세지 전송
         app.MapPost("/msg", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper) =>
         {
             ChatMessage ask = mapper.Map<ChatMessage>(askDto);
@@ -139,6 +141,8 @@ static public class ChatRequestApis
             return Results.Ok(applyDto);
         });
 
+
+        // 채팅 이력 조회
         app.MapPost("/load", async (ServerDbContext db, IMapper mapper, LoadChat load) =>
         {
             List<ChatMessageDto> chatMessages = await MessagesToList(db, mapper, load.LastTime, load.ChatId);
@@ -147,6 +151,7 @@ static public class ChatRequestApis
         });
     }
 
+    // 최근 채팅 이력 20개
     static public async Task<List<ChatMessageDto>> MessagesToList(ServerDbContext db, IMapper mapper, DateTime lastTime, Guid chatId)
     {
         List<ChatMessageDto> chatMessages = mapper.Map<List<ChatMessageDto>>(
