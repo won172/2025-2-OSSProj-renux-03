@@ -18,7 +18,7 @@ type ChatPageMessage = {
 const mapRoleNameToUserRole = (roleName?: string | null): UserRole => {
   if (!roleName) return 'STUDENT'
   const normalized = roleName.trim().toLowerCase()
-  if (normalized.includes('교직원')) {
+  if (normalized.includes('관리자')) {
     return 'UNIVERSITY_COUNCIL'
   }
   if (normalized.includes('학생회')) {
