@@ -148,142 +148,170 @@ const DepartmentAdminPage = () => {
   }
 
   return (
-    <div className="admin-shell">
-      <header className="admin-header glass-panel">
-        <div>
-          <p className="admin-eyebrow">DEPARTMENT COUNCIL</p>
-          <h1 className="admin-title">학과 정보 관리소</h1>
-          <p className="admin-subtitle">우리 학과 학생들을 위한 맞춤형 정보를 등록하세요. 챗봇이 이 내용을 학습합니다.</p>
-        </div>
-        <button className="ghost-btn" type="button" onClick={handleNavigateHome}>
-          메인페이지로 이동
-        </button>
-      </header>
+    <div className="admin-page-wrapper">
+      <div className="admin-shell compact-mode">
+        <header className="admin-header glass-panel compact">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <div>
+              <p className="admin-eyebrow">DEPARTMENT COUNCIL</p>
+              <h1 className="admin-title compact">학과 정보 관리소</h1>
+            </div>
+            <button className="hero-btn hero-btn--primary" type="button" onClick={handleNavigateHome}>
+              메인페이지로 이동
+            </button>
+          </div>
+        </header>
 
-      <section className="admin-metrics">
-        <article className="admin-card admin-card--compact">
-          <p className="admin-card__label">등록된 정보</p>
-          <strong className="admin-card__value">{knowledgeList.length}</strong>
-        </article>
-        <article className="admin-card admin-card--compact admin-card--muted">
-          <p className="admin-card__label">승인된 정보</p>
-          <strong className="admin-card__value">{knowledgeList.filter(k => k.status === 'APPROVED').length}</strong>
-          <p className="admin-card__hint">현재 챗봇이 답변 가능한 정보 수</p>
-        </article>
-        <button className="hero-btn hero-btn--primary" style={{ marginLeft: 'auto' }} onClick={handleCreateClick} disabled={isLoading}>
-          + 새 정보 등록하기
-        </button>
+      <section className="admin-metrics compact">
+        <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <article className="admin-card admin-card--accent admin-card--compact">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+              <div>
+                <p className="admin-card__label">등록된 정보</p>
+                <strong className="admin-card__value">{knowledgeList.length}</strong>
+              </div>
+              <span className="admin-card__icon" aria-hidden="true">📝</span>
+            </div>
+          </article>
+          <article className="admin-card admin-card--compact admin-card--muted">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+              <div>
+                <p className="admin-card__label">승인된 정보</p>
+                <strong className="admin-card__value">{knowledgeList.filter(k => k.status === 'APPROVED').length}</strong>
+              </div>
+              <span className="admin-card__icon admin-card__icon--green" aria-hidden="true">✅</span>
+            </div>
+          </article>
+          <article className="admin-card admin-card--compact" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <button className="hero-btn hero-btn--primary" onClick={handleCreateClick} disabled={isLoading}>
+              + 새 정보 등록하기
+            </button>
+          </article>
+        </div>
       </section>
 
-      <section className="admin-panel admin-panel--split">
-        {/* Left Column: List */}
-        <div className="admin-panel__column">
-          <h2 className="admin-panel__title">등록 내역</h2>
-          {isLoading ? (
-            <p className="admin-status">정보를 불러오는 중...</p>
-          ) : (
-            <ul className="admin-review-list">
-              {knowledgeList.map((item) => (
-                <li
-                  key={item.id}
-                  className={`admin-review-card ${selectedId === item.id ? 'admin-review-card--active' : ''}`}
-                >
-                  <button type="button" onClick={() => handleItemClick(item.id)}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: '4px' }}>
-                      <span className={`status-pill status-pill--${getStatusClass(item.status)}`}>
-                        {getStatusLabel(item.status)}
-                      </span>
-                      <span className="admin-review-card__meta">
-                        {new Date(item.createdAt).toLocaleDateString()}
-                      </span>
+        <div className="admin-dashboard-grid">
+          {/* Left Panel: Knowledge List */}
+          <section className="admin-panel glass-panel full-height">
+            <header className="admin-panel__header">
+              <div>
+                <h2 className="admin-panel__title">등록 내역</h2>
+                <p className="admin-panel__subtitle">등록된 정보 목록</p>
+              </div>
+            </header>
+            
+            <div className="admin-panel-content-scroll">
+              {isLoading ? (
+                <p className="admin-status">정보를 불러오는 중...</p>
+              ) : (
+                <ul className="admin-review-list admin-review-list-scroll">
+                  {knowledgeList.map((item) => (
+                    <li
+                      key={item.id}
+                      className={`admin-review-card ${selectedId === item.id ? 'admin-review-card--active' : ''}`}
+                    >
+                      <button type="button" onClick={() => handleItemClick(item.id)}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: '4px' }}>
+                          <span className={`status-pill status-pill--${getStatusClass(item.status)}`}>
+                            {getStatusLabel(item.status)}
+                          </span>
+                          <span className="admin-review-card__meta">
+                            {new Date(item.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <strong className="admin-review-card__title">{item.title}</strong>
+                      </button>
+                    </li>
+                  ))}
+                  {knowledgeList.length === 0 && (
+                    <li className="admin-table__empty">등록된 정보가 없습니다.</li>
+                  )}
+                </ul>
+              )}
+            </div>
+          </section>
+
+          {/* Right Panel: Detail or Create Form */}
+          <section className="admin-panel glass-panel full-height">
+            <div className="admin-panel__column full-height admin-panel__column--detail">
+                <div className="admin-panel-content-scroll admin-review-detail-scroll">
+                  {isCreating ? (
+                    <div className="admin-review-detail" style={{ border: 'none', background: 'transparent', padding: 0 }}>
+                      <p className="admin-review-detail__eyebrow">새 정보 등록</p>
+                      <h3 className="admin-review-detail__title">정보 입력</h3>
+                      
+                      <form onSubmit={handleSubmit}>
+                        <div className="mb-3">
+                          <label className="admin-form-label">제목 (키워드)</label>
+                          <input 
+                            type="text" 
+                            className="admin-input" 
+                            placeholder="예: 졸업논문 제출 기한, 사물함 신청 방법"
+                            value={newTitle}
+                            onChange={(e) => setNewTitle(e.target.value)}
+                            disabled={isLoading}
+                          />
+                          <p className="admin-form-hint">학생들이 질문할 만한 핵심 키워드를 포함해주세요.</p>
+                        </div>
+                        
+                        <div className="mb-3">
+                          <label className="admin-form-label">상세 내용</label>
+                          <textarea 
+                            className="admin-textarea" 
+                            rows={10} 
+                            placeholder="상세한 정보를 입력하세요. 챗봇은 이 내용을 바탕으로 답변을 생성합니다."
+                            value={newContent}
+                            onChange={(e) => setNewContent(e.target.value)}
+                            disabled={isLoading}
+                          />
+                        </div>
+
+                        <div className="admin-review-detail__actions">
+                          <button className="hero-btn hero-btn--primary" type="submit" disabled={isLoading}>
+                            {isLoading ? '제출 중...' : '제출하기'}
+                          </button>
+                        </div>
+                      </form>
                     </div>
-                    <strong className="admin-review-card__title">{item.title}</strong>
-                  </button>
-                </li>
-              ))}
-              {knowledgeList.length === 0 && (
-                <li className="admin-table__empty">등록된 정보가 없습니다.</li>
-              )}
-            </ul>
-          )}
+                  ) : selectedItem ? (
+                    <div className="admin-review-detail" style={{ border: 'none', background: 'transparent', padding: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <span className={`status-pill status-pill--${getStatusClass(selectedItem.status)}`}>
+                          {getStatusLabel(selectedItem.status)}
+                        </span>
+                        <button className="ghost-btn small ghost-btn--danger" onClick={() => handleDelete(selectedItem.id)} disabled={isLoading}>
+                          {isLoading ? '삭제 중...' : '삭제'}
+                        </button>
+                      </div>
+                      
+                      <h3 className="admin-review-detail__title" style={{ marginTop: '1rem' }}>{selectedItem.title}</h3>
+                      <dl className="admin-review-detail__meta">
+                        <div>
+                          <dt>등록일</dt>
+                          <dd>{new Date(selectedItem.createdAt).toLocaleString()}</dd>
+                        </div>
+                      </dl>
+                      
+                      <div className="admin-review-detail__question">
+                        <p style={{ whiteSpace: 'pre-wrap' }}>{selectedItem.content}</p>
+                      </div>
+
+                      {selectedItem.status === 'REJECTED' && selectedItem.rejectionReason && (
+                        <div className="admin-alert admin-alert--danger">
+                          <strong>반려 사유:</strong> {selectedItem.rejectionReason}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="admin-review-detail admin-review-detail--empty" style={{ height: '100%' }}>
+                      <p>왼쪽 목록에서 정보를 선택하거나,<br/>'새 정보 등록하기' 버튼을 눌러주세요.</p>
+                    </div>
+                  )}
+                </div>
+            </div>
+          </section>
         </div>
-
-        {/* Right Column: Detail or Create Form */}
-        <div className="admin-panel__column admin-panel__column--detail">
-          {isCreating ? (
-            <div className="admin-review-detail">
-              <p className="admin-review-detail__eyebrow">새 정보 등록</p>
-              <h3 className="admin-review-detail__title">정보 입력</h3>
-              
-              <form onSubmit={handleSubmit}>
-                <div className="mb-3">
-                  <label className="admin-form-label">제목 (키워드)</label>
-                  <input 
-                    type="text" 
-                    className="admin-input" 
-                    placeholder="예: 졸업논문 제출 기한, 사물함 신청 방법"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    disabled={isLoading}
-                  />
-                  <p className="admin-form-hint">학생들이 질문할 만한 핵심 키워드를 포함해주세요.</p>
-                </div>
-                
-                <div className="mb-3">
-                  <label className="admin-form-label">상세 내용</label>
-                  <textarea 
-                    className="admin-textarea" 
-                    rows={10} 
-                    placeholder="상세한 정보를 입력하세요. 챗봇은 이 내용을 바탕으로 답변을 생성합니다."
-                    value={newContent}
-                    onChange={(e) => setNewContent(e.target.value)}
-                    disabled={isLoading}
-                  />
-                </div>
-
-                <div className="admin-review-detail__actions">
-                  <button className="hero-btn hero-btn--primary" type="submit" disabled={isLoading}>
-                    {isLoading ? '제출 중...' : '제출하기'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          ) : selectedItem ? (
-            <div className="admin-review-detail">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <span className={`status-pill status-pill--${getStatusClass(selectedItem.status)}`}>
-                  {getStatusLabel(selectedItem.status)}
-                </span>
-                <button className="ghost-btn small ghost-btn--danger" onClick={() => handleDelete(selectedItem.id)} disabled={isLoading}>
-                  {isLoading ? '삭제 중...' : '삭제'}
-                </button>
-              </div>
-              
-              <h3 className="admin-review-detail__title" style={{ marginTop: '1rem' }}>{selectedItem.title}</h3>
-              <dl className="admin-review-detail__meta">
-                <div>
-                  <dt>등록일</dt>
-                  <dd>{new Date(selectedItem.createdAt).toLocaleString()}</dd>
-                </div>
-              </dl>
-              
-              <div className="admin-review-detail__question">
-                <p style={{ whiteSpace: 'pre-wrap' }}>{selectedItem.content}</p>
-              </div>
-
-              {selectedItem.status === 'REJECTED' && selectedItem.rejectionReason && (
-                <div className="admin-alert admin-alert--danger">
-                  <strong>반려 사유:</strong> {selectedItem.rejectionReason}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="admin-review-detail admin-review-detail--empty">
-              <p>왼쪽 목록에서 정보를 선택하거나,<br/>'새 정보 등록하기' 버튼을 눌러주세요.</p>
-            </div>
-          )}
-        </div>
-      </section>
+      </div>
     </div>
   )
 }

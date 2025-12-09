@@ -76,157 +76,166 @@ const UniversityAdminPage = () => {
   }
 
   return (
-    <div className="admin-shell">
-      <header className="admin-header glass-panel">
-        <div>
-          <p className="admin-eyebrow">ADMINISTRATION</p>
-          <h1 className="admin-title">관리자 제어 센터</h1>
-          <p className="admin-subtitle">학생회 조직, 공지사항, 챗봇 전달 문의를 한 곳에서 확인하세요.</p>
-        </div>
-        <button className="hero-btn hero-btn--primary" type="button" onClick={handleNavigateHome}>
-          메인페이지로 이동
-        </button>
-      </header>
-
-      <section className="admin-metrics">
-        <article className="admin-card admin-card--accent">
-          <div>
-            <p className="admin-card__label">등록된 조직</p>
-            <strong className="admin-card__value">{registeredCount}</strong>
+    <div className="admin-page-wrapper">
+      <div className="admin-shell compact-mode">
+        <header className="admin-header glass-panel compact">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <div>
+              <p className="admin-eyebrow">ADMINISTRATION</p>
+              <h1 className="admin-title compact">관리자 제어 센터</h1>
+            </div>
+            <button className="hero-btn hero-btn--primary" type="button" onClick={handleNavigateHome}>
+              메인페이지로 이동
+            </button>
           </div>
-          <span className="admin-card__icon" aria-hidden="true">
-            👥
-          </span>
-        </article>
-        <article className="admin-card">
-          <div>
-            <p className="admin-card__label">대기 중 요청</p>
-            <strong className="admin-card__value">{pendingCount}</strong>
-          </div>
-          <span className="admin-card__icon admin-card__icon--blue" aria-hidden="true">
-            📄
-          </span>
-        </article>
-        <article className="admin-card">
-          <div>
-            <p className="admin-card__label">시스템 상태</p>
-            <strong className="admin-card__value">양호</strong>
-          </div>
-          <span className="admin-card__icon admin-card__icon--green" aria-hidden="true">
-            🟢
-          </span>
-        </article>
-      </section>
-
-      <section className="admin-panel glass-panel">
-        <header className="admin-panel__header">
-          <div>
-            <h2 className="admin-panel__title">학생회 조직 현황</h2>
-            <p className="admin-panel__subtitle">최근 업데이트 일자와 담당자를 확인하세요.</p>
-          </div>
-          <button className="ghost-btn" type="button">
-            + 새로운 조직 추가
-          </button>
         </header>
-        <div className="admin-table">
-          <div className="admin-table__head">
-            <span>조직명</span>
-            <span>담당자</span>
-            <span>최근 업데이트</span>
-            <span>상태</span>
-          </div>
-          <ul className="admin-table__body">
-            {organizations.map((org) => (
-              <li key={org.id} className="admin-table__row">
-                <span>{org.name}</span>
-                <span>{org.manager}</span>
-                <span>{org.updatedAt}</span>
-                <span className={`status-pill status-pill--${org.status === '활성' ? 'success' : 'pending'}`}>
-                  {org.status}
-                </span>
-              </li>
-            ))}
-            {organizations.length === 0 && <li className="admin-table__empty">등록된 조직이 없습니다.</li>}
-          </ul>
-        </div>
-      </section>
 
-      <section className="admin-panel admin-panel--split">
-        <div className="admin-panel__column">
-          <h2 className="admin-panel__title">검수 대기 내역</h2>
-          <p className="admin-panel__subtitle">학과 학생회에서 제출한 답변을 확인하고 승인하세요.</p>
-          <ul className="admin-review-list">
-            {pendingReviews.map((review) => (
-              <li
-                key={review.id}
-                className={`admin-review-card ${selectedReviewId === review.id ? 'admin-review-card--active' : ''}`}
-              >
-                <button type="button" onClick={() => setSelectedReviewId(review.id)}>
-                  <span className="admin-review-card__dept">{review.departmentName}</span>
-                  <strong className="admin-review-card__title">{review.question}</strong>
-                  <span className="admin-review-card__meta">
-                    {review.handler} ·{' '}
-                    {new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric' }).format(
-                      new Date(review.submittedAt),
-                    )}
-                  </span>
-                </button>
-              </li>
-            ))}
-            {pendingReviews.length === 0 && (
-              <li className="admin-table__empty">검수할 요청이 모두 처리되었습니다.</li>
-            )}
-          </ul>
-        </div>
-        <div className="admin-panel__column admin-panel__column--detail">
-          {selectedReview ? (
-            <div className="admin-review-detail">
-              <p className="admin-review-detail__eyebrow">{selectedReview.departmentName}</p>
-              <h3 className="admin-review-detail__title">{selectedReview.question}</h3>
-              <dl className="admin-review-detail__meta">
+        <section className="admin-metrics compact">
+          <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+            <article className="admin-card admin-card--accent admin-card--compact">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                 <div>
-                  <dt>담당자</dt>
-                  <dd>{selectedReview.handler}</dd>
+                    <p className="admin-card__label">등록된 조직</p>
+                    <strong className="admin-card__value">{registeredCount}</strong>
                 </div>
-                <div>
-                  <dt>제출 시각</dt>
-                  <dd>
-                    {new Intl.DateTimeFormat('ko-KR', {
-                      month: 'long',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    }).format(new Date(selectedReview.submittedAt))}
-                  </dd>
-                </div>
-              </dl>
-              <div className="admin-review-detail__answer">
-                <p>{selectedReview.answer}</p>
+                <span className="admin-card__icon" aria-hidden="true">👥</span>
               </div>
-              <div className="admin-review-detail__actions">
-                <button
-                  className="ghost-btn ghost-btn--muted"
-                  type="button"
-                  onClick={() => handleReviewAction(selectedReview.id, 'reject')}
-                >
-                  반려
-                </button>
-                <button
-                  className="hero-btn hero-btn--primary"
-                  type="button"
-                  onClick={() => handleReviewAction(selectedReview.id, 'approve')}
-                >
-                  승인
-                </button>
+            </article>
+            <article className="admin-card admin-card--compact">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <div>
+                    <p className="admin-card__label">대기 중 요청</p>
+                    <strong className="admin-card__value">{pendingCount}</strong>
+                </div>
+                <span className="admin-card__icon admin-card__icon--blue" aria-hidden="true">📄</span>
+              </div>
+            </article>
+            <article className="admin-card admin-card--compact">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <div>
+                    <p className="admin-card__label">시스템 상태</p>
+                    <strong className="admin-card__value">양호</strong>
+                </div>
+                <span className="admin-card__icon admin-card__icon--green" aria-hidden="true">🟢</span>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <div className="admin-dashboard-grid">
+          {/* Left Panel: Organizations */}
+          <section className="admin-panel glass-panel full-height">
+            <header className="admin-panel__header">
+              <div>
+                <h2 className="admin-panel__title">학생회 조직 현황</h2>
+                <p className="admin-panel__subtitle">최근 업데이트 및 상태</p>
+              </div>
+              {/* <button className="ghost-btn small" type="button">+ 추가</button> */}
+            </header>
+            
+            <div className="admin-panel-content-scroll">
+                <div className="admin-table">
+                <div className="admin-table__head">
+                    <span>조직명</span>
+                    <span>담당자</span>
+                    <span>상태</span>
+                </div>
+                <ul className="admin-table__body">
+                    {organizations.map((org) => (
+                    <li key={org.id} className="admin-table__row" style={{ gridTemplateColumns: '1.6fr 1fr 0.8fr' }}>
+                        <span>{org.name}</span>
+                        <span>{org.manager}</span>
+                        <span className={`status-pill status-pill--${org.status === '활성' ? 'success' : 'pending'}`}>
+                        {org.status}
+                        </span>
+                    </li>
+                    ))}
+                    {organizations.length === 0 && <li className="admin-table__empty">등록된 조직이 없습니다.</li>}
+                </ul>
+                </div>
+            </div>
+          </section>
+
+          {/* Right Panel: Reviews */}
+          <section className="admin-panel admin-panel--split glass-panel full-height">
+            <div className="admin-panel__column full-height">
+              <h2 className="admin-panel__title">검수 대기 내역</h2>
+              <p className="admin-panel__subtitle">제출된 답변 승인/반려</p>
+              <div className="admin-review-list-scroll">
+                  {pendingReviews.map((review) => (
+                    <div
+                        key={review.id}
+                        className={`admin-review-card ${selectedReviewId === review.id ? 'admin-review-card--active' : ''}`}
+                    >
+                        <button type="button" onClick={() => setSelectedReviewId(review.id)}>
+                        <span className="admin-review-card__dept">{review.departmentName}</span>
+                        <strong className="admin-review-card__title" style={{ fontSize: '0.95rem' }}>{review.question}</strong>
+                        <span className="admin-review-card__meta">
+                            {review.handler} · {new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric' }).format(new Date(review.submittedAt))}
+                        </span>
+                        </button>
+                    </div>
+                  ))}
+                  {pendingReviews.length === 0 && (
+                    <div className="admin-table__empty">검수할 요청이 없습니다.</div>
+                  )}
               </div>
             </div>
-          ) : (
-            <div className="admin-review-detail admin-review-detail--empty">
-              <p>왼쪽 목록에서 검수할 요청을 선택하세요.</p>
+            
+            <div className="admin-panel__column full-height admin-panel__column--detail">
+              <div className="admin-review-detail-scroll">
+                  {selectedReview ? (
+                    <div className="admin-review-detail" style={{ border: 'none', background: 'transparent', padding: 0 }}>
+                      <p className="admin-review-detail__eyebrow">{selectedReview.departmentName}</p>
+                      <h3 className="admin-review-detail__title">{selectedReview.question}</h3>
+                      <dl className="admin-review-detail__meta">
+                        <div>
+                          <dt>담당자</dt>
+                          <dd>{selectedReview.handler}</dd>
+                        </div>
+                        <div>
+                          <dt>시각</dt>
+                          <dd>
+                            {new Intl.DateTimeFormat('ko-KR', {
+                              month: 'numeric',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            }).format(new Date(selectedReview.submittedAt))}
+                          </dd>
+                        </div>
+                      </dl>
+                      <div className="admin-review-detail__answer">
+                        <p>{selectedReview.answer}</p>
+                      </div>
+                      <div className="admin-review-detail__actions" style={{ marginTop: '20px' }}>
+                        <button
+                          className="ghost-btn ghost-btn--muted"
+                          type="button"
+                          onClick={() => handleReviewAction(selectedReview.id, 'reject')}
+                        >
+                          반려
+                        </button>
+                        <button
+                          className="hero-btn hero-btn--primary"
+                          type="button"
+                          onClick={() => handleReviewAction(selectedReview.id, 'approve')}
+                        >
+                          승인
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="admin-review-detail admin-review-detail--empty" style={{ height: '100%' }}>
+                      <p>목록에서 요청을 선택하세요.</p>
+                    </div>
+                  )}
+              </div>
             </div>
-          )}
+          </section>
         </div>
-      </section>
+
+      </div>
     </div>
   )
 }
