@@ -19,6 +19,7 @@ static public class AuthenticationApis
     {
         var app = application.MapGroup("/auth");
 
+        // 유저 이름 조회
         app.MapGet("/name", async (HttpContext context, ServerDbContext db) =>
         {
             string name = context.User.FindFirstValue(JwtRegisteredClaimNames.Name)!;
@@ -27,9 +28,11 @@ static public class AuthenticationApis
             return Results.Ok(new { Name = name, RoleName = roleName });
         }).RequireAuthorization();
 
+        // 아이디 중복 검사
         app.MapPost("/idcheck", async (ServerDbContext db, IdCheck id) 
             => Results.Ok(await db.Users.AnyAsync(u => u.UserId==id.Id)));
 
+        // 회원가입
         app.MapPost("/signup",
             async (ServerDbContext db, SignupUserDto signup, IValidator<SignupUserDto> validator,
             IMapper mapper) =>
@@ -52,6 +55,7 @@ static public class AuthenticationApis
             return Results.Ok(true);
         });
 
+        // 로그인
         app.MapPost("/signin", async (ServerDbContext db, SigninUserDto signin, IValidator<SigninUserDto> validator,
             IConfiguration config, HttpContext context) =>
         {
@@ -63,7 +67,6 @@ static public class AuthenticationApis
                 return Results.Unauthorized();
             }
 
-            //User? user = await db.Users.FirstOrDefaultAsync(u => u.UserId == signin.UserId);
             User? user = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == signin.UserId);
 
             if (user == null || !BCrypt.Net.BCrypt.Verify(signin.Password, user.HashPassword))
@@ -103,6 +106,7 @@ static public class AuthenticationApis
             return Results.Ok(true);
         });
 
+        // 로그아웃
         app.MapGet("/signout", (HttpContext context) =>
         {
             context.Response.Cookies.Delete("renux-server-token");

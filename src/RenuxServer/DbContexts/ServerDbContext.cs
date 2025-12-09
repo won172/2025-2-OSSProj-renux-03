@@ -39,7 +39,7 @@ public class ServerDbContext : DbContext
         role.ToTable("roles").HasIndex(r => r.Rolename).IsUnique();
         role.HasData([
             new() { Id = new("c22bc8f7-98b8-45a3-9053-3b779e027649"), Rolename = "학생회" },
-            new() { Id = new("ec62f7d6-069d-4a47-8801-db61b938a299"), Rolename = "교직원" },
+            new() { Id = new("ec62f7d6-069d-4a47-8801-db61b938a299"), Rolename = "관리자" },
             new() { Id = new("b4114fd1-c9f0-4171-821f-b53a15faba9b"), Rolename = "일반학생" }
             ]);
 
