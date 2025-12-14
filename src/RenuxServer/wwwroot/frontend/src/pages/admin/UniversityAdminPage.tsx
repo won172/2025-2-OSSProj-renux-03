@@ -1,60 +1,106 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CouncilOrganization, PendingAnswerReview } from '../../types/admin'
+import { apiFetch } from '../../api/client'
 
-const organizationMocks: CouncilOrganization[] = [
-  {
-    id: 'org-1',
-    name: '총학생회',
-    manager: '박지원',
-    updatedAt: '2024-11-18',
-    status: '활성',
-    pendingRequests: 2,
-  },
-  {
-    id: 'org-2',
-    name: '컴퓨터공학과 학생회',
-    manager: '이서준',
-    updatedAt: '2024-11-15',
-    status: '활성',
-    pendingRequests: 1,
-  },
-  {
-    id: 'org-3',
-    name: '경영학과 학생회',
-    manager: '최민서',
-    updatedAt: '2024-11-10',
-    status: '검토 중',
-    pendingRequests: 0,
-  },
-]
+// Interfaces for API responses
+interface ApiPendingItem {
+  id: number
+  source_type: string
+  data: string // JSON string
+  status: string
+  created_at: string
+}
 
-const pendingReviewMocks: PendingAnswerReview[] = [
-  {
-    id: 'rev-1',
-    departmentName: '컴퓨터공학과',
-    submittedAt: '2024-11-19T08:32:00Z',
-    handler: '이서준',
-    question: '2025년 1학기 등록금 고지서는 언제 발송되나요?',
-    answer:
-      '총무팀에서 2월 7일(금) 이메일과 문자로 일괄 발송합니다. 학과 홈페이지 공지사항에서도 같은 날 확인 가능합니다.',
-  },
-  {
-    id: 'rev-2',
-    departmentName: '경영학과',
-    submittedAt: '2024-11-18T05:15:00Z',
-    handler: '최민서',
-    question: '학과 스터디룸 예약이 안 되는데, 방법을 알려주세요.',
-    answer:
-      '학생지원센터 예약 시스템에서 경영학과 > 스터디룸 선택 후 주당 최대 2시간까지 예약할 수 있습니다. 잔여 회차가 없으면 다음 주 월요일 09시에 새로 열립니다.',
-  },
-]
+interface ApiOrganization {
+    id: string
+    major: {
+        id: string
+        majorname: string
+    }
+}
 
 const UniversityAdminPage = () => {
   const navigate = useNavigate()
-  const [organizations] = useState(organizationMocks)
-  const [pendingReviews, setPendingReviews] = useState(pendingReviewMocks)
-  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(pendingReviews[0]?.id ?? null)
+  const [organizations, setOrganizations] = useState<CouncilOrganization[]>([])
+  const [pendingReviews, setPendingReviews] = useState<PendingAnswerReview[]>([])
+  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null)
+  
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Fetch Data
+  useEffect(() => {
+    const fetchData = async () => {
+        console.log('Fetching admin data...'); // Added log
+        setLoading(true)
+        setError(null) // Clear previous errors
+        try {
+            // 1. Fetch Organizations
+            try {
+                const orgsData = await apiFetch<ApiOrganization[]>('/req/orgs')
+                console.log('Received organizations data:', orgsData); // Added log
+                if (Array.isArray(orgsData)) {
+                    const mappedOrgs: CouncilOrganization[] = orgsData.map(org => ({
+                        id: org.id,
+                        name: `${org.major.majorname} 학생회`,
+                        manager: '-', // Not available in API
+                        updatedAt: new Date().toISOString().split('T')[0], // Placeholder
+                        status: '활성',
+                        pendingRequests: 0 // Placeholder
+                    }))
+                    setOrganizations(mappedOrgs)
+                }
+            } catch (e) {
+                console.warn('Failed to fetch orgs:', e); // Added log
+                // Don't set global error for orgs fetch failure, it might not be critical
+            }
+
+            // 2. Fetch Pending Reviews
+            try {
+                const pendingData = await apiFetch<ApiPendingItem[]>('/admin/pending')
+                console.log('Received pending reviews data:', pendingData); // Added log
+                
+                if (Array.isArray(pendingData)) {
+                    const mappedReviews: PendingAnswerReview[] = pendingData
+                        .filter(item => item.source_type === 'custom_knowledge')
+                        .map(item => {
+                            let parsedData = { question: '', answer: '', category: '' }
+                            try {
+                                parsedData = JSON.parse(item.data)
+                            } catch (e) { console.error('JSON parse error for item data:', item.data, e) } // More detailed log
+                            
+                            return {
+                                id: item.id.toString(),
+                                departmentName: parsedData.category || '공통',
+                                submittedAt: item.created_at,
+                                handler: 'System', // Placeholder
+                                question: parsedData.question,
+                                answer: parsedData.answer
+                            }
+                        })
+                    setPendingReviews(mappedReviews)
+                    if (mappedReviews.length > 0) {
+                        setSelectedReviewId(mappedReviews[0].id) // Automatically select the first one
+                    } else {
+                        setSelectedReviewId(null) // Clear selection if no reviews
+                    }
+                    console.log('Mapped pending reviews:', mappedReviews); // Added log
+                }
+            } catch (e) {
+                console.error('Failed to fetch pending reviews:', e); // More detailed log
+                setError('검수 대기 데이터를 불러오는데 실패했습니다.'); // Set global error
+            }
+
+        } catch (e) { // Catch-all for other unexpected errors during fetchData
+            console.error('An unexpected error occurred during admin data fetch:', e);
+            setError('관리자 데이터를 불러오는 중 예상치 못한 오류가 발생했습니다.');
+        } finally {
+            setLoading(false)
+        }
+    }
+    fetchData()
+  }, [])
 
   const selectedReview = useMemo(
     () => pendingReviews.find((review) => review.id === selectedReviewId) ?? null,
@@ -66,13 +112,67 @@ const UniversityAdminPage = () => {
 
   const handleNavigateHome = () => navigate('/')
 
-  const handleReviewAction = (reviewId: string, action: 'approve' | 'reject') => {
-    setPendingReviews((prev) => prev.filter((review) => review.id !== reviewId))
-    if (selectedReviewId === reviewId) {
-      setSelectedReviewId(null)
+  const handleReviewAction = async (reviewId: string, action: 'approve' | 'reject') => {
+    console.log(`handleReviewAction called for ID: ${reviewId}, action: ${action}`); // Added log
+    if (!confirm(`${action === 'approve' ? '승인' : '반려'} 하시겠습니까?`)) {
+      console.log('User cancelled action.'); // Added log
+      return;
     }
-    const actionLabel = action === 'approve' ? '승인했습니다.' : '반려했습니다.'
-    alert(`검수 내역을 ${actionLabel}`)
+
+    try {
+        console.log(`Sending ${action} request to /admin/${action}/${reviewId}`); // Added log
+        await apiFetch(`/admin/${action}/${reviewId}`, { method: 'POST' })
+        console.log(`Request for ID ${reviewId} with action ${action} successful.`); // Added log
+        
+        // Update UI: remove the approved/rejected item
+        setPendingReviews((prev) => prev.filter((review) => review.id !== reviewId))
+        
+        // If the currently selected item was just handled, select next or clear
+        if (selectedReviewId === reviewId) {
+            const remainingReviews = pendingReviews.filter(review => review.id !== reviewId);
+            setSelectedReviewId(remainingReviews.length > 0 ? remainingReviews[0].id : null);
+        }
+
+        const actionLabel = action === 'approve' ? '승인했습니다.' : '반려했습니다.'
+        alert(`검수 내역을 ${actionLabel}`)
+    } catch (e) {
+        console.error('Action failed:', e); // More detailed log
+        let message = '요청 처리에 실패했습니다.';
+        if (e instanceof Error) {
+            message += ` (${e.message})`;
+            // @ts-ignore
+            if (e.status) message += ` [Status: ${e.status}]`;
+        }
+        setError(message) // Set error state for display
+        alert(message)
+    }
+  }
+
+  // Display loading, error, or main content
+  if (loading) {
+    return (
+      <div className="admin-page-wrapper">
+        <div className="admin-shell compact-mode">
+          <header className="admin-header glass-panel compact">
+            <h1 className="admin-title compact">관리자 제어 센터</h1>
+          </header>
+          <section className="admin-metrics compact">로딩 중...</section>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="admin-page-wrapper">
+        <div className="admin-shell compact-mode">
+          <header className="admin-header glass-panel compact">
+            <h1 className="admin-title compact">관리자 제어 센터</h1>
+          </header>
+          <section className="admin-metrics compact" style={{color: 'red'}}>오류: {error}</section>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -166,8 +266,9 @@ const UniversityAdminPage = () => {
                     <div
                         key={review.id}
                         className={`admin-review-card ${selectedReviewId === review.id ? 'admin-review-card--active' : ''}`}
+                        onClick={() => setSelectedReviewId(review.id)} // Click on card selects it
                     >
-                        <button type="button" onClick={() => setSelectedReviewId(review.id)}>
+                        <button type="button" style={{all: 'unset', cursor: 'pointer', display: 'block', width: '100%', padding: '10px'}}>
                         <span className="admin-review-card__dept">{review.departmentName}</span>
                         <strong className="admin-review-card__title" style={{ fontSize: '0.95rem' }}>{review.question}</strong>
                         <span className="admin-review-card__meta">
