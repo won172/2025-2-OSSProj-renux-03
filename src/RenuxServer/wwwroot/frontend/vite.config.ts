@@ -22,6 +22,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/admin': {
+        target: DEV_PROXY_TARGET,
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
 })
