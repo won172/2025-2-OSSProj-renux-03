@@ -2167,3 +2167,21 @@
 .admin-table__head, .admin-table__row {
     padding: 8px 4px;
 }
+
+/* Added for Department Admin Form Actions */
+.form-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+/* Add margin to admin-form-field for spacing between form groups */
+.admin-form-field {
+    margin-bottom: 15px;
+}
+
+/* Remove bottom margin for the last form field in a form */
+.admin-form-field:last-of-type {
+    margin-bottom: 0;
+}
