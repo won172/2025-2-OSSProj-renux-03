@@ -3,6 +3,29 @@ import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
 import type { DepartmentKnowledge } from '../../types/admin'
 
+interface KnowledgePayload {
+  question: string;
+  answer: string;
+  category: string;
+}
+
+interface EventPayload {
+  title: string;
+  start_date: string;
+  end_date: string;
+  location: string;
+  department: string;
+  description: string;
+}
+
+interface AnnouncementPayload {
+  title: string;
+  content: string;
+  date: string;
+  category: string;
+  department: string;
+}
+
 // Mock data for initial development
 const mockKnowledgeList: DepartmentKnowledge[] = [
   {
@@ -51,7 +74,7 @@ const DepartmentAdminPage = () => {
     if (knowledgeList.length === 0) {
       setKnowledgeList(mockKnowledgeList);
     }
-  }, []);
+  }, [knowledgeList.length]); // Added knowledgeList.length to dependency array
 
   const selectedItem = useMemo(
     () => knowledgeList.find((item) => item.id === selectedId) ?? null,
@@ -84,8 +107,8 @@ const DepartmentAdminPage = () => {
       return
     }
 
-    let payloadData: any = {}
-    let sourceType = ''
+    let payloadData: KnowledgePayload | EventPayload | AnnouncementPayload;
+    let sourceType = '';
 
     if (contentType === 'knowledge') {
       payloadData = {
@@ -108,7 +131,8 @@ const DepartmentAdminPage = () => {
         description: newContent
       }
       sourceType = 'event'
-    } else if (contentType === 'announcement') {
+    } else {
+      // contentType === 'announcement'
       if (!startDate) {
         alert('게시일을 입력해주세요.')
         return
@@ -291,117 +315,122 @@ const DepartmentAdminPage = () => {
             <div className="admin-panel__column full-height admin-panel__column--detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div className="admin-panel-content-scroll admin-review-detail-scroll" style={{ flex: 1, overflowY: 'auto' }}>
                   {isCreating ? (
-                    <div className="admin-review-detail" style={{ border: 'none', background: 'transparent', padding: 0 }}>
-                      <p className="admin-review-detail__eyebrow">새 정보 등록</p>
-                      <h3 className="admin-review-detail__title">정보 입력</h3>
-                      
-                      <form onSubmit={handleSubmit}>
-                        <div className="mb-3">
-                          <label className="admin-form-label">등록 유형</label>
-                          <select 
-                            className="admin-input" 
-                            value={contentType} 
-                            onChange={(e) => setContentType(e.target.value as any)}
-                            disabled={isLoading}
-                          >
-                            <option value="knowledge">❓ 자주 묻는 질문 (FAQ)</option>
-                            <option value="event">📅 학과 행사 (Event)</option>
-                            <option value="announcement">📢 공지사항 (Notice)</option>
-                          </select>
+                    <div className="admin-review-detail">
+                      <header className="admin-panel__header">
+                        <div>
+                          <p className="admin-eyebrow">새 정보 등록</p>
+                          <h3 className="admin-panel__title">정보 입력</h3>
                         </div>
+                      </header>
+                      <div className="admin-panel__content">
+                        <form onSubmit={handleSubmit}>
+                          <div className="admin-form-field">
+                            <label className="admin-form-label">등록 유형</label>
+                            <select 
+                              className="admin-input" 
+                              value={contentType} 
+                              onChange={(e) => setContentType(e.target.value as 'knowledge' | 'event' | 'announcement')}
+                              disabled={isLoading}
+                            >
+                              <option value="knowledge">❓ 자주 묻는 질문 (FAQ)</option>
+                              <option value="event">📅 학과 행사 (Event)</option>
+                              <option value="announcement">📢 공지사항 (Notice)</option>
+                            </select>
+                          </div>
 
-                        <div className="mb-3">
-                          <label className="admin-form-label">
-                            {contentType === 'knowledge' ? '질문 (Question)' : contentType === 'event' ? '행사명 (Title)' : '제목 (Title)'}
-                          </label>
-                          <input 
-                            type="text" 
-                            className="admin-input" 
-                            placeholder={contentType === 'knowledge' ? "예: 졸업논문 제출 기한" : "제목을 입력하세요"}
-                            value={newTitle}
-                            onChange={(e) => setNewTitle(e.target.value)}
-                            disabled={isLoading}
-                          />
-                        </div>
+                          <div className="admin-form-field">
+                            <label className="admin-form-label">
+                              {contentType === 'knowledge' ? '질문 (Question)' : contentType === 'event' ? '행사명 (Title)' : '제목 (Title)'}
+                            </label>
+                            <input 
+                              type="text" 
+                              className="admin-input" 
+                              placeholder={contentType === 'knowledge' ? "예: 졸업논문 제출 기한" : "제목을 입력하세요"}
+                              value={newTitle}
+                              onChange={(e) => setNewTitle(e.target.value)}
+                              disabled={isLoading}
+                            />
+                          </div>
 
-                        {/* Date Fields for Event/Announcement */}
-                        {(contentType === 'event' || contentType === 'announcement') && (
-                          <div className="mb-3" style={{ display: 'flex', gap: '10px' }}>
-                            <div style={{ flex: 1 }}>
-                              <label className="admin-form-label">{contentType === 'event' ? '시작일' : '게시일'}</label>
-                              <input 
-                                type="date" 
-                                className="admin-input"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
-                                disabled={isLoading}
-                              />
-                            </div>
-                            {contentType === 'event' && (
+                          {/* Date Fields for Event/Announcement */}
+                          {(contentType === 'event' || contentType === 'announcement') && (
+                            <div className="admin-form-field" style={{ display: 'flex', gap: '10px' }}>
                               <div style={{ flex: 1 }}>
-                                <label className="admin-form-label">종료일 (선택)</label>
+                                <label className="admin-form-label">{contentType === 'event' ? '시작일' : '게시일'}</label>
                                 <input 
                                   type="date" 
                                   className="admin-input"
-                                  value={endDate}
-                                  onChange={(e) => setEndDate(e.target.value)}
+                                  value={startDate}
+                                  onChange={(e) => setStartDate(e.target.value)}
                                   disabled={isLoading}
                                 />
                               </div>
-                            )}
-                          </div>
-                        )}
+                              {contentType === 'event' && (
+                                <div style={{ flex: 1 }}>
+                                  <label className="admin-form-label">종료일 (선택)</label>
+                                  <input 
+                                    type="date" 
+                                    className="admin-input"
+                                    value={endDate}
+                                    onChange={(e) => setEndDate(e.target.value)}
+                                    disabled={isLoading}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
 
-                        {/* Location for Event */}
-                        {contentType === 'event' && (
-                          <div className="mb-3">
-                            <label className="admin-form-label">장소</label>
-                            <input 
-                              type="text" 
-                              className="admin-input"
-                              placeholder="예: 공학관 101호"
-                              value={location}
-                              onChange={(e) => setLocation(e.target.value)}
+                          {/* Location for Event */}
+                          {contentType === 'event' && (
+                            <div className="admin-form-field">
+                              <label className="admin-form-label">장소</label>
+                              <input 
+                                type="text" 
+                                className="admin-input"
+                                placeholder="예: 공학관 101호"
+                                value={location}
+                                onChange={(e) => setLocation(e.target.value)}
+                                disabled={isLoading}
+                              />
+                            </div>
+                          )}
+
+                          {/* Category for Announcement */}
+                          {contentType === 'announcement' && (
+                            <div className="admin-form-field">
+                              <label className="admin-form-label">카테고리</label>
+                              <input 
+                                type="text" 
+                                className="admin-input"
+                                placeholder="예: 학사, 장학, 채용"
+                                value={category}
+                                onChange={(e) => setCategory(e.target.value)}
+                                disabled={isLoading}
+                              />
+                            </div>
+                          )}
+                          
+                          <div className="admin-form-field">
+                            <label className="admin-form-label">
+                              {contentType === 'knowledge' ? '답변 (Answer)' : '상세 내용'}
+                            </label>
+                            <textarea 
+                              className="admin-textarea" 
+                              rows={10} 
+                              placeholder="상세 내용을 입력하세요."
+                              value={newContent}
+                              onChange={(e) => setNewContent(e.target.value)}
                               disabled={isLoading}
                             />
                           </div>
-                        )}
 
-                        {/* Category for Announcement */}
-                        {contentType === 'announcement' && (
-                          <div className="mb-3">
-                            <label className="admin-form-label">카테고리</label>
-                            <input 
-                              type="text" 
-                              className="admin-input"
-                              placeholder="예: 학사, 장학, 채용"
-                              value={category}
-                              onChange={(e) => setCategory(e.target.value)}
-                              disabled={isLoading}
-                            />
+                          <div className="form-actions">
+                            <button className="hero-btn hero-btn--primary" type="submit" disabled={isLoading}>
+                              {isLoading ? '제출 중...' : '제출하기'}
+                            </button>
                           </div>
-                        )}
-                        
-                        <div className="mb-3">
-                          <label className="admin-form-label">
-                            {contentType === 'knowledge' ? '답변 (Answer)' : '상세 내용'}
-                          </label>
-                          <textarea 
-                            className="admin-textarea" 
-                            rows={10} 
-                            placeholder="상세 내용을 입력하세요."
-                            value={newContent}
-                            onChange={(e) => setNewContent(e.target.value)}
-                            disabled={isLoading}
-                          />
-                        </div>
-
-                        <div className="admin-review-detail__actions">
-                          <button className="hero-btn hero-btn--primary" type="submit" disabled={isLoading}>
-                            {isLoading ? '제출 중...' : '제출하기'}
-                          </button>
-                        </div>
-                      </form>
+                        </form>
+                      </div>
                     </div>
                   ) : selectedItem ? (
                     <div className="admin-review-detail" style={{ border: 'none', background: 'transparent', padding: 0 }}>
