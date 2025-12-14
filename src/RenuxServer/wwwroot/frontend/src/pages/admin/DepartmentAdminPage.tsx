@@ -241,7 +241,7 @@ const DepartmentAdminPage = () => {
                       <h3 className="admin-review-detail__title">정보 입력</h3>
                       
                       <form onSubmit={handleSubmit}>
-                        <div className="mb-3">
+                        <div className="admin-form-field">
                           <label className="admin-form-label">제목 (키워드)</label>
                           <input 
                             type="text" 
@@ -254,7 +254,7 @@ const DepartmentAdminPage = () => {
                           <p className="admin-form-hint">학생들이 질문할 만한 핵심 키워드를 포함해주세요.</p>
                         </div>
                         
-                        <div className="mb-3">
+                        <div className="admin-form-field">
                           <label className="admin-form-label">상세 내용</label>
                           <textarea 
                             className="admin-textarea" 
