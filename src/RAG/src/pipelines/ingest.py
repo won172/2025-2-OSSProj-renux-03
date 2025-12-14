@@ -228,9 +228,10 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
     
     session = SessionLocal()
     try:
-        # 1. 기존 데이터 삭제
-        session.query(Chunk).filter(Chunk.notice_id.isnot(None)).delete()
-        session.query(Notice).delete()
+        # 1. 기존 데이터 삭제 (자동 수집된 것만)
+        auto_notices_query = session.query(Notice.id).filter((Notice.is_manual == 0) | (Notice.is_manual.is_(None)))
+        session.query(Chunk).filter(Chunk.notice_id.in_(auto_notices_query)).delete(synchronize_session=False)
+        session.query(Notice).filter((Notice.is_manual == 0) | (Notice.is_manual.is_(None))).delete(synchronize_session=False)
         session.commit()
         
         # 2. 원본 데이터 저장
@@ -261,6 +262,28 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
         session.close()
 
     # 4. 청크 생성 및 저장
+    # DB에 남아있는 수동 데이터(manual notices)를 가져와서 raw_df에 합침
+    manual_notices = session.query(Notice).filter(Notice.is_manual == 1).all()
+    manual_data = []
+    for n in manual_notices:
+        manual_data.append({
+            "게시판": n.board,
+            "제목": n.title,
+            "카테고리": n.category,
+            "게시일": n.published_date,
+            "상단고정": n.is_fixed,
+            "상세URL": n.detail_url,
+            "본문": n.content,
+            "첨부파일": n.attachments, # JSON string or list?
+            "db_id": n.id
+        })
+    
+    if manual_data:
+        manual_df = pd.DataFrame(manual_data)
+        # raw_df에는 db_id가 이미 있음 (3. ID 매핑 단계에서).
+        # manual_df와 합치기.
+        raw_df = pd.concat([raw_df, manual_df], ignore_index=True)
+
     chunks_df = build_notice_chunks(raw_df)
     _save_chunks_to_sqlite(chunks_df, "notices")
     
@@ -390,8 +413,10 @@ def ingest_schedule() -> Tuple[pd.DataFrame, object, object]:
     
     session = SessionLocal()
     try:
-        session.query(Chunk).filter(Chunk.schedule_id.isnot(None)).delete()
-        session.query(Schedule).delete()
+        # 1. 기존 데이터 삭제 (자동 수집된 것만)
+        auto_schedule_query = session.query(Schedule.id).filter((Schedule.is_manual == 0) | (Schedule.is_manual.is_(None)))
+        session.query(Chunk).filter(Chunk.schedule_id.in_(auto_schedule_query)).delete(synchronize_session=False)
+        session.query(Schedule).filter((Schedule.is_manual == 0) | (Schedule.is_manual.is_(None))).delete(synchronize_session=False)
         session.commit()
 
         sch_objs = []
@@ -428,6 +453,26 @@ def ingest_schedule() -> Tuple[pd.DataFrame, object, object]:
         df["db_object"] = parsed_objs
         
         # Build chunks INSIDE the session block to access lazy-loaded attributes
+        
+        # 수동 데이터 추가
+        manual_schedules = session.query(Schedule).filter(Schedule.is_manual == 1).all()
+        for ms in manual_schedules:
+            # df 구조에 맞게 row 추가 필요
+            # build_schedule_chunks는 row["db_object"]를 사용함.
+            # 수동 데이터용 row 생성
+            new_row = pd.Series()
+            # build_schedule_chunks에서 db_object만 있으면 됨.
+            new_row["db_object"] = ms
+            # df에 추가하지 않고, build_schedule_chunks 로직을 보면 df를 순회함.
+            # df에 append하는 것이 좋음.
+            # 하지만 df는 문자열로 되어있고, db_object는 객체임.
+            # df["db_object"] 컬럼에 객체가 들어있음.
+            
+            # DataFrame 확장이 번거로우므로, manual_schedules를 리스트로 만들어서 처리할 수도 있지만
+            # 기존 로직과의 일관성을 위해 df에 추가.
+            ms_df = pd.DataFrame([{"db_object": ms}])
+            df = pd.concat([df, ms_df], ignore_index=True)
+
         chunks_df = build_schedule_chunks(df)
     finally:
         session.close()
@@ -694,10 +739,12 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
         # 1. Notices
         if not target or target == "notices":
             print("🔄 Re-indexing notices from DB...")
-            query = session.query(Chunk, Notice).join(Notice, Chunk.notice_id == Notice.id)
-            data = []
-            for chunk, notice in query.all():
-                data.append({
+            
+            # Existing Notice query
+            query_notices = session.query(Chunk, Notice).join(Notice, Chunk.notice_id == Notice.id)
+            notice_data = []
+            for chunk, notice in query_notices.all():
+                notice_data.append({
                     "chunk_id": chunk.chunk_id,
                     "chunk_text": chunk.chunk_text,
                     "title": notice.title,
@@ -706,10 +753,38 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
                     "url": notice.detail_url,
                     "attachments": notice.attachments,
                     "source": "notices",
-                    "notice_id": notice.id
+                    "notice_id": notice.id,
+                    "category": notice.category,
+                    "question": None, 
+                    "answer": None, 
+                    "custom_knowledge_id": None 
                 })
-            if data:
-                df = pd.DataFrame(data)
+
+            # New CustomKnowledge query
+            query_custom_knowledge = session.query(Chunk, CustomKnowledge).join(CustomKnowledge, Chunk.custom_knowledge_id == CustomKnowledge.id)
+            custom_knowledge_data = []
+            for chunk, ck in query_custom_knowledge.all():
+                custom_knowledge_data.append({
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_text": chunk.chunk_text,
+                    "title": ck.question, 
+                    "topics": ck.category or "CustomKnowledge", 
+                    "published_at": ck.created_at.strftime("%Y-%m-%d") if ck.created_at else "", 
+                    "url": "", 
+                    "attachments": "[]", 
+                    "source": "custom_knowledge", 
+                    "notice_id": None, 
+                    "category": ck.category,
+                    "question": ck.question,
+                    "answer": ck.answer,
+                    "custom_knowledge_id": ck.id
+                })
+            
+            # Combine both data sources
+            all_notices_data = notice_data + custom_knowledge_data
+
+            if all_notices_data:
+                df = pd.DataFrame(all_notices_data)
                 results["notices"] = _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, df)
         
         # 2. Rules
