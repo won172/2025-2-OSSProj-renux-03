@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import os
 import json
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime
+
+def kst_now():
+    return datetime.now(timezone(timedelta(hours=9)))
+
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 
 # 데이터베이스 파일 경로 설정 (RAG 폴더 최상위에 'rag_database.db' 파일로 저장됨)
@@ -34,6 +39,7 @@ class Notice(Base):
     detail_url = Column(String, unique=True, index=True)
     content = Column(Text)
     attachments = Column(Text)
+    is_manual = Column(Integer, default=0) # 0: auto, 1: manual
     
     chunks = relationship("Chunk", back_populates="notice")
 
@@ -61,6 +67,7 @@ class Schedule(Base):
     category = Column(String)
     department = Column(String)
     content = Column(Text)
+    is_manual = Column(Integer, default=0) # 0: auto, 1: manual
     
     chunks = relationship("Chunk", back_populates="schedule")
 
@@ -95,7 +102,31 @@ class Staff(Base):
     chunks = relationship("Chunk", back_populates="staff")
 
 
-# 6. 통합 청크 (Chunks)
+# 6. 사용자 정의 지식 (CustomKnowledge)
+class CustomKnowledge(Base):
+    __tablename__ = "custom_knowledge"
+
+    id = Column(Integer, primary_key=True, index=True)
+    question = Column(Text, index=True)
+    answer = Column(Text)
+    category = Column(String)
+    created_at = Column(DateTime, default=kst_now)
+
+    chunks = relationship("Chunk", back_populates="custom_knowledge")
+
+
+# 7. 승인 대기 항목 (PendingItems)
+class PendingItem(Base):
+    __tablename__ = "pending_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_type = Column(String)  # 'custom_knowledge', 'notice', etc.
+    data = Column(Text)  # JSON payload
+    status = Column(String, default="pending")  # pending, approved, rejected
+    created_at = Column(DateTime, default=kst_now)
+
+
+# 8. 통합 청크 (Chunks)
 class Chunk(Base):
     __tablename__ = "chunks"
 
@@ -109,13 +140,15 @@ class Chunk(Base):
     schedule_id = Column(Integer, ForeignKey("schedule.id"), nullable=True)
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True) # 새로 추가
-    
+    custom_knowledge_id = Column(Integer, ForeignKey("custom_knowledge.id"), nullable=True)
+
     # Relationships
     notice = relationship("Notice", back_populates="chunks")
     rule = relationship("Rule", back_populates="chunks")
     schedule = relationship("Schedule", back_populates="chunks")
     course = relationship("Course", back_populates="chunks")
     staff = relationship("Staff", back_populates="chunks") # 새로 추가
+    custom_knowledge = relationship("CustomKnowledge", back_populates="chunks")
 
 
 def init_db():

@@ -43,7 +43,7 @@ LLM_ROUTER_DESCRIPTIONS = {
 }
 
 # OpenAI/LLM 기본 설정.
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.2")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # 대화 기록 관련 설정 (인메모리).

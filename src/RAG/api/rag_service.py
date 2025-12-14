@@ -3,6 +3,7 @@ import logging
 import re
 import sys
 import uuid
+import json
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -22,6 +24,7 @@ from src.config import (
     RECENCY_WEIGHT,
     VECTORIZER_DIR,
 )
+from src.database import SessionLocal, PendingItem, CustomKnowledge, Chunk, Notice, Schedule
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
     ingest_courses,
@@ -33,15 +36,29 @@ from src.pipelines.ingest import (
 from src.search.hybrid import load_tfidf, hybrid_search_with_meta
 from src.services.answer import format_citations
 from src.services.langchain_chat import generate_langchain_answer
-from src.models.embedding import get_embedder
+from src.models.embedding import get_embedder, encode_texts
 from src.services.router import route_query
 from src.utils.date_parser import extract_date_range_from_query
 from src.utils.query_expansion import expand_query
+from src.utils.preprocess import make_doc_id
+from src.vectorstore.chroma_client import upsert_items
 
 app = FastAPI(
     title="동똑이",
     description="25-2 오픈소스소프트웨어프로젝트 팀 Renux의 동국대학교 캠퍼스 RAG 어시스턴트 API 서비스입니다.",
 )
+
+@app.get("/notifications")
+async def notifications_dummy():
+    return []
+
+@app.options("/notifications")
+async def notifications_options_dummy():
+    return {}
+
+@app.options("/token")
+async def token_options_dummy():
+    return {}
 
 _DATASET_LOADERS = {
     "notices": ingest_notices,
@@ -84,6 +101,11 @@ class AskRequest(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+class SubmitRequest(BaseModel):
+    source_type: str
+    data: str
 
 
 
@@ -161,6 +183,296 @@ def bootstrap_artifacts() -> None:
     except Exception as exc:
         logging.warning(f"⚠️ Embedding model warmup failed: {exc}", exc_info=True)
 
+
+
+@app.post("/admin/submit")
+async def submit_pending(req: SubmitRequest):
+    session = SessionLocal()
+    try:
+        item = PendingItem(
+            source_type=req.source_type,
+            data=req.data,
+            status="pending"
+        )
+        session.add(item)
+        session.commit()
+        return {"status": "ok", "id": item.id}
+    finally:
+        session.close()
+
+
+@app.get("/admin/pending")
+async def list_pending():
+    session = SessionLocal()
+    try:
+        items = session.query(PendingItem).filter(PendingItem.status == "pending").all()
+        return items
+    finally:
+        session.close()
+
+
+@app.get("/admin/items")
+async def list_all_items():
+    session = SessionLocal()
+    try:
+        items = session.query(PendingItem).order_by(PendingItem.created_at.desc()).all()
+        return items
+    finally:
+        session.close()
+
+
+
+@app.post("/admin/approve/{item_id}")
+async def approve_pending(item_id: int):
+    session = SessionLocal()
+    try:
+        logging.info(f"👉 [Admin] Approving item ID: {item_id}")
+        item = session.query(PendingItem).filter(PendingItem.id == item_id).first()
+        if not item:
+            logging.error(f"❌ [Admin] Item not found: {item_id}")
+            return {"status": "error", "message": "Item not found"}
+
+        if item.source_type == "custom_knowledge":
+            data = json.loads(item.data)
+            logging.info(f"📝 [Admin] Processing custom knowledge: {data.get('question')}")
+
+            # 1. Create CustomKnowledge
+            ck = CustomKnowledge(
+                question=data.get("question"),
+                answer=data.get("answer"),
+                category=data.get("category")
+            )
+            session.add(ck)
+            session.commit()  # to get ID
+            logging.info(f"✅ [Admin] CustomKnowledge saved to DB. ID: {ck.id}")
+
+            # 2. Create Chunk
+            doc_id = make_doc_id("custom_knowledge", str(ck.id), ck.question[:20])
+            text = f"질문: {ck.question}\n\n답변: {ck.answer}"
+            if ck.category:
+                text = f"카테고리: {ck.category}\n{text}"
+
+            chunk = Chunk(
+                chunk_id=doc_id,
+                chunk_text=text,
+                custom_knowledge_id=ck.id
+            )
+            session.add(chunk)
+            session.commit()
+            logging.info(f"✅ [Admin] Chunk saved to DB. Chunk ID: {doc_id}")
+
+            # 3. Upsert to Chroma
+            target_collection = "dongguk_notices"
+            embedding = encode_texts([text])
+            metadata = {
+                "source": "custom_knowledge",
+                "question": ck.question,
+                "category": ck.category or "",
+                "created_at": str(ck.created_at),
+                "major": "common" # 필터링 우회를 위한 기본값
+            }
+            metadata = {k: (v if v is not None else "") for k, v in metadata.items()}
+
+            upsert_items(
+                name=target_collection,
+                ids=[doc_id],
+                documents=[text],
+                metadatas=[metadata],
+                embeddings=embedding
+            )
+            logging.info(f"✅ [Admin] Upserted to ChromaDB")
+
+            # 4. Trigger dataset reload to include new custom knowledge from DB
+            try:
+                # Invalidate cache for notices dataset to force reload from DB
+                if "notices" in _datasets:
+                    del _datasets["notices"] 
+                _ensure_dataset("notices")
+                logging.info(f"✅ [Admin] Triggered dataset reload for 'notices' to include new CustomKnowledge.")
+            except Exception as e:
+                logging.error(f"❌ [Admin] Failed to trigger dataset reload after CustomKnowledge approval: {e}")
+                # Reload failure is not critical for DB commit, but RAG may not reflect changes immediately
+
+
+
+            item.status = "approved"
+            session.commit()
+            logging.info(f"🎉 [Admin] Item {item_id} successfully approved.")
+
+            return {"status": "approved", "chunk_id": doc_id}
+
+        elif item.source_type == "event":
+            data = json.loads(item.data)
+            logging.info(f"📅 [Admin] Processing event: {data.get('title')}")
+            
+            # 1. Create Schedule
+            sch = Schedule(
+                title=data.get("title"),
+                start_date=data.get("start_date"),
+                end_date=data.get("end_date"),
+                category="학과행사",
+                department=data.get("department"),
+                content=data.get("description"),
+                is_manual=1
+            )
+            session.add(sch)
+            session.commit()
+            logging.info(f"✅ [Admin] Schedule saved to DB. ID: {sch.id}")
+
+            # 2. Create Chunk
+            doc_id = make_doc_id("schedule", sch.start_date, sch.end_date, sch.content)
+            
+            date_str = f"{sch.start_date}"
+            if sch.end_date and sch.end_date != sch.start_date:
+                date_str += f" ~ {sch.end_date}"
+            
+            rich_text = f"학과행사: {sch.title}\n\n{sch.content}\n\n기간: {date_str}"
+            if sch.department:
+                rich_text += f"\n\n주관부서: {sch.department}"
+            
+            if data.get("location"):
+                 rich_text += f"\n\n장소: {data.get('location')}"
+
+            chunk = Chunk(
+                chunk_id=doc_id,
+                chunk_text=rich_text,
+                schedule_id=sch.id
+            )
+            session.add(chunk)
+            session.commit()
+            logging.info(f"✅ [Admin] Chunk saved to DB. Chunk ID: {doc_id}")
+
+            # 3. Upsert to Chroma
+            target_collection = "dongguk_schedule"
+            embedding = encode_texts([rich_text])
+            metadata = {
+                "source": "schedule",
+                "title": sch.title,
+                "schedule_start": sch.start_date,
+                "schedule_end": sch.end_date,
+                "category": sch.category,
+                "department": sch.department,
+                "published_at": sch.start_date # for date filtering
+            }
+            metadata = {k: (v if v is not None else "") for k, v in metadata.items()}
+
+            upsert_items(
+                name=target_collection,
+                ids=[doc_id],
+                documents=[rich_text],
+                metadatas=[metadata],
+                embeddings=embedding
+            )
+            logging.info(f"✅ [Admin] Upserted to ChromaDB (Schedule)")
+
+            # 4. Trigger dataset reload
+            try:
+                if "schedule" in _datasets:
+                    del _datasets["schedule"] 
+                _ensure_dataset("schedule")
+                logging.info(f"✅ [Admin] Triggered dataset reload for 'schedule'.")
+            except Exception as e:
+                logging.error(f"❌ [Admin] Failed to trigger dataset reload: {e}")
+
+            item.status = "approved"
+            session.commit()
+            return {"status": "approved", "chunk_id": doc_id}
+
+        elif item.source_type == "announcement":
+            data = json.loads(item.data)
+            logging.info(f"📢 [Admin] Processing announcement: {data.get('title')}")
+            
+            # 1. Create Notice
+            notice = Notice(
+                board=data.get("department", "공지사항"),
+                title=data.get("title"),
+                category=data.get("category", "일반"),
+                published_date=data.get("date"),
+                content=data.get("content"),
+                is_manual=1
+            )
+            session.add(notice)
+            session.commit()
+            logging.info(f"✅ [Admin] Notice saved to DB. ID: {notice.id}")
+
+            # 2. Create Chunk
+            doc_id = make_doc_id(notice.title, notice.board, notice.published_date)
+            
+            text_content = notice.content
+            prefix_parts = []
+            if notice.board:
+                prefix_parts.append(f"게시판: {notice.board}")
+            if notice.published_date:
+                prefix_parts.append(f"게시일: {notice.published_date}")
+            
+            if prefix_parts:
+                text_content = f"[{', '.join(prefix_parts)}]\n\n{text_content}"
+
+            chunk = Chunk(
+                chunk_id=doc_id,
+                chunk_text=text_content,
+                notice_id=notice.id
+            )
+            session.add(chunk)
+            session.commit()
+
+            # 3. Upsert to Chroma
+            target_collection = "dongguk_notices"
+            embedding = encode_texts([text_content])
+            metadata = {
+                "source": "notices",
+                "title": notice.title,
+                "topics": notice.board,
+                "published_at": notice.published_date,
+                "category": notice.category
+            }
+            metadata = {k: (v if v is not None else "") for k, v in metadata.items()}
+            
+            upsert_items(
+                name=target_collection,
+                ids=[doc_id],
+                documents=[text_content],
+                metadatas=[metadata],
+                embeddings=embedding
+            )
+            logging.info(f"✅ [Admin] Upserted to ChromaDB (Notice)")
+
+            # 4. Trigger reload
+            try:
+                if "notices" in _datasets:
+                    del _datasets["notices"]
+                _ensure_dataset("notices")
+            except Exception as e:
+                logging.error(f"❌ [Admin] Failed to reload notices: {e}")
+
+            item.status = "approved"
+            session.commit()
+            return {"status": "approved", "chunk_id": doc_id}
+            
+        else:
+             item.status = "approved_manually" 
+             session.commit()
+             return {"status": "approved_manually"}
+
+    except Exception as e:
+        session.rollback()
+        logging.error(f"🔥 [Admin] Critical Error in approve_pending: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+    finally:
+        session.close()
+
+
+@app.post("/admin/reject/{item_id}")
+async def reject_pending(item_id: int):
+    session = SessionLocal()
+    try:
+        item = session.query(PendingItem).filter(PendingItem.id == item_id).first()
+        if item:
+            item.status = "rejected"
+            session.commit()
+        return {"status": "rejected"}
+    finally:
+        session.close()
 
 
 @app.post("/ask", response_model=AskResponse)
@@ -321,7 +633,7 @@ async def ask(req: AskRequest) -> AskResponse:
     # LLM에게 현재 날짜를 전달하여 "오늘", "이번 학기" 등의 표현을 해석하도록 돕습니다.
     from datetime import timedelta, timezone
     KST = timezone(timedelta(hours=9))
-    current_date = datetime.now(KST).strftime('%Y년 %m월 %d일')
+    current_date = datetime.now(KST).strftime('%Y년 %m월 %d일 %H시 %M분 (KST)')
     answer = await generate_langchain_answer(
         question=query, 
         context=context_text, 
