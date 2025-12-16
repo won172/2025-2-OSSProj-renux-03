@@ -84,6 +84,9 @@
 * **Database:** PostgreSQL (Data Entity), ChromaDB (Vector Store), Redis (Cache)
 * **AI Model:** OpenAI GPT-4o-mini (Generation), KURE-v1 (Embedding)
 
+  <img width="1843" height="940" alt="image" src="https://github.com/user-attachments/assets/61623a6d-6d24-471f-b951-9075745818ae" />
+
+
 **2. 핵심 파이프라인 (RAG Engine)**
 1.  **데이터 수집/전처리:** Selenium/BeautifulSoup 크롤링 및 HWP 텍스트 추출 -> 청킹(Chunking) -> 메타데이터 태깅.
 2.  **임베딩:** KURE-v1 모델을 사용하여 텍스트를 고차원 벡터로 변환 및 인덱싱.
