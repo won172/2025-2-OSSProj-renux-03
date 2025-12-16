@@ -1,17 +1,21 @@
-# ¼­¹ö ½ÇÇà ¹æ¹ý
-ÇÁ·ÎÁ§Æ® µð·ºÅä¸®¿¡ `.env` ÆÄÀÏÀ» »ý¼ºÇÑ´Ù.
+# ì„œë²„ ì‹¤í–‰ ë°©ë²•
+RenuxServer ë””ë ‰í† ë¦¬ì— `.env` íŒŒì¼ì„ ìƒì„±í•œë‹¤.
 
-`.env` ÆÄÀÏ ¾È¿¡ ´ÙÀ½°ú °°Àº È¯°æ º¯¼ö¸¦ ¼³Á¤ÇÑ´Ù.
+`.env` íŒŒì¼ ì•ˆì— ë‹¤ìŒê³¼ ê°™ì€ í™˜ê²½ ë³€ìˆ˜ë¥¼ ì„¤ì •í•œë‹¤.
 
 ```env
 POSTGRES_USER=postgres
-POSTGRES_PASSWORD=[ÆÐ½º¿öµå ÀÔ·Â]
-POSTGRES_DB=[db ÀÔ·Â]
+POSTGRES_PASSWORD=[íŒ¨ìŠ¤ì›Œë“œ ìž…ë ¥]
+POSTGRES_DB=[db ìž…ë ¥]
 
-CONNECTIONSTRING="Host=db; Port=5432; Database=[dbÀÔ·Â(À§¿Í µ¿ÀÏ)]; Username=postgres;Password=[ÆÐ½º¿öµå ÀÔ·Â(À§¿Í µ¿ÀÏ)]"
-JWT_kEY=[Å° ÀÔ·Â]
+# dotnet npgsql postgres ConnectionString
+CONNECTIONSTRING="Host=db; Port=5432; Database=[dbìž…ë ¥(ìœ„ì™€ ë™ì¼)]; Username=postgres;Password=[íŒ¨ìŠ¤ì›Œë“œ ìž…ë ¥(ìœ„ì™€ ë™ì¼)]"
+JWT_kEY=[í‚¤ ìž…ë ¥]
+
+OPENAI_API_KEY=[openai api í‚¤ ìž…ë ¥]
+REDIS_URL=redis://localhost:3679/0 # redis ConnectionString
 ```
 
-`docker compose up` ¸í·É¾î·Î docker compose¸¦ ½ÇÇàÇÑ´Ù.
+`docker compose up --build` ëª…ë ¹ì–´ë¡œ docker composeë¥¼ ë¹Œë“œ ë° ì‹¤í–‰í•œë‹¤.
 
-`localhost:8080`À¸·Î Á¢¼ÓÇØº»´Ù.
+`localhost:8080`ìœ¼ë¡œ ì ‘ì†í•´ë³¸ë‹¤.
