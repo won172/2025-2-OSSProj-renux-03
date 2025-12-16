@@ -22,10 +22,21 @@ static public class AuthenticationApis
         // 유저 이름 조회
         app.MapGet("/name", async (HttpContext context, ServerDbContext db) =>
         {
-            string name = context.User.FindFirstValue(JwtRegisteredClaimNames.Name)!;
-            string roleName = context.User.FindFirstValue("Role")!;
+            string userIdStr = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub)!;
+            if (!Guid.TryParse(userIdStr, out Guid userId)) 
+            {
+                // Fallback to claims if DB fetch isn't desired or fails (though here we want DB)
+                return Results.Unauthorized();
+            }
 
-            return Results.Ok(new { Name = name, RoleName = roleName });
+            var user = await db.Users.Include(u => u.Major).FirstOrDefaultAsync(u => u.Id == userId);
+            if (user == null) return Results.Unauthorized();
+
+            string name = user.Username;
+            string roleName = context.User.FindFirstValue("Role")!;
+            string majorName = user.Major?.Majorname ?? "Unknown"; // Safe navigation
+
+            return Results.Ok(new { Name = name, RoleName = roleName, MajorName = majorName });
         }).RequireAuthorization();
 
         // 아이디 중복 검사
@@ -67,7 +78,7 @@ static public class AuthenticationApis
                 return Results.Unauthorized();
             }
 
-            User? user = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == signin.UserId);
+            User? user = await db.Users.Include(u => u.Role).Include(u => u.Major).FirstOrDefaultAsync(u => u.UserId == signin.UserId);
 
             if (user == null || !BCrypt.Net.BCrypt.Verify(signin.Password, user.HashPassword))
             {
@@ -83,7 +94,8 @@ static public class AuthenticationApis
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
                 new Claim(JwtRegisteredClaimNames.Name, user.Username),
-                new Claim("Role", user.Role!.Rolename)
+                new Claim("Role", user.Role!.Rolename),
+                new Claim("Major", user.Major?.Majorname ?? "Unknown")
             };
 
             JwtSecurityToken token = new(
@@ -96,8 +108,11 @@ static public class AuthenticationApis
             CookieOptions copt = new()
             {
                 HttpOnly = true,
-                //Secure = true,
-                Expires = DateTime.Now.AddMinutes(60)
+                Secure = false, // Set to true in production with HTTPS
+                SameSite = SameSiteMode.Lax,
+                IsEssential = true,
+                Expires = DateTime.UtcNow.AddMinutes(60),
+                Path = "/"
             };
 
             string tokenString = new JwtSecurityTokenHandler().WriteToken(token);

@@ -1818,6 +1818,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
 }
 
 .admin-panel__title {
@@ -1983,6 +1984,11 @@
     border: 1px solid rgba(15, 23, 42, 0.08);
 }
 
+.admin-review-detail__question p,
+.admin-review-detail__answer p {
+    white-space: pre-wrap;
+}
+
 .admin-review-detail__actions {
     display: flex;
     gap: 12px;
@@ -1998,8 +2004,79 @@
 .admin-form-field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.admin-form-label {
+    font-size: 0.9rem;
     font-weight: 600;
+    color: var(--buddy-muted);
+}
+
+.admin-input,
+.admin-textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    border-radius: 12px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    background: white;
+    transition: border-color 0.2s;
+}
+
+.admin-input:focus,
+.admin-textarea:focus {
+    outline: none;
+    border-color: var(--buddy-primary);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+}
+
+.admin-alert {
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    font-size: 0.9rem;
+}
+
+.admin-alert--danger {
+    background: #fef2f2;
+    color: #991b1b;
+    border-color: #fecaca;
+}
+
+/* Scrollable Areas */
+.admin-panel-content-scroll {
+    flex: 1; /* Allow to take available space in flex container */
+    min-height: 0; /* Crucial for scrolling within flex items */
+    overflow-y: auto;
+    /* Custom Scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15, 23, 42, 0.1) transparent;
+}
+
+.admin-panel-content-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.admin-panel-content-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.admin-panel-content-scroll::-webkit-scrollbar-thumb {
+    background-color: rgba(15, 23, 42, 0.1);
+    border-radius: 20px;
+}
+
+.admin-review-list-scroll {
+    padding-right: 8px; /* Avoid scrollbar overlapping content */
+}
+
+.admin-review-detail-scroll {
+    padding-right: 8px;
 }
 
 .admin-form-field textarea {
@@ -2126,6 +2203,8 @@
     flex-direction: column;
     padding: 16px 20px;
     box-sizing: border-box;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .admin-panel-content-scroll {

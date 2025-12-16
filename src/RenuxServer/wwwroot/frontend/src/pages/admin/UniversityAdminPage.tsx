@@ -16,8 +16,11 @@ interface ApiOrganization {
     id: string
     major: {
         id: string
-        majorname: string
+        majorname?: string
+        Majorname?: string
     }
+    managerName?: string
+    ManagerName?: string
 }
 
 const UniversityAdminPage = () => {
@@ -39,15 +42,15 @@ const UniversityAdminPage = () => {
             // 1. Fetch Organizations
             try {
                 const orgsData = await apiFetch<ApiOrganization[]>('/req/orgs')
-                console.log('Received organizations data:', orgsData); // Added log
+                console.log('Received organizations data:', orgsData); 
                 if (Array.isArray(orgsData)) {
                     const mappedOrgs: CouncilOrganization[] = orgsData.map(org => ({
                         id: org.id,
-                        name: `${org.major.majorname} 학생회`,
-                        manager: '-', // Not available in API
-                        updatedAt: new Date().toISOString().split('T')[0], // Placeholder
+                        name: `${org.major.majorname || org.major.Majorname || '알수없음'} 학생회`,
+                        manager: org.managerName || org.ManagerName || '-', 
+                        updatedAt: new Date().toISOString().split('T')[0], 
                         status: '활성',
-                        pendingRequests: 0 // Placeholder
+                        pendingRequests: 0 
                     }))
                     setOrganizations(mappedOrgs)
                 }
@@ -56,43 +59,72 @@ const UniversityAdminPage = () => {
                 // Don't set global error for orgs fetch failure, it might not be critical
             }
 
-            // 2. Fetch Pending Reviews
+            // 2. Fetch Pending Reviews (ALL items for history)
             try {
-                const pendingData = await apiFetch<ApiPendingItem[]>('/admin/pending')
-                console.log('Received pending reviews data:', pendingData); // Added log
+                const pendingData = await apiFetch<ApiPendingItem[]>(`/admin/items?t=${new Date().getTime()}`)
+                console.log('Received all reviews data:', pendingData); 
                 
                 if (Array.isArray(pendingData)) {
                     const mappedReviews: PendingAnswerReview[] = pendingData
-                        .filter(item => item.source_type === 'custom_knowledge')
                         .map(item => {
-                            let parsedData = { question: '', answer: '', category: '' }
+                            let title = '제목 없음';
+                            let content = '';
+                            let category = '공통';
+                            let parsedData: any = {};
+                            
                             try {
-                                parsedData = JSON.parse(item.data)
-                            } catch (e) { console.error('JSON parse error for item data:', item.data, e) } // More detailed log
+                                parsedData = JSON.parse(item.data);
+                                
+                                if (item.source_type === 'custom_knowledge') {
+                                    title = parsedData.question || '질문 없음';
+                                    content = parsedData.answer || '';
+                                    category = parsedData.category || '공통';
+                                } else if (item.source_type === 'event') {
+                                    title = `[행사] ${parsedData.title || ''}`;
+                                    content = `일시: ${parsedData.start_date} ~ ${parsedData.end_date}\n장소: ${parsedData.location}\n\n${parsedData.description}`;
+                                    category = parsedData.department || '공통';
+                                } else if (item.source_type === 'announcement') {
+                                    title = `[공지] ${parsedData.title || ''}`;
+                                    content = `게시일: ${parsedData.date}\n분류: ${parsedData.category}\n\n${parsedData.content}`;
+                                    category = parsedData.department || '공통';
+                                }
+                            } catch (e) { 
+                                console.error('JSON parse error for item data:', item.data, e);
+                            }
                             
                             return {
                                 id: item.id.toString(),
-                                departmentName: parsedData.category || '공통',
+                                departmentName: category,
                                 submittedAt: item.created_at,
-                                handler: 'System', // Placeholder
-                                question: parsedData.question,
-                                answer: parsedData.answer
+                                handler: parsedData.requester || '정보 없음', // Name or 'Info Missing'
+                                question: title,
+                                answer: content,
+                                status: item.status 
                             }
                         })
+                    // Sort: Pending first, then by date desc
+                    mappedReviews.sort((a, b) => {
+                        const isAPending = a.status === 'pending';
+                        const isBPending = b.status === 'pending';
+                        if (isAPending && !isBPending) return -1;
+                        if (!isAPending && isBPending) return 1;
+                        return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
+                    });
+                    
                     setPendingReviews(mappedReviews)
                     if (mappedReviews.length > 0) {
-                        setSelectedReviewId(mappedReviews[0].id) // Automatically select the first one
+                        // Keep selection if exists, else select first
+                        if (!selectedReviewId) setSelectedReviewId(mappedReviews[0].id)
                     } else {
-                        setSelectedReviewId(null) // Clear selection if no reviews
+                        setSelectedReviewId(null)
                     }
-                    console.log('Mapped pending reviews:', mappedReviews); // Added log
                 }
             } catch (e) {
-                console.error('Failed to fetch pending reviews:', e); // More detailed log
-                setError('검수 대기 데이터를 불러오는데 실패했습니다.'); // Set global error
+                console.error('Failed to fetch pending reviews:', e);
+                setError('검수 대기 데이터를 불러오는데 실패했습니다.');
             }
 
-        } catch (e) { // Catch-all for other unexpected errors during fetchData
+        } catch (e) { 
             console.error('An unexpected error occurred during admin data fetch:', e);
             setError('관리자 데이터를 불러오는 중 예상치 못한 오류가 발생했습니다.');
         } finally {
@@ -100,7 +132,7 @@ const UniversityAdminPage = () => {
         }
     }
     fetchData()
-  }, [])
+  }, []) // Dependency array empty to run once on mount
 
   const selectedReview = useMemo(
     () => pendingReviews.find((review) => review.id === selectedReviewId) ?? null,
@@ -108,47 +140,39 @@ const UniversityAdminPage = () => {
   )
 
   const registeredCount = organizations.length
-  const pendingCount = pendingReviews.length
+  const pendingCount = pendingReviews.filter(r => r.status === 'pending').length
 
   const handleNavigateHome = () => navigate('/')
 
   const handleReviewAction = async (reviewId: string, action: 'approve' | 'reject') => {
-    console.log(`handleReviewAction called for ID: ${reviewId}, action: ${action}`); // Added log
+    console.log(`handleReviewAction called for ID: ${reviewId}, action: ${action}`);
     if (!confirm(`${action === 'approve' ? '승인' : '반려'} 하시겠습니까?`)) {
-      console.log('User cancelled action.'); // Added log
       return;
     }
 
     try {
-        console.log(`Sending ${action} request to /admin/${action}/${reviewId}`); // Added log
         await apiFetch(`/admin/${action}/${reviewId}`, { method: 'POST' })
-        console.log(`Request for ID ${reviewId} with action ${action} successful.`); // Added log
         
-        // Update UI: remove the approved/rejected item
-        setPendingReviews((prev) => prev.filter((review) => review.id !== reviewId))
+        // Update UI: update status instead of removing
+        setPendingReviews((prev) => prev.map((review) => 
+            review.id === reviewId ? { ...review, status: action === 'approve' ? 'approved' : 'rejected' } : review
+        ))
         
-        // If the currently selected item was just handled, select next or clear
-        if (selectedReviewId === reviewId) {
-            const remainingReviews = pendingReviews.filter(review => review.id !== reviewId);
-            setSelectedReviewId(remainingReviews.length > 0 ? remainingReviews[0].id : null);
-        }
-
         const actionLabel = action === 'approve' ? '승인했습니다.' : '반려했습니다.'
         alert(`검수 내역을 ${actionLabel}`)
     } catch (e) {
-        console.error('Action failed:', e); // More detailed log
+        console.error('Action failed:', e);
         let message = '요청 처리에 실패했습니다.';
         if (e instanceof Error) {
             message += ` (${e.message})`;
             // @ts-ignore
             if (e.status) message += ` [Status: ${e.status}]`;
         }
-        setError(message) // Set error state for display
+        setError(message) 
         alert(message)
     }
   }
 
-  // Display loading, error, or main content
   if (loading) {
     return (
       <div className="admin-page-wrapper">
@@ -230,7 +254,6 @@ const UniversityAdminPage = () => {
                 <h2 className="admin-panel__title">학생회 조직 현황</h2>
                 <p className="admin-panel__subtitle">최근 업데이트 및 상태</p>
               </div>
-              {/* <button className="ghost-btn small" type="button">+ 추가</button> */}
             </header>
             
             <div className="admin-panel-content-scroll">
@@ -266,14 +289,21 @@ const UniversityAdminPage = () => {
                     <div
                         key={review.id}
                         className={`admin-review-card ${selectedReviewId === review.id ? 'admin-review-card--active' : ''}`}
-                        onClick={() => setSelectedReviewId(review.id)} // Click on card selects it
+                        onClick={() => setSelectedReviewId(review.id)} 
                     >
                         <button type="button" style={{all: 'unset', cursor: 'pointer', display: 'block', width: '100%', padding: '10px'}}>
-                        <span className="admin-review-card__dept">{review.departmentName}</span>
-                        <strong className="admin-review-card__title" style={{ fontSize: '0.95rem' }}>{review.question}</strong>
-                        <span className="admin-review-card__meta">
+                        <div style={{display: 'flex', alignItems: 'center', marginBottom: '6px'}}>
+                            <span className="admin-review-card__dept" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: '4px' }}>{review.departmentName}</span>
+                            {review.status !== 'pending' && (
+                                <span className={`status-pill status-pill--${review.status === 'approved' || review.status === 'approved_manually' ? 'success' : 'pending'}`} style={{fontSize: '0.7rem', padding: '2px 8px', flexShrink: 0, whiteSpace: 'nowrap'}}>
+                                    {review.status === 'approved' || review.status === 'approved_manually' ? '승인됨' : '반려됨'}
+                                </span>
+                            )}
+                        </div>
+                        <strong className="admin-review-card__title" style={{ fontSize: '0.95rem', display: 'block', marginBottom: '4px' }}>{review.question}</strong>
+                        <div className="admin-review-card__meta">
                             {review.handler} · {new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric' }).format(new Date(review.submittedAt))}
-                        </span>
+                        </div>
                         </button>
                     </div>
                   ))}
@@ -305,26 +335,37 @@ const UniversityAdminPage = () => {
                             }).format(new Date(selectedReview.submittedAt))}
                           </dd>
                         </div>
+                        <div>
+                            <dt>상태</dt>
+                            <dd>
+                                <span className={`status-pill status-pill--${selectedReview.status === 'pending' ? 'pending' : (selectedReview.status === 'approved' || selectedReview.status === 'approved_manually' ? 'success' : 'danger')}`}>
+                                    {selectedReview.status === 'pending' ? '대기 중' : (selectedReview.status === 'approved' || selectedReview.status === 'approved_manually' ? '승인됨' : '반려됨')}
+                                </span>
+                            </dd>
+                        </div>
                       </dl>
                       <div className="admin-review-detail__answer">
                         <p>{selectedReview.answer}</p>
                       </div>
-                      <div className="admin-review-detail__actions" style={{ marginTop: '20px' }}>
-                        <button
-                          className="ghost-btn ghost-btn--muted"
-                          type="button"
-                          onClick={() => handleReviewAction(selectedReview.id, 'reject')}
-                        >
-                          반려
-                        </button>
-                        <button
-                          className="hero-btn hero-btn--primary"
-                          type="button"
-                          onClick={() => handleReviewAction(selectedReview.id, 'approve')}
-                        >
-                          승인
-                        </button>
-                      </div>
+                      
+                      {selectedReview.status === 'pending' && (
+                          <div className="admin-review-detail__actions" style={{ marginTop: '20px' }}>
+                            <button
+                              className="ghost-btn ghost-btn--muted"
+                              type="button"
+                              onClick={() => handleReviewAction(selectedReview.id, 'reject')}
+                            >
+                              반려
+                            </button>
+                            <button
+                              className="hero-btn hero-btn--primary"
+                              type="button"
+                              onClick={() => handleReviewAction(selectedReview.id, 'approve')}
+                            >
+                              승인
+                            </button>
+                          </div>
+                      )}
                     </div>
                   ) : (
                     <div className="admin-review-detail admin-review-detail--empty" style={{ height: '100%' }}>

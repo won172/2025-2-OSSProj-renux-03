@@ -7,4 +7,5 @@ public class OrganizationDto
 {
     public Guid Id { get; init; }
     public MajorDto Major { get; set; } = null!;
+    public string? ManagerName { get; set; }
 }
