@@ -387,6 +387,41 @@ async def approve_pending(item_id: int):
             )
             logging.info(f"✅ [Admin] Upserted to ChromaDB (Notice)")
 
+            # 3.5. Append to CSV (Persistent Storage)
+            try:
+                artifacts = DATASET_ARTIFACTS["notices"]
+                csv_path = artifacts.csv_path
+                
+                # notices.csv schema: chunk_id,doc_id,chunk_text,position,token_len,title,topics,published_at,url,attachments,source,notice_id,rule_id,schedule_id,course_id,staff_id
+                new_row = {
+                    "chunk_id": doc_id,
+                    "doc_id": doc_id,
+                    "chunk_text": text_content,
+                    "position": 0,
+                    "token_len": len(text_content), 
+                    "title": notice.title,
+                    "topics": notice.board,
+                    "published_at": notice.published_date,
+                    "url": "",
+                    "attachments": "[]",
+                    "source": "notices",
+                    "notice_id": notice.id,
+                    "rule_id": "",
+                    "schedule_id": "",
+                    "course_id": "",
+                    "staff_id": ""
+                }
+                
+                if csv_path.exists():
+                    new_df = pd.DataFrame([new_row])
+                    new_df.to_csv(csv_path, mode='a', header=False, index=False, encoding='utf-8-sig')
+                    logging.info(f"✅ [Admin] Appended to notices.csv")
+                else:
+                    logging.warning(f"⚠️ [Admin] notices.csv not found. Skipping CSV append.")
+
+            except Exception as e:
+                logging.error(f"❌ [Admin] Failed to append to CSV: {e}")
+
             # 4. Trigger reload
             try:
                 if "notices" in _datasets:
@@ -577,6 +612,32 @@ async def ask(req: AskRequest) -> AskResponse:
         if row.get('url'): # URL 정보가 있는 경우
             part += f"URL: {row.get('url')}\n"
         part += f"내용:\n{row['chunk_text']}\n"
+        
+        # --- NEW ATTACHMENT PROCESSING ---
+        attachments_str = row.get('attachments')
+        if attachments_str:
+            try:
+                # attachments_str이 비어있지 않은 경우에만 json.loads 시도
+                if attachments_str.strip(): # 비어있는 문자열 체크
+                    attachments = json.loads(attachments_str)
+                else:
+                    attachments = [] # 비어있는 경우 빈 리스트로 처리
+
+                if isinstance(attachments, list):
+                    pdf_links = []
+                    for att in attachments:
+                        if isinstance(att, dict) and 'name' in att and 'url' in att:
+                            file_name = att['name']
+                            file_url = att['url']
+                            # Check if it's a PDF or a file link
+                            # For now, include all attachments as clickable links, not just PDFs
+                            pdf_links.append(f"- [{file_name}]({file_url})")
+                    if pdf_links:
+                        part += "\n첨부파일:\n" + "\n".join(pdf_links) + "\n"
+            except json.JSONDecodeError:
+                logging.warning(f"Failed to decode attachments JSON: {attachments_str}")
+        # --- END NEW ATTACHMENT PROCESSING ---
+
         context_parts.append(part)
     
     context_text = "\n\n---\n\n".join(context_parts) if context_parts else "검색된 관련 문서가 없습니다. 일반적인 대화로 응답해주세요."

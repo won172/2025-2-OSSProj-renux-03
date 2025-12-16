@@ -100,8 +100,7 @@ static public class ChatRequestApis
             {
                 ChatId = chat.Id,
                 IsAsk = false,
-                Content = $"안녕하세요. {stch.Org.Major.Majorname} 전문 동똑이입니다. 무엇을 도와드릴까요?",
-                CreatedTime = time
+                                            Content = "안녕하세요. 동똑이입니다. 무엇을 도와드릴까요?",                CreatedTime = time
             };
 
             await db.Chats.AddAsync(chat);
