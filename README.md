@@ -86,6 +86,22 @@
 
 <img width="1857" height="956" alt="image" src="https://github.com/user-attachments/assets/44b50d6a-1fbf-4d39-a2bd-31369abdd584" />
 
+<br><br>
+
+- 유스케이스 다이어그램
+<img width="1138" height="764" alt="image" src="https://github.com/user-attachments/assets/b3ee01ea-9ab4-4466-ab15-f66886e1f05b" />
+
+<br><br>
+
+- 시퀀스 다이어그램
+<img width="1067" height="550" alt="image" src="https://github.com/user-attachments/assets/7fa1c811-b841-4bdb-91e2-0e508089d6de" />
+
+<br><br>
+
+- 시스템 블록 다이어그램
+<img width="1233" height="428" alt="image" src="https://github.com/user-attachments/assets/78c380fb-2364-422f-8963-3c46ce029231" />
+
+<br><br>
 
 **2. 핵심 파이프라인 (RAG Engine)**
 1.  **데이터 수집/전처리:** Selenium/BeautifulSoup 크롤링 및 HWP 텍스트 추출 -> 청킹(Chunking) -> 메타데이터 태깅.
