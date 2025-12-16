@@ -9,6 +9,7 @@ using RenuxServer.Validators;
 using RenuxServer.Apis.Auth;
 
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using RenuxServer.Models;
 using RenuxServer.Dtos.ChatDtos;
 using RenuxServer.Dtos.EtcDtos;
@@ -44,9 +45,15 @@ builder.Services.AddValidatorsFromAssemblyContaining<SigninUserValidator>();
 
 
 // Auth Setting
-builder.Services.AddAuthentication()
+builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
     .AddJwtBearer(options =>
     {
+        options.MapInboundClaims = false; // Disable automatic claim mapping
         options.TokenValidationParameters = new()
         {
             IssuerSigningKey = new SymmetricSecurityKey(Convert.FromBase64String(builder.Configuration["Jwt:Key"]!)),
@@ -56,16 +63,29 @@ builder.Services.AddAuthentication()
 
         options.Events = new()
         {
-            OnMessageReceived = new(context =>
+            OnMessageReceived = context =>
             {
                 if (context.Request.Cookies.ContainsKey("renux-server-token"))
+                {
                     context.Token = context.Request.Cookies["renux-server-token"];
+                    Console.WriteLine(">> [Auth] Token cookie found.");
+                }
+                else
+                {
+                    Console.WriteLine(">> [Auth] No token cookie.");
+                }
                 return Task.CompletedTask;
-            })
+            },
+            OnAuthenticationFailed = context =>
+            {
+                Console.WriteLine($">> [Auth] Failed: {context.Exception.Message}");
+                return Task.CompletedTask;
+            }
         };
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddHttpClient();
 
 var app = builder.Build();
 
@@ -104,11 +124,18 @@ app.UseStaticFiles();
 app.AddAuthApis();
 app.AddChatApis();
 app.AddEtcApis();
+app.AddAdminProxyApis();
 
 app.MapGet("/", async (HttpContext context) =>
 {
     context.Response.ContentType = "text/html";
     await context.Response.SendFileAsync("wwwroot/index.html");
 });
+
+app.MapGet("/notifications", () => Results.Ok(Array.Empty<object>()));
+app.MapMethods("/notifications", new[] { "OPTIONS" }, () => Results.Ok());
+
+// SPA fallback for client-side routing
+app.MapFallbackToFile("index.html");
 
 app.Run();

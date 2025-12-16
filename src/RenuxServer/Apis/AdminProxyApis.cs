@@ -16,6 +16,15 @@ static public class AdminProxyApis
             return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
         });
 
+        app.MapGet("/items", async (HttpResponse response) => 
+        {
+            using var client = new HttpClient();
+            var proxyRes = await client.GetAsync($"{RagServiceUrl}/admin/items");
+            response.StatusCode = (int)proxyRes.StatusCode;
+            var contentStream = await proxyRes.Content.ReadAsStreamAsync();
+            return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
+        });
+
         app.MapPost("/submit", async (HttpRequest request, HttpResponse response) => 
         {
             using var client = new HttpClient();

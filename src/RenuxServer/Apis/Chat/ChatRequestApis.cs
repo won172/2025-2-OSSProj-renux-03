@@ -23,19 +23,16 @@ static public class ChatRequestApis
         app.MapGet("/active", async (ServerDbContext db, HttpContext context, IMapper mapper) =>
         {
             // For guests, return an empty list as their chats are not persisted
-            if (!context.Request.Cookies.ContainsKey("renux-server-token") && context.Request.Cookies.ContainsKey("renux-server-guest"))
+            if (!context.Request.Cookies.ContainsKey("renux-server-token"))
             {
                 return Results.Ok(new List<ActiveChatDto>());
             }
 
             Guid id;
-            if (context.Request.Cookies.ContainsKey("renux-server-token"))
+            var userIdStr = context.User.FindFirstValue(Microsoft.IdentityModel.JsonWebTokens.JwtRegisteredClaimNames.Sub);
+            if (userIdStr == null || !Guid.TryParse(userIdStr, out id))
             {
-                id = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            }
-            else
-            {
-                id = Guid.NewGuid();
+                return Results.Unauthorized();
             }
 
             List<ActiveChatDto> chats =
@@ -52,100 +49,91 @@ static public class ChatRequestApis
         app.MapPost("/start", async (ServerDbContext db, HttpContext context, StartChat stch, IMapper mapper) =>
         {
             DateTime time = DateTime.Now.ToUniversalTime();
-
             Guid id = Guid.NewGuid();
 
-            while (await db.Chats.AnyAsync(c => c.Id == id))
-                id = Guid.NewGuid();
+            // Authenticated user check
+            bool isAuthenticated = context.Request.Cookies.ContainsKey("renux-server-token");
 
-            Guid userId;
-
-            if (context.Request.Cookies.ContainsKey("renux-server-token"))
+            if (!isAuthenticated)
             {
-                userId = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            }
-            else
-            {
-                userId = Guid.NewGuid();
-
-                CookieOptions opt = new()
+                // Guest flow: Do NOT save to DB
+                // Create a temporary ID for the frontend session
+                Guid guestChatId = Guid.NewGuid();
+                
+                // Ensure the guest cookie exists for session consistency (optional but good practice)
+                if (!context.Request.Cookies.ContainsKey("renux-server-guest"))
                 {
-                    HttpOnly = true,
-                    SameSite = SameSiteMode.Strict
-                };
+                    CookieOptions opt = new() { HttpOnly = true, SameSite = SameSiteMode.Strict };
+                    context.Response.Cookies.Append("renux-server-guest", Guid.NewGuid().ToString(), opt);
+                }
 
-                context.Response.Cookies.Append("renux-server-guest", userId.ToString(), opt);
-            }
-
-            bool isGuest = !context.Request.Cookies.ContainsKey("renux-server-token");
-
-            if (isGuest)
-            {
-                // Guest specific flow: No DB persistence, return a dummy DTO
-                // Use the guest's userId as the "chat Id" for the frontend
                 ActiveChatDto guestChatDto = new()
                 {
-                    Id = userId, // Using guest's ID as chat ID for non-persisted session
-                    Organization = stch.Org, // Pass through from request
-                    Title = stch.Title // Pass through from request
+                    Id = guestChatId,
+                    Organization = stch.Org,
+                    Title = stch.Title
                 };
                 return Results.Ok(guestChatDto);
             }
-            else
+
+            // Authenticated User Flow
+            while (await db.Chats.AnyAsync(c => c.Id == id))
+                id = Guid.NewGuid();
+
+            var userIdStr = context.User.FindFirstValue(Microsoft.IdentityModel.JsonWebTokens.JwtRegisteredClaimNames.Sub);
+            if (userIdStr == null || !Guid.TryParse(userIdStr, out Guid userId))
             {
-                // Authenticated user flow (existing logic)
-                ActiveChat chat = new()
-                {
-                    Id = id, // Note: This `id` is a *new* GUID for the chat
-                    UserId = userId,
-                    OrganizationId = stch.Org.Id,
-                    Title = stch.Title,
-                    CreatedTime = time,
-                    UpdatedTime = time
-                };
-
-                ChatMessage startChat = new()
-                {
-                    ChatId = chat.Id,
-                    IsAsk = false,
-                    Content = $"안녕하세요. {stch.Org.Major.Majorname} 전문 동똑이입니다. 무엇을 도와드릴까요?",
-                    CreatedTime = time
-                };
-
-                await db.Chats.AddAsync(chat);
-                await db.ChatMessages.AddAsync(startChat);
-                await db.SaveChangesAsync();
-
-                ActiveChatDto chatDto = mapper.Map<ActiveChatDto>(chat);
-
-                return Results.Ok(chatDto);
+                return Results.Unauthorized();
             }
+
+            ActiveChat chat = new()
+            {
+                Id = id,
+                UserId = userId,
+                OrganizationId = stch.Org.Id,
+                Title = stch.Title,
+                CreatedTime = time,
+                UpdatedTime = time
+            };
+
+            ChatMessage startChat = new()
+            {
+                ChatId = chat.Id,
+                IsAsk = false,
+                Content = $"안녕하세요. {stch.Org.Major.Majorname} 전문 동똑이입니다. 무엇을 도와드릴까요?",
+                CreatedTime = time
+            };
+
+            await db.Chats.AddAsync(chat);
+            await db.ChatMessages.AddAsync(startChat);
+            await db.SaveChangesAsync();
+
+            ActiveChatDto chatDto = mapper.Map<ActiveChatDto>(chat);
+
+            return Results.Ok(chatDto);
         });
 
-        
-
-        app.MapPost("/msg", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper, ILogger<Program> logger) =>
+        app.MapPost("/msg", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper, ILogger<Program> logger, IConfiguration configuration, IHttpClientFactory httpClientFactory) =>
         {
-            bool isGuest = !context.Request.Cookies.ContainsKey("renux-server-token");
+            bool isAuthenticated = context.Request.Cookies.ContainsKey("renux-server-token");
 
-            if (isGuest)
+            if (!isAuthenticated)
             {
-                // Guest flow: Don't save to DB
-                // Only interact with RAG and return the reply
+                // Guest Flow: Do NOT save to DB
                 ToRag toRag = new(askDto.ChatId.ToString(), askDto.Content);
-
-                HttpClient client = new();
-                var res = await client.PostAsJsonAsync("http://rag-service:8000/ask", toRag);
-
-                string replyContent = "대답이여";
-
+                var client = httpClientFactory.CreateClient();
+                var ragUrl = configuration["RagServiceUrl"] ?? "http://rag-service:8000";
+                
+                // Call RAG
+                var res = await client.PostAsJsonAsync($"{ragUrl}/ask", toRag);
+                string replyContent = "죄송합니다. 답변을 생성할 수 없습니다.";
                 if (res.IsSuccessStatusCode)
                 {
-                    replyContent = (await res.Content.ReadFromJsonAsync<Reply>())!.Answer;
+                    var replyObj = await res.Content.ReadFromJsonAsync<Reply>();
+                    if (replyObj != null) replyContent = replyObj.Answer;
                 }
                 logger.LogInformation("Guest AI Reply: {ReplyContent}", replyContent);
 
-                // Create a ChatMessageDto for the reply, but don't save to DB
                 ChatMessageDto replyDto = new()
                 {
                     ChatId = askDto.ChatId,
@@ -153,57 +141,50 @@ static public class ChatRequestApis
                     IsAsk = false,
                     CreatedTime = DateTime.Now.ToUniversalTime()
                 };
-
                 return Results.Ok(replyDto);
             }
-            else
+
+            // Authenticated Flow
+            ChatMessage ask = mapper.Map<ChatMessage>(askDto);
+            await db.ChatMessages.AddAsync(ask);
+
+            ToRag authToRag = new(askDto.ChatId.ToString(), askDto.Content);
+            var authClient = httpClientFactory.CreateClient();
+            var authRagUrl = configuration["RagServiceUrl"] ?? "http://rag-service:8000";
+            
+            var authRes = await authClient.PostAsJsonAsync($"{authRagUrl}/ask", authToRag);
+            string authReply = "죄송합니다. 답변을 생성할 수 없습니다.";
+            if (authRes.IsSuccessStatusCode)
             {
-                // Authenticated user flow (existing logic)
-                ChatMessage ask = mapper.Map<ChatMessage>(askDto);
-
-                await db.ChatMessages.AddAsync(ask);
-
-                ToRag toRag = new(askDto.ChatId.ToString(), askDto.Content);
-
-                HttpClient client = new();
-
-                var res = await client.PostAsJsonAsync("http://rag-service:8000/ask", toRag);
-
-                string reply = "대답이여";
-
-                if (res.IsSuccessStatusCode)
-                {
-                    reply = (await res.Content.ReadFromJsonAsync<Reply>())!.Answer;
-                }
-                logger.LogInformation("Authenticated AI Reply: {Reply}", reply);
-
-                ChatMessage apply = new()
-                {
-                    ChatId = ask.ChatId,
-                    Content = reply,
-                    IsAsk = false,
-                    CreatedTime = DateTime.Now.ToUniversalTime()
-                };
-
-                await db.ChatMessages.AddAsync(apply);
-                await db.SaveChangesAsync();
-
-                ChatMessageDto applyDto = mapper.Map<ChatMessageDto>(apply);
-
-                return Results.Ok(applyDto);
+                var replyObj = await authRes.Content.ReadFromJsonAsync<Reply>();
+                if (replyObj != null) authReply = replyObj.Answer;
             }
+            logger.LogInformation("Authenticated AI Reply: {Reply}", authReply);
+
+            ChatMessage apply = new()
+            {
+                ChatId = ask.ChatId,
+                Content = authReply,
+                IsAsk = false,
+                CreatedTime = DateTime.Now.ToUniversalTime()
+            };
+
+            await db.ChatMessages.AddAsync(apply);
+            await db.SaveChangesAsync();
+
+            ChatMessageDto applyDto = mapper.Map<ChatMessageDto>(apply);
+            return Results.Ok(applyDto);
         });
 
         app.MapPost("/load", async (ServerDbContext db, HttpContext context, IMapper mapper, LoadChat load) =>
         {
-            // For guests, return an empty list as their chats are not persisted
-            if (!context.Request.Cookies.ContainsKey("renux-server-token") && context.Request.Cookies.ContainsKey("renux-server-guest"))
+            // For guests, return empty list (no persistence)
+            if (!context.Request.Cookies.ContainsKey("renux-server-token"))
             {
                 return Results.Ok(new List<ChatMessageDto>());
             }
 
             List<ChatMessageDto> chatMessages = await MessagesToList(db, mapper, load.LastTime, load.ChatId);
-
             return Results.Ok(chatMessages);
         });
 
@@ -211,7 +192,11 @@ static public class ChatRequestApis
         {
             if (context.Request.Cookies.ContainsKey("renux-server-token"))
             {
-                var userId = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+                var userIdStr = context.User.FindFirstValue(Microsoft.IdentityModel.JsonWebTokens.JwtRegisteredClaimNames.Sub);
+                if (userIdStr == null || !Guid.TryParse(userIdStr, out var userId))
+                {
+                    return Results.Unauthorized();
+                }
 
                 var chat = await db.Chats.FirstOrDefaultAsync(c => c.Id == chatId && c.UserId == userId);
 

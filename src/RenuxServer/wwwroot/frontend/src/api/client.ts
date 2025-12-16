@@ -50,7 +50,7 @@ export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options:
   }
 
   if (!response.ok) {
-    const error: ApiError = new Error('요청이 실패했습니다.')
+    const error: ApiError = new Error(`요청이 실패했습니다. (Status: ${response.status})`)
     error.status = response.status
     error.details = parsedBody
     throw error

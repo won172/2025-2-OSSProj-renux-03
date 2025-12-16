@@ -30,6 +30,7 @@ export interface PendingAnswerReview {
   handler: string
   question: string
   answer: string
+  status?: string
 }
 
 export type KnowledgeStatus = 'PENDING' | 'APPROVED' | 'REJECTED'

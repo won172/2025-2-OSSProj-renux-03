@@ -115,8 +115,8 @@ const HomePage = () => {
               window.localStorage.setItem('renux-user-role', resolvedRole)
             }
           }
-          if (data.departmentName) {
-            setDepartmentName(data.departmentName)
+          if (data.majorName) {
+            setDepartmentName(data.majorName)
           }
         }
       } catch (error) {
@@ -144,9 +144,8 @@ const HomePage = () => {
           setActiveChats([])
         }
       } else {
-        // 게스트인 경우 로컬 스토리지에서 불러옴
-        const guestChats = loadGuestChats()
-        setActiveChats(guestChats)
+        // 게스트인 경우 로컬 스토리지에서 불러오지 않음 (저장 안 함)
+        setActiveChats([])
       }
     }
     fetchActiveChats()
@@ -354,7 +353,7 @@ const HomePage = () => {
         })
 
         if (!isAuthenticated) {
-          saveGuestChat(chatRoom)
+          // saveGuestChat(chatRoom)
         }
 
         currentChatId = chatRoom.id

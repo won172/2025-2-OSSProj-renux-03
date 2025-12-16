@@ -19,14 +19,26 @@ static public class EtcApis
 
         app.MapGet("/orgs", async (ServerDbContext db, IMapper mapper) =>
         {
-            List<OrganizationDto> orgs
-            = mapper.Map<List<OrganizationDto>>
-            (await db.Organizations
-            .Include(o => o.Major)
-            .Where(o => o.IsActive)
-            .ToListAsync());
+            var organizations = await db.Organizations
+                .Include(o => o.Major)
+                .Where(o => o.IsActive)
+                .ToListAsync();
 
-            return Results.Ok(orgs);
+            List<OrganizationDto> orgDtos = mapper.Map<List<OrganizationDto>>(organizations);
+
+            foreach (var orgDto in orgDtos)
+            {
+                // Find a user associated with this major (assuming they are the manager/council)
+                // In a real scenario, you might filter by Role as well.
+                var manager = await db.Users
+                    .Where(u => u.MajorId == orgDto.Major.Id)
+                    .Select(u => u.Username)
+                    .FirstOrDefaultAsync();
+                
+                orgDto.ManagerName = manager ?? "-";
+            }
+
+            return Results.Ok(orgDtos);
         });
     }
 }
