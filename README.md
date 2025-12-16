@@ -1,5 +1,19 @@
 # A3.1 OSS 프로젝트 최종보고서
 
+* [I. 수행팀 개요](#i-프로젝트-수행팀-개요)
+* [II. 수행 결과](#ii-프로젝트-수행-결과)
+  * [1. 프로젝트 개요](#1-프로젝트-개요)
+    * [1.1 개발 동기 및 목적](#11-개발-동기-및-목적)
+    * [1.2 필요성 및 차별점](#12-필요성-및-차별점)
+    * [1.3 개발 목표](#13-개발-목표)
+  * [2. 최종결과물 소개](#2-최종결과물-소개)
+  * [3. 프로젝트 추진 내용](#3-프로젝트-추진-내용)
+     * [3.1 프로젝트 진행과정](#31-프로젝트-진행과정)
+     * [3.2 프로젝트 구현과정](#32-프로젝트-구현과정-시스템-아키텍처)
+  * [4. 기대효과](#4-기대효과)
+  * [5. 역할분담](#5-역할분담)
+  * [6. 참고문헌](#6-참고문헌)
+
 ## I. 프로젝트 수행팀 개요
 
 * **수행 학기:** 2025년 2학기 (2025.09 ~ 2025.12)
@@ -66,9 +80,12 @@
 **1. 기술 스택**
 * **Frontend:** React (Vite, TypeScript)
 * **Backend:** ASP.NET Core 9.0 (User Auth, Chat Session, DB Connection)
-* **AI Server:** FastAPI (RAG Engine)
+* **LLM Server:** FastAPI (RAG Engine)
 * **Database:** PostgreSQL (Data Entity), ChromaDB (Vector Store), Redis (Cache)
 * **AI Model:** OpenAI GPT-4o-mini (Generation), KURE-v1 (Embedding)
+
+<img width="1857" height="956" alt="image" src="https://github.com/user-attachments/assets/44b50d6a-1fbf-4d39-a2bd-31369abdd584" />
+
 
 **2. 핵심 파이프라인 (RAG Engine)**
 1.  **데이터 수집/전처리:** Selenium/BeautifulSoup 크롤링 및 HWP 텍스트 추출 -> 청킹(Chunking) -> 메타데이터 태깅.
@@ -84,7 +101,7 @@
 3.  **리소스 낭비 감소 (ESG):** 종이 문서나 안내 책자 대신 AI를 통해 정보를 제공함으로써 예산 절감 및 ESG 경영 실천.
 4.  **정보 불균형 해소:** 인맥이나 정보력에 상관없이 누구나 공평하게 정확한 학사 정보를 얻을 수 있어 정보 격차 해소.
 
-### 5. 팀원 역할
+### 5. 역할분담
 
 | 구분 | 성명 | 역할 |
 |:---:|:---:|:---|
