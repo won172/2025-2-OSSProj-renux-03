@@ -1,4 +1,4 @@
-﻿@font-face {
+@font-face {
   font-family: 'DonggukFont';
   src: url('../assets/fonts/dongguk-university.otf') format('opentype');
   font-weight: 400;
@@ -387,6 +387,26 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    max-height: calc(100vh - 350px); /* Dynamic height based on viewport */
+    min-height: 150px; /* Minimum height to ensure usability */
+    overflow-y: auto;
+    /* Custom Scrollbar for better UX */
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: rgba(255, 255, 255, 0.3) transparent; /* Firefox */
+}
+
+/* Webkit scrollbar styles (Chrome, Safari) */
+.gpt-home__chat-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.gpt-home__chat-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.gpt-home__chat-list::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 20px;
 }
 
 .gpt-home__chat-item {
@@ -2263,4 +2283,75 @@
 /* Remove bottom margin for the last form field in a form */
 .admin-form-field:last-of-type {
     margin-bottom: 0;
+}
+
+/* Home Guide Styles */
+.home-guide {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+    color: var(--buddy-foreground);
+    padding: 2rem;
+}
+
+.home-guide h3 {
+    font-size: 1.5rem;
+    margin-bottom: 2rem;
+    color: var(--buddy-primary);
+    font-weight: 700;
+}
+
+.home-guide ol {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 1.5rem;
+    max-width: 600px;
+    width: 100%;
+    text-align: left;
+}
+
+.home-guide li {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 16px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.home-guide li:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px rgba(0, 0, 0, 0.05);
+}
+
+.home-guide li strong {
+    font-size: 1.1rem;
+    color: #1f2937;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.home-guide li p {
+    margin: 0;
+    color: #6b7280;
+    line-height: 1.5;
+    font-size: 0.95rem;
+}
+
+.home-guide em {
+    font-style: normal;
+    font-weight: 600;
+    color: var(--buddy-primary);
+    background: rgba(249, 115, 22, 0.1);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
 }

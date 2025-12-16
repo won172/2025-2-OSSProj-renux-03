@@ -1,5 +1,8 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import rehypeExternalLinks from 'rehype-external-links'
+import remarkGfm from 'remark-gfm'
 import { apiFetch } from '../../api/client'
 import type { ActiveChat } from '../../types/chat'
 
@@ -185,7 +188,24 @@ const ChatPage = () => {
                     key={message.id}
                     className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'}`}
                   >
-                    <span className="chat-bubble__text">{message.content}</span>
+                    <ReactMarkdown
+                      className="chat-bubble__text"
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[[rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }]]}
+                      components={{
+                        a: ({ node, ...props }) => (
+                          <a
+                            {...props}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: '#0d6efd', textDecoration: 'underline', pointerEvents: 'auto', cursor: 'pointer' }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ),
+                      }}
+                    >
+                      {message.content}
+                    </ReactMarkdown>
                     {messageTime && <time className="chat-bubble__time">{messageTime}</time>}
                   </li>
                 )

@@ -1,0 +1,91 @@
+/* =========================
+   Chat bubble markdown base
+   ========================= */
+
+/* Links */
+.chat-bubble__text a {
+  color: #0d6efd !important;
+  text-decoration: underline !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 10;
+}
+.chat-bubble__text a:hover {
+  color: #0a58ca !important;
+  text-decoration: none !important;
+}
+
+/* Text wrapping (Korean line breaks) */
+.chat-bubble__text {
+  white-space: normal !important;
+  word-break: keep-all !important;     /* 한국어 단어가 중간에 쪼개지는 것 방지 */
+  overflow-wrap: break-word !important;/* 긴 URL/영문이 있을 때만 줄바꿈 */
+}
+
+/* =========================
+   List rendering hard reset
+   (fix "2-column" flex/grid issue)
+   ========================= */
+
+/* Some global styles set li to flex/grid -> force back to list-item */
+.chat-bubble__text ol,
+.chat-bubble__text ul {
+  display: block !important;
+  margin: 0 !important;
+  padding-left: 1.25em !important; /* 기본 들여쓰기 */
+  list-style-position: outside !important; /* 기본이 가장 안정적 */
+}
+
+.chat-bubble__text ol > li,
+.chat-bubble__text ul > li {
+  display: list-item !important; /* 핵심: flex/grid 무력화 */
+  margin: 0.2em 0 !important;
+  padding: 0 !important;         /* 2중 들여쓰기 방지 */
+}
+
+/* Nested lists: 조금만 더 들여쓰기 */
+.chat-bubble__text li > ul,
+.chat-bubble__text li > ol {
+  margin-top: 0.35em !important;
+  padding-left: 1.25em !important;
+}
+
+/* =========================
+   Paragraph spacing inside markdown
+   ========================= */
+
+.chat-bubble__text p {
+  margin: 0 !important;
+  line-height: 1.5 !important;
+}
+
+/* 문단 다음 문단/리스트 간격(필요 시 조절) */
+.chat-bubble__text p + p {
+  margin-top: 0.6em !important;
+}
+.chat-bubble__text p + ul,
+.chat-bubble__text p + ol {
+  margin-top: 0.6em !important;
+}
+
+/* Loose list 구조( li 안에 p가 들어오는 경우 ) 간격/스타일 */
+.chat-bubble__text li > p {
+  margin: 0 !important;
+  line-height: 1.5 !important;
+}
+
+/* 번호 리스트의 "제목"처럼 보이는 첫 문단만 살짝 강조(원치 않으면 삭제) */
+.chat-bubble__text ol > li > p:first-child {
+  font-weight: 600;
+}
+
+/* =========================
+   Optional: tighter spacing for list items
+   ========================= */
+
+/* 리스트 항목 사이 간격을 더 촘촘히 하고 싶으면 값만 줄이기 */
+.chat-bubble__text ol > li + li,
+.chat-bubble__text ul > li + li {
+  margin-top: 0.35em !important;
+}

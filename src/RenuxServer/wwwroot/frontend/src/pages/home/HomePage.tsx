@@ -1,5 +1,8 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import rehypeExternalLinks from 'rehype-external-links'
+import remarkGfm from 'remark-gfm'
 import { apiFetch } from '../../api/client'
 import donggukLogo from '../../assets/images/dongguk-logo.png'
 import dongddokiLogo from '../../assets/images/dongddoki-logo.png'
@@ -637,12 +640,29 @@ const HomePage = () => {
               ) : chatError ? (
                 <p className="home-chat__status home-chat__status--error">{chatError}</p>
               ) : !selectedChatId ? (
-                <p className="home-chat__status">채팅방을 선택하거나 새로 만드세요.</p>
+                <div className="home-guide">
+                  <h3>동똑이 사용 가이드</h3>
+                  <ol>
+                    <li>
+                      <strong>새 대화 시작하기</strong>
+                      <p>좌측 사이드바의 <em>+ 새 대화</em> 버튼을 클릭하여 채팅방을 생성하세요.</p>
+                    </li>
+                    <li>
+                      <strong>질문하기</strong>
+                      <p>학사 일정, 장학금, 규정 등 궁금한 내용을 자유롭게 질문하세요.</p>
+                    </li>
+                    <li>
+                      <strong>로그인 혜택</strong>
+                      <p>로그인하면 대화 내역이 저장되고, 소속 학과에 맞는 맞춤형 답변을 받을 수 있습니다.</p>
+                    </li>
+                  </ol>
+                </div>
               ) : chatMessages.length === 0 ? (
                 <div className="home-chat__empty">아직 메시지가 없습니다. 첫 메시지를 보내보세요.</div>
               ) : (
                 <ul className="chat-bubbles">
                   {isLoadingMore && <li className="home-chat__status"><small>이전 대화 불러오는 중...</small></li>}
+
                   {chatMessages.map((message) => {
                     const messageTime = formatMessageTime(message.createdTime)
                     return (
@@ -650,11 +670,29 @@ const HomePage = () => {
                         key={message.id}
                         className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'}`}
                       >
-                        <span className="chat-bubble__text">{message.content}</span>
+                        <ReactMarkdown
+                          className="chat-bubble__text"
+                          remarkPlugins={[remarkGfm]}
+                          rehypePlugins={[[rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }]]}
+                          components={{
+                            a: ({ node, ...props }) => (
+                              <a
+                                {...props}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: '#0d6efd', textDecoration: 'underline', pointerEvents: 'auto', cursor: 'pointer' }}
+                            onClick={(e) => e.stopPropagation()}
+                              />
+                            ),
+                          }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
                         {messageTime && <time className="chat-bubble__time">{messageTime}</time>}
                       </li>
                     )
                   })}
+
                   {chatSending && (
                     <li className="chat-bubble chat-bubble--bot">
                       <div className="typing-indicator">
