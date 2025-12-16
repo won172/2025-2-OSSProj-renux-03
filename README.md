@@ -80,11 +80,11 @@
 **1. 기술 스택**
 * **Frontend:** React (Vite, TypeScript)
 * **Backend:** ASP.NET Core 9.0 (User Auth, Chat Session, DB Connection)
-* **AI Server:** FastAPI (RAG Engine)
+* **LLM Server:** FastAPI (RAG Engine)
 * **Database:** PostgreSQL (Data Entity), ChromaDB (Vector Store), Redis (Cache)
 * **AI Model:** OpenAI GPT-4o-mini (Generation), KURE-v1 (Embedding)
 
-  <img width="1843" height="940" alt="image" src="https://github.com/user-attachments/assets/61623a6d-6d24-471f-b951-9075745818ae" />
+<img width="1857" height="956" alt="image" src="https://github.com/user-attachments/assets/44b50d6a-1fbf-4d39-a2bd-31369abdd584" />
 
 
 **2. 핵심 파이프라인 (RAG Engine)**
