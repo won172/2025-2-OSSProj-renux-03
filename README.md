@@ -57,13 +57,13 @@
 
     *   **환각 현상 개선:** 기존 GPT 모델이 모르는 정보를 지어내는 것과 달리, '동똑이'는 정확한 출처와 근거를 기반으로 답변하며, 불필요한 서식을 제거하여 정보의 신뢰도를 높였습니다.
 
-![Renux Chatbot Screenshot](doc/최종결과물_사진1.png)
-![Renux Chatbot Screenshot](doc/최종결과물_사진2.png)
-![Renux Chatbot Screenshot](doc/최종결과물_사진3.png)
-![Renux Chatbot Screenshot](doc/최종결과물_사진4.png)
-![Renux Chatbot Screenshot](doc/최종결과물_사진5.png)
-![Renux Chatbot Screenshot](doc/최종결과물_사진6.png)
-![Renux Chatbot Screenshot](doc/최종결과물_사진7.png)
+![Renux Chatbot Screenshot](doc/images/최종결과물_사진1.png)
+![Renux Chatbot Screenshot](doc/images/최종결과물_사진2.png)
+![Renux Chatbot Screenshot](doc/images/최종결과물_사진3.png)
+![Renux Chatbot Screenshot](doc/images/최종결과물_사진4.png)
+![Renux Chatbot Screenshot](doc/images/최종결과물_사진5.png)
+![Renux Chatbot Screenshot](doc/images/최종결과물_사진6.png)
+![Renux Chatbot Screenshot](doc/images/최종결과물_사진7.png)
 
 ### 3. 프로젝트 추진 내용
 
@@ -89,22 +89,21 @@
 * **Database:** PostgreSQL (Data Entity), ChromaDB (Vector Store), Redis (Cache)
 * **AI Model:** OpenAI GPT-4o-mini (Generation), KURE-v1 (Embedding)
 
-<img width="1857" height="956" alt="image" src="https://github.com/user-attachments/assets/44b50d6a-1fbf-4d39-a2bd-31369abdd584" />
+| 시스템 아키텍처 | 유스케이스 다이어그램 |
+| :---: | :---: |
+| <img src="doc/images/E-R 다이어그램.png" width="100%"> | <img src="doc/images/유스케이스 다이어그램.png" width="100%"> |
 
-<br><br>
+| 시퀀스 다이어그램 (메인 흐름) | 시퀀스 다이어그램 (RAG 내부 로직) |
+| :---: | :---: |
+| <img src="doc/images/시퀀스 다이어그램-메인 요청:응답 흐름.png" width="100%"> | <img src="doc/images/시퀀스 다이어그램-RAG 서비스 내부 로직.png" width="100%"> |
 
-- 유스케이스 다이어그램
-<img width="1138" height="764" alt="image" src="https://github.com/user-attachments/assets/b3ee01ea-9ab4-4466-ab15-f66886e1f05b" />
+| E-R 다이어그램 |
+| :---: |
+| <img src="doc/images/시스템 블록 다이어그램.png" width="100%"> |
 
-<br><br>
-
-- 시퀀스 다이어그램
-<img width="1067" height="550" alt="image" src="https://github.com/user-attachments/assets/7fa1c811-b841-4bdb-91e2-0e508089d6de" />
-
-<br><br>
-
-- 시스템 블록 다이어그램
-<img width="1233" height="428" alt="image" src="https://github.com/user-attachments/assets/78c380fb-2364-422f-8963-3c46ce029231" />
+| 기술 스택 |
+| :---: |
+| <img src="doc/images/기술스택.png" width="100%"> |
 
 <br><br>
 
@@ -118,9 +117,8 @@
 ### 4. 기대효과
 
 1.  **스마트 캠퍼스 이미지 강화:** 최신 생성형 AI(RAG) 기술을 학사 행정에 선제적으로 도입하여 디지털 혁신 선도 대학 이미지 제고.
-2.  **학사 운영의 투명성 및 신뢰도 향상:** AI가 규정 원문에 근거하여 답변하므로 규정 해석의 모호함을 줄이고 투명성 확보.
-3.  **리소스 낭비 감소 (ESG):** 종이 문서나 안내 책자 대신 AI를 통해 정보를 제공함으로써 예산 절감 및 ESG 경영 실천.
-4.  **정보 불균형 해소:** 인맥이나 정보력에 상관없이 누구나 공평하게 정확한 학사 정보를 얻을 수 있어 정보 격차 해소.
+2.  **답변 신뢰도 향상:** AI가 규정 원문에 근거하여 답변하므로 규정 해석의 모호함을 줄이고 투명성 확보.
+3.  **정보 불균형 해소:** 인맥이나 정보력에 상관없이 누구나 공평하게 정확한 학사 정보를 얻을 수 있어 정보 격차 해소.
 
 ### 5. 역할분담
 
