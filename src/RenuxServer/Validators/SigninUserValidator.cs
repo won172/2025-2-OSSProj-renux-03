@@ -13,6 +13,10 @@ public class SigninUserValidator : AbstractValidator<SigninUserDto>
             .Length(8, 30);
         RuleFor(p => p.Password)
             .NotNull()
-            .Length(10, 30);
+            .Length(10, 30)/*
+            .Matches(@"[a-z]")
+            .Matches(@"[A-Z]")
+            .Matches(@"[0-9]")
+            .Matches(@"[!@#$%]")*/;
     }
 }
