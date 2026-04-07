@@ -89,17 +89,13 @@
 * **Database:** PostgreSQL (Data Entity), ChromaDB (Vector Store), Redis (Cache)
 * **AI Model:** OpenAI GPT-4o-mini (Generation), KURE-v1 (Embedding)
 
-| 시스템 아키텍처 | 유스케이스 다이어그램 |
-| :---: | :---: |
-| <img src="doc/images/E-R 다이어그램.png" width="100%"> | <img src="doc/images/유스케이스 다이어그램.png" width="100%"> |
+| 시스템 아키텍처 | 유스케이스 다이어그램 | E-R 다이어그램 |
+| :---: | :---: | :---: |
+| <img src="doc/images/시스템 아키텍처 다이어그램.png" width="100%"> | <img src="doc/images/유스케이스 다이어그램.png" width="100%"> | <img src="doc/images/E-R 다이어그램.png" width="100%"> |
 
 | 시퀀스 다이어그램 (메인 흐름) | 시퀀스 다이어그램 (RAG 내부 로직) |
 | :---: | :---: |
-| <img src="doc/images/시퀀스 다이어그램-메인 요청:응답 흐름.png" width="100%"> | <img src="doc/images/시퀀스 다이어그램-RAG 서비스 내부 로직.png" width="100%"> |
-
-| E-R 다이어그램 |
-| :---: |
-| <img src="doc/images/시스템 블록 다이어그램.png" width="100%"> |
+| <img src="doc/images/시퀀스 다이어그램-메인 요청_응답 흐름.png" width="100%"> | <img src="doc/images/시퀀스 다이어그램-RAG 서비스 내부 로직.png" width="100%"> |
 
 | 기술 스택 |
 | :---: |
