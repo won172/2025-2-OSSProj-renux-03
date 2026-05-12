@@ -3,9 +3,32 @@ __*/
 **/bin/
 **/obj/
 *.env
+*.env.*
 RenuxServer.csproj.Backup.tmp
 RenuxServer.csproj.user
 .DS_Store
 **/.DS_Store
 **/huggingface_cache
-src/RAG/artifacts/db_chroma/chroma.sqlite3
+
+# Local environment files
+src/RAG/.env
+src/RenuxServer/.env
+src/RenuxServer/.env.docker.local
+src/RenuxServer/wwwroot/frontend/.env*
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+src/RAG/rag_data.db
+src/RAG/rag_database.db
+src/RAG/src/rag_database.db
+
+# Local RAG artifacts
+src/RAG/artifacts/raw/
+src/RAG/artifacts/normalized/
+src/RAG/artifacts/chunks/
+src/RAG/artifacts/vectorizers/
+src/RAG/artifacts/vectorizers_backup_*/
+src/RAG/artifacts/models/
+src/RAG/artifacts/db_chroma/

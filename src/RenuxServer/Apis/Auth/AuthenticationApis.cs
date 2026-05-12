@@ -15,6 +15,36 @@ public record IdCheck(string Id);
 
 static public class AuthenticationApis
 {
+    static private CookieOptions BuildAuthCookieOptions(IConfiguration config)
+    {
+        bool secure = config.GetValue<bool?>("AuthCookie:Secure")
+            ?? config.GetValue<bool?>("AUTH_COOKIE_SECURE")
+            ?? true;
+
+        string sameSiteRaw =
+            config["AuthCookie:SameSite"]
+            ?? config["AUTH_COOKIE_SAMESITE"]
+            ?? "None";
+
+        SameSiteMode sameSite = sameSiteRaw.ToLowerInvariant() switch
+        {
+            "strict" => SameSiteMode.Strict,
+            "lax" => SameSiteMode.Lax,
+            "none" => SameSiteMode.None,
+            _ => SameSiteMode.None,
+        };
+
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = secure,
+            SameSite = sameSite,
+            IsEssential = true,
+            Expires = DateTime.UtcNow.AddMinutes(60),
+            Path = "/"
+        };
+    }
+
     static public void AddAuthApis(this WebApplication application)
     {
         var app = application.MapGroup("/auth");
@@ -105,15 +135,7 @@ static public class AuthenticationApis
                 expires: DateTime.Now.AddMinutes(60),
                 signingCredentials: credential);
 
-            CookieOptions copt = new()
-            {
-                HttpOnly = true,
-                Secure = false, // Set to true in production with HTTPS
-                SameSite = SameSiteMode.Lax,
-                IsEssential = true,
-                Expires = DateTime.UtcNow.AddMinutes(60),
-                Path = "/"
-            };
+            CookieOptions copt = BuildAuthCookieOptions(config);
 
             string tokenString = new JwtSecurityTokenHandler().WriteToken(token);
             context.Response.Cookies.Append("renux-server-token", tokenString, copt);

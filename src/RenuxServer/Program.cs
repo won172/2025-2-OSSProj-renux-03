@@ -1,6 +1,7 @@
 using AutoMapper;
 using Microsoft.EntityFrameworkCore;
 using FluentValidation;
+using Microsoft.AspNetCore.Http;
 
 using RenuxServer.DbContexts;
 using RenuxServer.Dtos.AuthDtos;
@@ -20,10 +21,31 @@ var builder = WebApplication.CreateBuilder();
 
 builder.Configuration.AddUserSecrets<Program>();
 
+var rawConnectionString =
+    builder.Configuration.GetConnectionString("RenuxServer")
+    ?? builder.Configuration["CONNECTIONSTRING"];
+
+if (string.IsNullOrWhiteSpace(rawConnectionString))
+{
+    throw new InvalidOperationException("Database connection string is not configured. Set ConnectionStrings__RenuxServer or CONNECTIONSTRING.");
+}
+
+var rawJwtKey =
+    builder.Configuration["Jwt:Key"]
+    ?? builder.Configuration["JWT_KEY"];
+
+if (string.IsNullOrWhiteSpace(rawJwtKey))
+{
+    throw new InvalidOperationException("JWT signing key is not configured. Set Jwt__Key or JWT_KEY.");
+}
+
+var configuredCorsOrigins = (builder.Configuration["CORS_ALLOWED_ORIGINS"] ?? string.Empty)
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
 // DbContext Setting
 builder.Services.AddDbContext<ServerDbContext>(options =>
 {
-    options.UseNpgsql(builder.Configuration.GetConnectionString("RenuxServer"));
+    options.UseNpgsql(rawConnectionString);
 });
 
 // AutoMapper Setting
@@ -56,7 +78,7 @@ builder.Services.AddAuthentication(options =>
         options.MapInboundClaims = false; // Disable automatic claim mapping
         options.TokenValidationParameters = new()
         {
-            IssuerSigningKey = new SymmetricSecurityKey(Convert.FromBase64String(builder.Configuration["Jwt:Key"]!)),
+            IssuerSigningKey = new SymmetricSecurityKey(Convert.FromBase64String(rawJwtKey)),
             ValidateIssuer = false,
             ValidateAudience = false
         };
@@ -86,10 +108,43 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 builder.Services.AddHttpClient();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("FrontendCors", policy =>
+    {
+        policy
+            .SetIsOriginAllowed(origin =>
+            {
+                if (configuredCorsOrigins.Length > 0)
+                {
+                    return configuredCorsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
+                }
+
+                if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
+                    origin.StartsWith("https://localhost:", StringComparison.OrdinalIgnoreCase) ||
+                    origin.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase) ||
+                    origin.StartsWith("https://127.0.0.1:", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                {
+                    return uri.Host.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase);
+                }
+
+                return false;
+            })
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
 
 var app = builder.Build();
 
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
+app.UseCors("FrontendCors");
 
 using (var scope = app.Services.CreateScope())
 {
