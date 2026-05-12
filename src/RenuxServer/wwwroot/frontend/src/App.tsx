@@ -1,7 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import HomePage from './pages/home/HomePage'
 import SignInPage from './pages/auth/SignInPage'
-import SignUpPage from './pages/auth/SignUpPage'
 import ChatPage from './pages/chat/ChatPage'
 import SettingsPage from './pages/settings/SettingsPage'
 import UniversityAdminPage from './pages/admin/UniversityAdminPage'
@@ -15,7 +14,7 @@ function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/auth/in" element={<SignInPage />} />
-          <Route path="/auth/up" element={<SignUpPage />} />
+          <Route path="/auth/up" element={<Navigate to="/auth/in" replace />} />
           <Route path="/chat/:chatId" element={<ChatPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/admin/university" element={<UniversityAdminPage />} />
