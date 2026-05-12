@@ -2,10 +2,34 @@ namespace RenuxServer.Apis;
 
 static public class AdminProxyApis
 {
+    private static readonly HashSet<string> AllowedAdminRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "관리자",
+        "학생회",
+        "총학생회",
+    };
+
     static public void AddAdminProxyApis(this WebApplication application)
     {
-        var app = application.MapGroup("/admin");
+        var app = application.MapGroup("/admin").RequireAuthorization();
         string RagServiceUrl = application.Configuration["RagServiceUrl"] ?? application.Configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
+
+        app.AddEndpointFilter(async (context, next) =>
+        {
+            var user = context.HttpContext.User;
+            if (user?.Identity?.IsAuthenticated != true)
+            {
+                return Results.Unauthorized();
+            }
+
+            var roleName = user.FindFirst("Role")?.Value;
+            if (string.IsNullOrWhiteSpace(roleName) || !AllowedAdminRoles.Contains(roleName))
+            {
+                return Results.Forbid();
+            }
+
+            return await next(context);
+        });
 
         app.MapGet("pending", async (HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) => 
         {
