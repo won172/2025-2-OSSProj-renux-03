@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "JANGHAKNOTICE:26764498",
+  "collected_at": "2026-05-12T10:45:54.571146+09:00",
+  "raw_record": {
+    "게시판": "장학공지",
+    "게시판코드": "JANGHAKNOTICE",
+    "원문글ID": 26764498,
+    "제목": "[홍보] KICS 한국통신학회 장학금 지원 대상자 선발",
+    "카테고리": null,
+    "게시일": "2026-04-27",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/JANGHAKNOTICE/detail/26764498",
+    "본문HTML": "<p>\n\n</p><p style=\"text-align: center;\"><img alt=\"공고 포스터\" src=\"/cmmn/fileView?path=/ckeditor//JANGHAKNOTICE&amp;physical=1777248807789.jpg&amp;contentType=image\" style=\"width: 800px; height: 2000px;\"/></p>",
+    "본문": "",
+    "첨부파일": []
+  }
+}

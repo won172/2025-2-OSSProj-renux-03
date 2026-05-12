@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "SAFENOTICE:26758120",
+  "collected_at": "2026-05-12T10:45:54.623716+09:00",
+  "raw_record": {
+    "게시판": "안전공지",
+    "게시판코드": "SAFENOTICE",
+    "원문글ID": 26758120,
+    "제목": "공지 동국대학교 안전·보건 경영방침 및 목표",
+    "카테고리": "안내",
+    "게시일": "2024-11-26",
+    "상단고정": true,
+    "상세URL": "https://www.dongguk.edu/article/SAFENOTICE/detail/26758120",
+    "본문HTML": "<p>\n\n</p><p><img alt=\"목표및경영방침\" src=\"/cmmn/fileView?path=/ckeditor//SAFENOTICE&amp;physical=1732593755444.jpg&amp;contentType=image\" style=\"width: 1240px; height: 1753px;\"/></p>",
+    "본문": "",
+    "첨부파일": []
+  }
+}

@@ -877,9 +877,24 @@
     color: var(--buddy-foreground);
 }
 
+.chat-bubble--fallback {
+    border-color: rgba(180, 83, 9, 0.28);
+    background: rgba(255, 251, 235, 0.96);
+}
+
 .chat-bubble__text {
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+.chat-fallback-badge {
+    width: fit-content;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(180, 83, 9, 0.12);
+    color: #92400e;
+    font-size: 0.72rem;
+    font-weight: 700;
 }
 
 .chat-bubble__time {
@@ -890,6 +905,155 @@
 
 .chat-bubble--bot .chat-bubble__time {
     color: rgba(15, 23, 42, 0.45);
+}
+
+.source-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 4px;
+}
+
+.source-cards__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.source-cards__header::-webkit-details-marker {
+    display: none;
+}
+
+.source-cards__title {
+    font-size: 0.8rem;
+    font-weight: 800;
+    color: rgba(15, 23, 42, 0.78);
+}
+
+.source-cards__title::before {
+    content: '▸';
+    display: inline-block;
+    margin-right: 6px;
+    color: rgba(15, 23, 42, 0.52);
+    transition: transform 0.18s ease;
+}
+
+.source-cards[open] .source-cards__title::before {
+    transform: rotate(90deg);
+}
+
+.source-cards__count {
+    font-size: 0.72rem;
+    color: rgba(15, 23, 42, 0.5);
+}
+
+.source-cards__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.source-card {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 10px 12px;
+    border: 1px solid rgba(15, 23, 42, 0.09);
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.94);
+}
+
+.source-card__meta,
+.source-card__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.source-card__dataset {
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.08);
+    color: rgba(15, 23, 42, 0.72);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.source-card__date,
+.source-card__score {
+    color: rgba(15, 23, 42, 0.52);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.source-card__title {
+    margin: 0;
+    color: rgba(15, 23, 42, 0.9);
+    font-size: 0.9rem;
+    line-height: 1.35;
+}
+
+.source-card__snippet {
+    margin: 0;
+    display: -webkit-box;
+    overflow: hidden;
+    color: rgba(15, 23, 42, 0.62);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.source-card__link {
+    color: #2563eb;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.source-card__link:hover {
+    text-decoration: underline;
+}
+
+.source-card__link--disabled {
+    color: rgba(15, 23, 42, 0.42);
+}
+
+.source-cards--empty {
+    padding: 10px 12px;
+    border: 1px dashed rgba(180, 83, 9, 0.28);
+    border-radius: 8px;
+    background: rgba(255, 247, 237, 0.72);
+}
+
+.source-cards__empty-title {
+    color: #92400e;
+    font-size: 0.82rem;
+    font-weight: 800;
+}
+
+.source-cards__empty-text {
+    color: rgba(120, 53, 15, 0.78);
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+    .source-card__meta,
+    .source-card__footer {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .source-card__date,
+    .source-card__score {
+        white-space: normal;
+    }
 }
 
 .chat-page-v2__composer {
@@ -1906,6 +2070,11 @@
     color: #92400e;
 }
 
+.status-pill--danger {
+    background: rgba(239, 68, 68, 0.14);
+    color: #b91c1c;
+}
+
 .admin-review-list {
     list-style: none;
     padding: 0;
@@ -2166,26 +2335,26 @@
 }
 
 .admin-page-wrapper {
-    height: 100vh; /* Use height for full viewport fill */
+    min-height: 100vh;
     width: 100%;
     background: radial-gradient(circle at 15% -10%, rgba(249, 115, 22, 0.16), transparent 36%),
         radial-gradient(circle at 90% 10%, rgba(249, 115, 22, 0.12), transparent 32%),
         linear-gradient(180deg, #FFF7ED 0%, #FFF7ED 50%, #FFF7ED 100%);
     display: flex;
     flex-direction: column;
-    align-items: center; /* Center horizontally */
-    justify-content: flex-start; /* Align content to the top within the wrapper */
-    overflow: hidden; /* Prevent body scroll */
+    align-items: center;
+    justify-content: flex-start;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 /* Admin Dashboard Compact Layout */
 .admin-shell.compact-mode {
-    height: 100%; /* Take full height of parent (admin-page-wrapper) */
     width: 100%;
     max-width: 1600px;
     margin: 0 auto;
-    padding: 16px 32px; /* Slightly reduce vertical padding to give more content space */
-    gap: 12px; /* Slightly reduce gap to save vertical space */
+    padding: 16px 32px 40px;
+    gap: 16px;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
@@ -2213,23 +2382,28 @@
     display: grid;
     grid-template-columns: 500px 1fr; /* Increased width for the left column */
     gap: 16px;
-    flex: 1;
-    min-height: 0; /* Important for nested scrolling */
+    align-items: start;
 }
 
 .admin-panel.full-height {
-    height: 100%;
     display: flex;
     flex-direction: column;
     padding: 16px 20px;
     box-sizing: border-box;
-    min-height: 0;
-    overflow: hidden;
+    min-height: 320px;
+}
+
+.admin-panel--organizations {
+    max-height: 560px;
+}
+
+.admin-panel--organizations .admin-panel-content-scroll {
+    overflow-y: auto;
 }
 
 .admin-panel-content-scroll {
     flex: 1;
-    overflow-y: auto;
+    overflow-y: visible;
     min-height: 0;
 }
 
@@ -2241,10 +2415,9 @@
 }
 
 .admin-panel__column.full-height {
-    height: 100%;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    min-height: 0;
 }
 
 .admin-review-list-scroll {
@@ -2258,13 +2431,30 @@
 
 .admin-review-detail-scroll {
     flex: 1;
-    overflow-y: auto;
+    overflow-y: visible;
     padding-right: 4px;
 }
 
 /* Adjust table in compact mode */
 .admin-table__head, .admin-table__row {
     padding: 8px 4px;
+}
+
+@media (max-width: 1280px) {
+    .admin-dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-panel--split.full-height {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-panel__column--detail {
+        border-left: none;
+        padding-left: 0;
+        border-top: 1px solid rgba(15, 23, 42, 0.06);
+        padding-top: 20px;
+    }
 }
 
 /* Added for Department Admin Form Actions */

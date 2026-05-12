@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "SAFENOTICE:26759943",
+  "collected_at": "2026-05-12T10:45:54.612959+09:00",
+  "raw_record": {
+    "게시판": "안전공지",
+    "게시판코드": "SAFENOTICE",
+    "원문글ID": 26759943,
+    "제목": "공지 2025년 동국대학교 연구실 안전관리 매뉴얼 안내",
+    "카테고리": "안내",
+    "게시일": "2025-05-02",
+    "상단고정": true,
+    "상세URL": "https://www.dongguk.edu/article/SAFENOTICE/detail/26759943",
+    "본문HTML": "<p>\n\n</p><p><strong><span style=\"font-size:12pt;\">2025학년도 동국대학교 연구실 안전관리 매뉴얼 안내</span></strong></p>\n<p><span style=\"font-size:11pt;\">1. 목적 : 연구실의 안전한 작업 환경을 조성하고, 안전사고가 발생할 경우 그 피해를 최소화하여 연구활동종사자의 건강과 생명을 보호, 유지 등을 위한 효율적 업무 수행</span></p>\n<p><span style=\"font-size:11pt;\">2. 사고유형별 비상연락망</span></p>\n<p><span style=\"font-size:11pt;\">  - 총괄 : 종합상황실(02-2260-3556)</span></p>\n<p><span style=\"font-size:11pt;\">3. 연구활동종사자 안전 가이드</span></p>\n<p><span style=\"font-size:11pt;\">  - 연구실 사고 구분 : 중대 연구실 사고, 일반 연구실 사고, 단순 연구실 사고</span></p>\n<p><span style=\"font-size:11pt;\">  - 사고대응절차 : 연구실 사고 발생 시 사고 보고 → 사고 대응 → 사고조사 → 재발방지 대책 수립, 시행 → 사후관리</span></p>\n<p><span style=\"font-size:11pt;\">  - 사고 최초 발견자는 연구실책임자(담당 교수)에게 즉시 보고</span></p>\n<p><span style=\"font-size:11pt;\">  - 연구실책임자(담당 교수) 안전관리부서에 사고 발생 사항 통보</span></p>\n<p><span style=\"font-size:11pt;\">  - 안전관리부서는 사고 대응 후 파악된 사항을 연구주체의 장 보고</span></p>\n<p><span style=\"font-size:11pt;\">4. 연구실 사고사례</span></p>\n<p><span style=\"font-size:11pt;\">5. 상해유형 및 응급처치</span></p>\n<p> </p>\n<p><span style=\"font-size:11pt;\">붙임 : 2025년 동국대학교 연구실 안전관리 매뉴얼 1부. 끝.</span></p>",
+    "본문": "2025학년도 동국대학교 연구실 안전관리 매뉴얼 안내\n1. 목적 : 연구실의 안전한 작업 환경을 조성하고, 안전사고가 발생할 경우 그 피해를 최소화하여 연구활동종사자의 건강과 생명을 보호, 유지 등을 위한 효율적 업무 수행\n2. 사고유형별 비상연락망\n- 총괄 : 종합상황실(02-2260-3556)\n3. 연구활동종사자 안전 가이드\n- 연구실 사고 구분 : 중대 연구실 사고, 일반 연구실 사고, 단순 연구실 사고\n- 사고대응절차 : 연구실 사고 발생 시 사고 보고 → 사고 대응 → 사고조사 → 재발방지 대책 수립, 시행 → 사후관리\n- 사고 최초 발견자는 연구실책임자(담당 교수)에게 즉시 보고\n- 연구실책임자(담당 교수) 안전관리부서에 사고 발생 사항 통보\n- 안전관리부서는 사고 대응 후 파악된 사항을 연구주체의 장 보고\n4. 연구실 사고사례\n5. 상해유형 및 응급처치\n붙임 : 2025년 동국대학교 연구실 안전관리 매뉴얼 1부. 끝.",
+    "첨부파일": [
+      {
+        "name": "★2025학년도 연구실 안전관리 매뉴얼.pdf",
+        "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=%E2%98%852025%ED%95%99%EB%85%84%EB%8F%84%20%EC%97%B0%EA%B5%AC%EC%8B%A4%20%EC%95%88%EC%A0%84%EA%B4%80%EB%A6%AC%20%EB%A7%A4%EB%89%B4%EC%96%BC.pdf&filepath=/files/article/SAFENOTICE/26759943/&filerealname=B19C397A8E884D0281F0D322D88A3672.pdf"
+      }
+    ]
+  }
+}

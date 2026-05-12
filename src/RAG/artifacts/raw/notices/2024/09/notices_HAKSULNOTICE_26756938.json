@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "HAKSULNOTICE:26756938",
+  "collected_at": "2026-05-12T10:45:54.629254+09:00",
+  "raw_record": {
+    "게시판": "학술공지",
+    "게시판코드": "HAKSULNOTICE",
+    "원문글ID": 26756938,
+    "제목": "[(사)한국교수불자연합회]  2024 백제·신라불교 자산 구축 사업 학술대회 :  백제불교의 고찰과 초전지 불교 자산의 탐방",
+    "카테고리": null,
+    "게시일": "2024-09-03",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/HAKSULNOTICE/detail/26756938",
+    "본문HTML": "<p>\n\n</p><p>자세한 내용 및 일정은 첨부파일의 프로그램을 참고하시기 바랍니다. <img alt=\"백제불교의 특징과 초전지 불교 자산의 현대적 의미  학술대회 (사)한국교수불자연합회\" src=\"/cmmn/fileView?path=/ckeditor//HAKSULNOTICE&amp;physical=1725335914326.jpg&amp;contentType=image\" style=\"width: 1453px; height: 2026px;\"/></p>",
+    "본문": "자세한 내용 및 일정은 첨부파일의 프로그램을 참고하시기 바랍니다.",
+    "첨부파일": [
+      {
+        "name": "백제 불교초전지 프로그램 0903최종본.pdf",
+        "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=%EB%B0%B1%EC%A0%9C%20%EB%B6%88%EA%B5%90%EC%B4%88%EC%A0%84%EC%A7%80%20%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8%200903%EC%B5%9C%EC%A2%85%EB%B3%B8.pdf&filepath=/files/article/HAKSULNOTICE/26756938/&filerealname=663D887741D648F3BEA037E3B6337C4E.pdf"
+      }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+﻿question,expected_dataset,actual_route,hit,keyword_score,fallback,top_score
+동국대학교 2026학년도 입학 전형에 대해 알려줘,notices,notices,True,0.3333333333333333,False,0.21888024373825887
+장학금 신청 기간이 언제야?,notices,notices,True,1.0,False,0.29375257573469993
+수강신청 취소는 어떻게 해?,rules,schedule,False,0.6666666666666666,False,0.2993879634387133
+이번 학기 종강일이 언제야?,schedule,schedule,True,0.5,False,0.48222213821750126
+컴퓨터공학과 사무실 전화번호 알려줘,staff,staff,True,0.6666666666666666,False,0.5621505677404316
+통계학과 교과과정에 대해 알려줘,courses,courses,True,1.0,False,0.12116351127624513

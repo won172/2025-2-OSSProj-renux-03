@@ -13,9 +13,11 @@ CHROMA_DIR = ARTIFACT_DIR / "db_chroma"
 MODEL_DIR = ARTIFACT_DIR / "models"
 VECTORIZER_DIR = ARTIFACT_DIR / "vectorizers"
 CHUNKS_DIR = ARTIFACT_DIR / "chunks"
+RAW_DIR = ARTIFACT_DIR / "raw"
+NORMALIZED_DIR = ARTIFACT_DIR / "normalized"
 
 # 모듈이 임포트될 때 필요한 디렉터리를 미리 만든다.
-for _path in (DATA_DIR, ARTIFACT_DIR, CHROMA_DIR, MODEL_DIR, VECTORIZER_DIR, CHUNKS_DIR):
+for _path in (DATA_DIR, ARTIFACT_DIR, CHROMA_DIR, MODEL_DIR, VECTORIZER_DIR, CHUNKS_DIR, RAW_DIR, NORMALIZED_DIR):
     _path.mkdir(parents=True, exist_ok=True)
 
 # 임베딩 관련 설정.
@@ -29,6 +31,12 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "80")) # 청크 겹침 기본값
 HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.4")) # 하이브리드 검색 가중치 기본값
 DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "10")) # 검색 결과 개수 기본값
 RECENCY_WEIGHT = float(os.getenv("RECENCY_WEIGHT", "0.4")) # Re-ranking 가중치 추가
+MIN_RETRIEVAL_SCORE = float(os.getenv("MIN_RETRIEVAL_SCORE", "0.12")) # 검색 실패 판단 최소 하이브리드 점수
+RECENCY_DECAY_DAYS_BY_DATASET = {
+    "notices": float(os.getenv("RECENCY_DECAY_DAYS_NOTICES", "90")),
+    "schedule": float(os.getenv("RECENCY_DECAY_DAYS_SCHEDULE", "180")),
+    "rules": float(os.getenv("RECENCY_DECAY_DAYS_RULES", "1095")),
+}
 
 # 컨텍스트 관련 설정
 MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "8000"))
@@ -45,12 +53,14 @@ LLM_ROUTER_DESCRIPTIONS = {
 # OpenAI/LLM 기본 설정.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+USE_QUERY_ANALYSIS = os.getenv("RAG_USE_QUERY_ANALYSIS", "1") == "1"
+QUERY_ANALYSIS_MAX_QUERIES = int(os.getenv("QUERY_ANALYSIS_MAX_QUERIES", "3"))
 
 # 대화 기록 관련 설정 (인메모리).
 MAX_HISTORY_STORE_SIZE = int(os.getenv("MAX_HISTORY_STORE_SIZE", "1000"))
 
 # Redis 대화 기록 백엔드 설정.
-REDIS_URL = os.getenv("REDIS_URL", "redis://renux_redis_internal:6379/0")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6380/0")
 
 # 노트북에서 가져온 입력 데이터 소스 경로.
 DATA_SOURCES: Dict[str, Path] = {
@@ -71,6 +81,8 @@ __all__ = [
     "MODEL_DIR",
     "VECTORIZER_DIR",
     "CHUNKS_DIR",
+    "RAW_DIR",
+    "NORMALIZED_DIR",
     "EMBED_MODEL_NAME",
     "EMBED_DEVICE",
     "EMBED_BATCH_SIZE",
@@ -78,12 +90,15 @@ __all__ = [
     "CHUNK_OVERLAP",
     "HYBRID_ALPHA",
     "DEFAULT_TOP_K",
+    "MIN_RETRIEVAL_SCORE",
+    "RECENCY_DECAY_DAYS_BY_DATASET",
     "MAX_CONTEXT_LENGTH",
     "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
     "OPENAI_API_KEY",
+    "USE_QUERY_ANALYSIS",
+    "QUERY_ANALYSIS_MAX_QUERIES",
     "MAX_HISTORY_STORE_SIZE",
     "REDIS_URL",
     "DATA_SOURCES",
 ]
-

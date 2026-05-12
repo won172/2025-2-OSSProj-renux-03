@@ -1,0 +1,25 @@
+{
+  "document_key": "notices:IPSINOTICE:26758506",
+  "dataset": "notices",
+  "source_type": "html_notice",
+  "source_id": "IPSINOTICE:26758506",
+  "board_name": "입학공지",
+  "board_code": "IPSINOTICE",
+  "article_id": 26758506,
+  "title": "2025학년도 전기 일반대학원 특별전형 신입생 모집 안내(내국인 - 원서접수 1.9~1.16)",
+  "category": "",
+  "published_at": "2025-01-02",
+  "detail_url": "https://www.dongguk.edu/article/IPSINOTICE/detail/26758506",
+  "content_text": "",
+  "content_html": "<p>\n\n</p><p style=\"text-align: center;\"><a href=\"https://gs.dongguk.edu/article/admission/detail/15217237?pageInd\"><img alt=\"특별전형 모집공고1\" src=\"/cmmn/fileView?path=/ckeditor//IPSINOTICE&amp;physical=1735796457138.jpg&amp;contentType=image\" style=\"width: 1100px; height: 1447px;\"/></a></p>\n<p style=\"text-align: center;\"><img alt=\"특별전형 모집공고2\" src=\"/cmmn/fileView?path=/ckeditor//IPSINOTICE&amp;physical=1735796478060.jpg&amp;contentType=image\" style=\"width: 1100px; height: 567px;\"/></p>",
+  "attachments": [
+    {
+      "name": "1. 2025-전기 일반대학원 특별전형 모집요강.pdf",
+      "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=1.%202025-%EC%A0%84%EA%B8%B0%20%EC%9D%BC%EB%B0%98%EB%8C%80%ED%95%99%EC%9B%90%20%ED%8A%B9%EB%B3%84%EC%A0%84%ED%98%95%20%EB%AA%A8%EC%A7%91%EC%9A%94%EA%B0%95.pdf&filepath=/files/article/IPSINOTICE/26758506/&filerealname=0F07B38F924B4937A9E06D856BDE59CB.pdf"
+    }
+  ],
+  "is_pinned": false,
+  "schema_version": 1,
+  "collected_at": "2026-05-12T10:45:54.621247+09:00",
+  "content_hash": "4893f922e13d28a50169dfe9561fb7d2bcc70069"
+}

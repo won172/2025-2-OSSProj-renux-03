@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "BUDDHISTEVENT:26764683",
+  "collected_at": "2026-05-12T10:45:54.530321+09:00",
+  "raw_record": {
+    "게시판": "행사공지",
+    "게시판코드": "BUDDHISTEVENT",
+    "원문글ID": 26764683,
+    "제목": "공지 [정각원] 합장DAY 안내_6월의 합장데이(6.11목)",
+    "카테고리": null,
+    "게시일": "2026-05-11",
+    "상단고정": true,
+    "상세URL": "https://www.dongguk.edu/article/BUDDHISTEVENT/detail/26764683",
+    "본문HTML": "<p>\n\n</p><p style=\"text-align: center;\"><img alt=\"ㄴㅇㄹㅇㄹㅇ\" src=\"/cmmn/fileView?path=/ckeditor//BUDDHISTEVENT&amp;physical=1778485989198.jpg&amp;contentType=image\" style=\"width: 1200px; height: 840px;\"/></p>",
+    "본문": "",
+    "첨부파일": []
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "IPSINOTICE:26758487",
+  "collected_at": "2026-05-12T10:45:54.621616+09:00",
+  "raw_record": {
+    "게시판": "입학공지",
+    "게시판코드": "IPSINOTICE",
+    "원문글ID": 26758487,
+    "제목": "2025학년도 정시모집 관련 우리대학 교직원 회피(자진신고) 안내",
+    "카테고리": null,
+    "게시일": "2024-12-30",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/IPSINOTICE/detail/26758487",
+    "본문HTML": "<p>\n\n</p><p style=\"text-align: center;\"><img alt=\"ㅇㅇㅇㅇㅇㅇㅇㅇㅇㅇㅇㅇㅇㅇㅇㅇㅇ\" src=\"/cmmn/fileView?path=/ckeditor//IPSINOTICE&amp;physical=1735540187632.png&amp;contentType=image\" style=\"width: 714px; height: 934px;\"/></p>",
+    "본문": "",
+    "첨부파일": [
+      {
+        "name": "붙임. 우리대학 교직원 중 신·편입학모집 지원 예정 자녀 및 친·인척 명단 제출서식.hwp",
+        "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=%EB%B6%99%EC%9E%84.%20%EC%9A%B0%EB%A6%AC%EB%8C%80%ED%95%99%20%EA%B5%90%EC%A7%81%EC%9B%90%20%EC%A4%91%20%EC%8B%A0%C2%B7%ED%8E%B8%EC%9E%85%ED%95%99%EB%AA%A8%EC%A7%91%20%EC%A7%80%EC%9B%90%20%EC%98%88%EC%A0%95%20%EC%9E%90%EB%85%80%20%EB%B0%8F%20%EC%B9%9C%C2%B7%EC%9D%B8%EC%B2%99%20%EB%AA%85%EB%8B%A8%20%EC%A0%9C%EC%B6%9C%EC%84%9C%EC%8B%9D.hwp&filepath=/files/article/IPSINOTICE/26758487/&filerealname=0F348C75CFBE44708AAFB0385D42DF99.hwp"
+      }
+    ]
+  }
+}

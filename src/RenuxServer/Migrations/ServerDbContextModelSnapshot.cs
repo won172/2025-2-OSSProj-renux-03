@@ -79,9 +79,23 @@ namespace RenuxServer.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_time");
 
+                    b.Property<string>("FallbackReason")
+                        .HasColumnType("text")
+                        .HasColumnName("fallback_reason");
+
+                    b.Property<bool>("IsFallback")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_fallback");
+
                     b.Property<bool>("IsAsk")
                         .HasColumnType("boolean")
                         .HasColumnName("is_ask");
+
+                    b.Property<string>("SourcesJson")
+                        .HasColumnType("text")
+                        .HasColumnName("sources_json");
 
                     b.HasKey("Id");
 

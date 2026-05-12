@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "IPSINOTICE:26760629",
+  "collected_at": "2026-05-12T10:45:54.610991+09:00",
+  "raw_record": {
+    "게시판": "입학공지",
+    "게시판코드": "IPSINOTICE",
+    "원문글ID": 26760629,
+    "제목": "2025학년도 후기 일반대학원 특별전형 신입생 모집 안내(내국인 - 원서접수 6.26~7.3)",
+    "카테고리": null,
+    "게시일": "2025-06-27",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/IPSINOTICE/detail/26760629",
+    "본문HTML": "<p>\n\n</p><p style='box-sizing: border-box; font-family: Montserrat, s-core-dream, dotum, 돋움, gulim, 굴림, Tahoma, \"sans-serif\", sans-serif; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; margin: 0px; color: rgb(34, 34, 34); font-size: 17px; background-color: rgb(255, 255, 255); text-align: center;'><a href=\"https://enter.jinhakapply.com/Notice/1236031/A\"><span style='box-sizing: border-box; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; color: rgb(255, 0, 0);'><span style='box-sizing: border-box; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; font-size: 24pt;'><span style='box-sizing: border-box; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; background-color: rgb(255, 255, 0);'>인터넷 원서접수 : 6. 26(목) ~7. 3(목) [원서접수 바로가기 클릭]</span></span></span></a></p>\n<p style='box-sizing: border-box; font-family: Montserrat, s-core-dream, dotum, 돋움, gulim, 굴림, Tahoma, \"sans-serif\", sans-serif; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; margin: 0px; color: rgb(34, 34, 34); font-size: 17px; background-color: rgb(255, 255, 255); text-align: center;'> </p>\n<p style='box-sizing: border-box; font-family: Montserrat, s-core-dream, dotum, 돋움, gulim, 굴림, Tahoma, \"sans-serif\", sans-serif; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; margin: 0px; color: rgb(34, 34, 34); font-size: 17px; background-color: rgb(255, 255, 255); text-align: center;'><span style='box-sizing: border-box; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; color: rgb(0, 0, 255);'><span style='box-sizing: border-box; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; font-size: 24pt;'>서류제출 : 인터넷 원서접수 후 ~ 7. 7(월)</span></span></p>\n<p style='box-sizing: border-box; font-family: Montserrat, s-core-dream, dotum, 돋움, gulim, 굴림, Tahoma, \"sans-serif\", sans-serif; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; margin: 0px; color: rgb(34, 34, 34); font-size: 17px; background-color: rgb(255, 255, 255); text-align: center;'> </p>\n<p style='box-sizing: border-box; font-family: Montserrat, s-core-dream, dotum, 돋움, gulim, 굴림, Tahoma, \"sans-serif\", sans-serif; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; margin: 0px; color: rgb(34, 34, 34); font-size: 17px; background-color: rgb(255, 255, 255); text-align: center;'><span style='box-sizing: border-box; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; font-size: 18pt;'>※ 원서접수 및 서류제출까지 하여야 지원이 완료됨. 서류미제출시 불합격.</span></p>\n<p style='box-sizing: border-box; font-family: Montserrat, s-core-dream, dotum, 돋움, gulim, 굴림, Tahoma, \"sans-serif\", sans-serif; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; margin: 0px; color: rgb(34, 34, 34); font-size: 17px; background-color: rgb(255, 255, 255); text-align: center;'><a href=\"https://gs.dongguk.edu/article/admission/detail/15217803?pageInd\"><img alt=\"\" src=\"https://gs.dongguk.edu/cmmn/fileView?path=/ckeditor//admission&amp;physical=1750291312240.jpg&amp;contentType=image\" style='box-sizing: border-box; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; border: 0px; width: 1100px; height: 1555px;'/></a><img alt=\"\" src=\"https://gs.dongguk.edu/cmmn/fileView?path=/ckeditor//admission&amp;physical=1750291331519.jpg&amp;contentType=image\" style='box-sizing: border-box; font-feature-settings: \"tnum\"; font-variant-numeric: tabular-nums; border: 0px; width: 1100px; height: 538px;'/></p>",
+    "본문": "인터넷 원서접수 : 6. 26(목) ~7. 3(목) [원서접수 바로가기 클릭]\n서류제출 : 인터넷 원서접수 후 ~ 7. 7(월)\n※ 원서접수 및 서류제출까지 하여야 지원이 완료됨. 서류미제출시 불합격.",
+    "첨부파일": [
+      {
+        "name": "1. 2025-후기 일반대학원 특별전형(내국인) 모집요강.pdf",
+        "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=1.%202025-%ED%9B%84%EA%B8%B0%20%EC%9D%BC%EB%B0%98%EB%8C%80%ED%95%99%EC%9B%90%20%ED%8A%B9%EB%B3%84%EC%A0%84%ED%98%95%28%EB%82%B4%EA%B5%AD%EC%9D%B8%29%20%EB%AA%A8%EC%A7%91%EC%9A%94%EA%B0%95.pdf&filepath=/files/article/IPSINOTICE/26760629/&filerealname=F882EE8172F6463F9F67E23137C2BED5.pdf"
+      }
+    ]
+  }
+}

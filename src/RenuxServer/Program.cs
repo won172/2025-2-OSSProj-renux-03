@@ -97,6 +97,18 @@ using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<ServerDbContext>();
         await db.Database.MigrateAsync();
+        await db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE chat_messages
+            ADD COLUMN IF NOT EXISTS sources_json text;
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE chat_messages
+            ADD COLUMN IF NOT EXISTS is_fallback boolean NOT NULL DEFAULT FALSE;
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE chat_messages
+            ADD COLUMN IF NOT EXISTS fallback_reason text;
+            """);
 
         List<Major> majors = await db.Majors.ToListAsync();
 

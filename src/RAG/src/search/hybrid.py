@@ -1,12 +1,14 @@
 """노트북에서 가져온 밀집 임베딩+TF-IDF 하이브리드 검색 유틸리티입니다."""
 from __future__ import annotations
 
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Iterable, Tuple, Dict # Dict 추가
 
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -26,14 +28,54 @@ def train_tfidf(identifier: str, corpus: Iterable[str]) -> Tuple[TfidfVectorizer
         raise ValueError("Corpus is empty, cannot train TF-IDF vectorizer.")
     vectorizer = TfidfVectorizer(max_features=10000)
     matrix = vectorizer.fit_transform(texts)
-    joblib.dump({"vectorizer": vectorizer, "matrix": matrix}, _vectorizer_path(identifier))
+    joblib.dump(
+        {
+            "vectorizer": vectorizer,
+            "matrix": matrix,
+            "metadata": {
+                "dataset": identifier,
+                "document_count": len(texts),
+                "created_at": datetime.now(timezone(timedelta(hours=9))).isoformat(),
+                "sklearn_version": sklearn.__version__,
+            },
+        },
+        _vectorizer_path(identifier),
+    )
     return vectorizer, matrix
+
+
+def _load_tfidf_artifact(identifier: str) -> dict:
+    artifact = joblib.load(_vectorizer_path(identifier))
+    if isinstance(artifact, dict) and "vectorizer" in artifact and "matrix" in artifact:
+        metadata = artifact.get("metadata")
+        if isinstance(metadata, dict):
+            return artifact
+        return {
+            "vectorizer": artifact["vectorizer"],
+            "matrix": artifact["matrix"],
+            "metadata": {
+                "dataset": identifier,
+                "document_count": None,
+                "created_at": None,
+                "sklearn_version": None,
+                "is_legacy": True,
+            },
+        }
+
+    raise ValueError(f"Unexpected TF-IDF artifact format for '{identifier}'.")
 
 
 def load_tfidf(identifier: str) -> Tuple[TfidfVectorizer, np.ndarray]:
     """이미 학습된 TF-IDF 벡터라이저와 행렬을 불러옵니다."""
-    data = joblib.load(_vectorizer_path(identifier))
+    data = _load_tfidf_artifact(identifier)
     return data["vectorizer"], data["matrix"]
+
+
+def read_tfidf_metadata(identifier: str) -> Dict:
+    """TF-IDF 아티팩트 메타데이터를 읽습니다. legacy 포맷이면 legacy 플래그를 반환합니다."""
+    data = _load_tfidf_artifact(identifier)
+    metadata = data.get("metadata")
+    return metadata if isinstance(metadata, dict) else {}
 
 
 def hybrid_search(
@@ -134,7 +176,7 @@ def hybrid_search(
         
         # 가중 합산
         final_score = alpha * v_score + (1.0 - alpha) * s_score
-        hybrid_results.append((cid, final_score))
+        hybrid_results.append((cid, final_score, v_score, s_score))
     
     # 점수순 정렬
     hybrid_results.sort(key=lambda x: x[1], reverse=True)
@@ -142,7 +184,14 @@ def hybrid_search(
     
     # 결과 DataFrame 생성
     top_ids = [res[0] for res in top_results]
-    top_scores = [res[1] for res in top_results]
+    score_by_id = {
+        res[0]: {
+            "hybrid_score": res[1],
+            "vector_score": res[2],
+            "sparse_score": res[3],
+        }
+        for res in top_results
+    }
     
     # 원본 DataFrame에서 해당 ID를 가진 행 추출 및 순서 유지
     # set_index를 사용하여 빠르게 조회
@@ -156,7 +205,9 @@ def hybrid_search(
         return chunks_df.iloc[:0].copy()
         
     result_df = df_indexed.loc[valid_ids].copy()
-    result_df["hybrid_score"] = top_scores[:len(valid_ids)]
+    result_df["hybrid_score"] = [score_by_id[cid]["hybrid_score"] for cid in valid_ids]
+    result_df["vector_score"] = [score_by_id[cid]["vector_score"] for cid in valid_ids]
+    result_df["sparse_score"] = [score_by_id[cid]["sparse_score"] for cid in valid_ids]
     result_df = result_df.reset_index() # chunk_id를 다시 컬럼으로
     
     return result_df
@@ -176,10 +227,10 @@ def hybrid_search_with_meta(
     hits = hybrid_search(collection_name, chunks_df, tfidf_vectorizer, tfidf_matrix, query, top_k, alpha, where_filter) # where_filter 전달
     out = hits.copy()
     out["title"] = out["chunk_text"].apply(_extract_title)
-    for column in ("topics", "published_at", "url", "source"):
+    for column in ("topics", "category", "published_at", "url", "source", "notice_id"):
         if column not in out.columns:
             out[column] = ""
-    desired = ["title", "chunk_text", "hybrid_score", "topics", "published_at", "url", "source"]
+    desired = ["chunk_id", "title", "chunk_text", "hybrid_score", "vector_score", "sparse_score", "topics", "category", "published_at", "url", "source", "notice_id"]
     existing = [col for col in desired if col in out.columns]
     return out[existing]
 
@@ -196,6 +247,7 @@ def _extract_title(text: str) -> str:
 __all__ = [
     "train_tfidf",
     "load_tfidf",
+    "read_tfidf_metadata",
     "hybrid_search",
     "hybrid_search_with_meta",
 ]

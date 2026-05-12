@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "HAKSULNOTICE:26757451",
+  "collected_at": "2026-05-12T10:45:54.627058+09:00",
+  "raw_record": {
+    "게시판": "학술공지",
+    "게시판코드": "HAKSULNOTICE",
+    "원문글ID": 26757451,
+    "제목": "[(사)한국교수불자연합회] 2024 신라백제불교 자산 구축사업 학술대회 : 신라불교의 고찰과 초전지 불교자산 탐방",
+    "카테고리": null,
+    "게시일": "2024-10-12",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/HAKSULNOTICE/detail/26757451",
+    "본문HTML": "<p>\n\n</p><p><img alt=\"신라초전지\" src=\"/cmmn/fileView?path=/ckeditor//HAKSULNOTICE&amp;physical=1728720660890.jpg&amp;contentType=image\" style=\"width: 825px; height: 1159px;\"/></p>",
+    "본문": "",
+    "첨부파일": [
+      {
+        "name": "신라불교초전지 학술대회.jpg",
+        "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=%EC%8B%A0%EB%9D%BC%EB%B6%88%EA%B5%90%EC%B4%88%EC%A0%84%EC%A7%80%20%ED%95%99%EC%88%A0%EB%8C%80%ED%9A%8C.jpg&filepath=/files/article/HAKSULNOTICE/26757451/&filerealname=B4C5A6BFFF374EBFBDCA650A7A8918B5.jpg"
+      }
+    ]
+  }
+}

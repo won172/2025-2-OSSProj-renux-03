@@ -1,0 +1,25 @@
+{
+  "document_key": "notices:HAKSULNOTICE:26762711",
+  "dataset": "notices",
+  "source_type": "html_notice",
+  "source_id": "HAKSULNOTICE:26762711",
+  "board_name": "학술공지",
+  "board_code": "HAKSULNOTICE",
+  "article_id": 26762711,
+  "title": "공지 문화학술원 HK+사업단 2025년 제15회 국내학술대회 \"동유라시아 물품학의 시대성\" 개최 안내(2025.11.28(금), 10:00~)",
+  "category": "",
+  "published_at": "2025-11-27",
+  "detail_url": "https://www.dongguk.edu/article/HAKSULNOTICE/detail/26762711",
+  "content_text": "",
+  "content_html": "<p>\n\n</p><p><img alt=\"동유라시아 물품학의 시대성\" src=\"/cmmn/fileView?path=/ckeditor//HAKSULNOTICE&amp;physical=1764230516665.jpg&amp;contentType=image\" style=\"width: 2481px; height: 3508px;\"/></p>",
+  "attachments": [
+    {
+      "name": "동국대학교 문화학술원 HK+사업단 제15회 국내학술대회 포스터.jpg",
+      "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=%EB%8F%99%EA%B5%AD%EB%8C%80%ED%95%99%EA%B5%90%20%EB%AC%B8%ED%99%94%ED%95%99%EC%88%A0%EC%9B%90%20HK%2B%EC%82%AC%EC%97%85%EB%8B%A8%20%EC%A0%9C15%ED%9A%8C%20%EA%B5%AD%EB%82%B4%ED%95%99%EC%88%A0%EB%8C%80%ED%9A%8C%20%ED%8F%AC%EC%8A%A4%ED%84%B0.jpg&filepath=/files/article/HAKSULNOTICE/26762711/&filerealname=4856E5E305CC4C1DBF68268DE222F0EF.jpg"
+    }
+  ],
+  "is_pinned": true,
+  "schema_version": 1,
+  "collected_at": "2026-05-12T10:45:54.605997+09:00",
+  "content_hash": "0fb7ff41bfcf6ea861718953fdeb263248a80fca"
+}

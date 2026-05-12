@@ -6,6 +6,7 @@ import ChatPage from './pages/chat/ChatPage'
 import SettingsPage from './pages/settings/SettingsPage'
 import UniversityAdminPage from './pages/admin/UniversityAdminPage'
 import DepartmentAdminPage from './pages/admin/DepartmentAdminPage'
+import ChatLogPage from './pages/admin/ChatLogPage'
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/admin/university" element={<UniversityAdminPage />} />
           <Route path="/admin/department" element={<DepartmentAdminPage />} />
+          <Route path="/admin/logs" element={<ChatLogPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

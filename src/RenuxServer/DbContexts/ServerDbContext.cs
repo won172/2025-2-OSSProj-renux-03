@@ -66,6 +66,9 @@ public class ServerDbContext : DbContext
         message.Property(c => c.IsAsk).HasColumnName("is_ask");
         message.Property(c => c.Content).HasColumnName("content");
         message.Property(c => c.CreatedTime).HasColumnName("created_time");
+        message.Property(c => c.SourcesJson).HasColumnName("sources_json");
+        message.Property(c => c.IsFallback).HasColumnName("is_fallback").HasDefaultValue(false);
+        message.Property(c => c.FallbackReason).HasColumnName("fallback_reason");
 
         org.Property(o => o.Id).HasColumnName("id");
         org.Property(o => o.MajorId).HasColumnName("major_id");

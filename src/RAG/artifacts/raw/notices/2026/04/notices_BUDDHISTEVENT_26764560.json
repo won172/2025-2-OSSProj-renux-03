@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "BUDDHISTEVENT:26764560",
+  "collected_at": "2026-05-12T10:45:54.558201+09:00",
+  "raw_record": {
+    "게시판": "행사공지",
+    "게시판코드": "BUDDHISTEVENT",
+    "원문글ID": 26764560,
+    "제목": "[정각원] 5월 6일 재학생 수요법회 안내(16시~ , 정각원 법당)",
+    "카테고리": null,
+    "게시일": "2026-04-30",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/BUDDHISTEVENT/detail/26764560",
+    "본문HTML": "<p>\n\n</p><p style=\"text-align: center;\"><img alt=\"dfsdf\" src=\"/cmmn/fileView?path=/ckeditor//BUDDHISTEVENT&amp;physical=1778132850735.jpg&amp;contentType=image\" style=\"width: 1200px; height: 849px;\"/></p>",
+    "본문": "",
+    "첨부파일": []
+  }
+}

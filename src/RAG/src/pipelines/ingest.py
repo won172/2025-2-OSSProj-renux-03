@@ -28,7 +28,7 @@ from src.utils.preprocess import (
 from src.vectorstore.chroma_client import add_items, reset_collection, upsert_items, get_all_ids, delete_items, get_existing_ids
 from src.database import (
     SessionLocal, engine, init_db,
-    Notice, Rule, Schedule, Course, Staff, Chunk
+    Notice, Rule, Schedule, Course, Staff, Chunk, CustomKnowledge
 )
 
 @dataclass
@@ -126,6 +126,27 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
     return chunks_df, vectorizer, matrix
 
 
+def persist_dataset_artifacts_only(key: str, chunks_df: pd.DataFrame) -> Tuple[pd.DataFrame, object, object]:
+    """Chroma upsert 없이 청크 아티팩트와 TF-IDF만 갱신합니다."""
+    if chunks_df.empty:
+        print(f"⚠️ Warning: No chunks generated for {key}")
+        return chunks_df, None, None
+
+    artifacts = DATASET_ARTIFACTS[key]
+    artifacts.chunk_path.parent.mkdir(parents=True, exist_ok=True)
+
+    write_path = artifacts.chunk_path
+    try:
+        chunks_df.astype(str).to_parquet(write_path, index=False)
+    except Exception:
+        write_path = artifacts.csv_path
+        chunks_df.to_csv(write_path, index=False, encoding="utf-8-sig")
+    artifacts.chunk_path = write_path
+
+    vectorizer, matrix = train_tfidf(key, chunks_df["chunk_text"].tolist())
+    return chunks_df, vectorizer, matrix
+
+
 def _save_chunks_to_sqlite(chunks_df: pd.DataFrame, source_key: str):
     """SQLite의 chunks 테이블에 저장합니다."""
     if chunks_df.empty:
@@ -173,9 +194,8 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(text_content, str) or not text_content.strip():
             continue
         
-        # 게시판 유형과 게시일을 텍스트에 포함
         topic_type = row.get(column["topic"], "")
-        published_date = row.get("clean_date", "") # "clean_date" 필드에서 게시일 가져오기
+        published_date = row.get("clean_date", "")
 
         prefix_parts = []
         if topic_type:
@@ -186,10 +206,13 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
         if prefix_parts:
             text_content = f"[{', '.join(prefix_parts)}]\n\n{text_content}"
         
-        # published = row.get("clean_date") # 위에서 이미 가져옴
-        doc_id = make_doc_id(row.get(column["title"]), row.get(column["topic"]), published_date)
+        # URL을 포함하여 고유 ID 생성 (중복 방지 핵심)
+        doc_id = (
+            row.get("document_key")
+            or row.get("문서키")
+            or make_doc_id(row.get(column["title"]), row.get(column["topic"]), published_date, row.get(column["url"]))
+        )
         
-        # attachments 리스트를 JSON 문자열로 변환
         raw_attachments = row.get(column["attachment"], [])
         if isinstance(raw_attachments, list):
             attachments_str = json.dumps(raw_attachments, ensure_ascii=False)
@@ -202,11 +225,16 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 "title": row.get(column["title"], ""),
                 "text": text_content,
                 "topics": row.get(column["topic"], ""),
+                "category": row.get("카테고리", ""),
                 "published_at": published_date or "",
                 "url": row.get(column["url"], ""),
                 "attachments": attachments_str,
                 "source": "notices",
-                "notice_id": row.get("db_id"), # DB ID from ingest_notices
+                "notice_id": row.get("db_id"),
+                "document_key": row.get("document_key") or row.get("문서키"),
+                "source_id": row.get("source_id") or row.get("원문ID"),
+                "board_code": row.get("board_code") or row.get("게시판코드"),
+                "article_id": row.get("article_id") or row.get("원문글ID"),
             }
         )
 
@@ -216,7 +244,11 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
         chunk_overlap=CHUNK_OVERLAP,
         include_title=True,
     )
-    return pd.DataFrame(chunks)
+    # 메모리 내 중복 ID 제거
+    chunks_df = pd.DataFrame(chunks)
+    if not chunks_df.empty:
+        chunks_df.drop_duplicates(subset=["chunk_id"], inplace=True)
+    return chunks_df
 
 
 def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
@@ -228,9 +260,8 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
     
     session = SessionLocal()
     try:
-        # 1. 기존 데이터 삭제 (자동 수집된 것만)
-        auto_notices_query = session.query(Notice.id).filter((Notice.is_manual == 0) | (Notice.is_manual.is_(None)))
-        session.query(Chunk).filter(Chunk.notice_id.in_(auto_notices_query)).delete(synchronize_session=False)
+        # 1. 기존 데이터 삭제 (공지사항과 연결된 모든 청크 삭제)
+        session.query(Chunk).filter(Chunk.notice_id.isnot(None)).delete(synchronize_session=False)
         session.query(Notice).filter((Notice.is_manual == 0) | (Notice.is_manual.is_(None))).delete(synchronize_session=False)
         session.commit()
         
@@ -288,6 +319,62 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
     _save_chunks_to_sqlite(chunks_df, "notices")
     
     return _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, chunks_df)
+
+
+def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
+    notice_rows = []
+    query_notices = session.query(Chunk, Notice).join(Notice, Chunk.notice_id == Notice.id)
+    for chunk, notice in query_notices.all():
+        notice_rows.append(
+            {
+                "chunk_id": chunk.chunk_id,
+                "chunk_text": chunk.chunk_text,
+                "title": notice.title,
+                "topics": notice.board,
+                "published_at": notice.published_date,
+                "url": notice.detail_url,
+                "attachments": notice.attachments,
+                "source": "notices",
+                "notice_id": notice.id,
+                "category": notice.category,
+                "question": None,
+                "answer": None,
+                "custom_knowledge_id": None,
+            }
+        )
+
+    query_custom_knowledge = session.query(Chunk, CustomKnowledge).join(
+        CustomKnowledge,
+        Chunk.custom_knowledge_id == CustomKnowledge.id,
+    )
+    for chunk, ck in query_custom_knowledge.all():
+        notice_rows.append(
+            {
+                "chunk_id": chunk.chunk_id,
+                "chunk_text": chunk.chunk_text,
+                "title": ck.question,
+                "topics": ck.category or "CustomKnowledge",
+                "published_at": ck.created_at.strftime("%Y-%m-%d") if ck.created_at else "",
+                "url": "",
+                "attachments": "[]",
+                "source": "custom_knowledge",
+                "notice_id": None,
+                "category": ck.category,
+                "question": ck.question,
+                "answer": ck.answer,
+                "custom_knowledge_id": ck.id,
+            }
+        )
+
+    return pd.DataFrame(notice_rows) if notice_rows else pd.DataFrame()
+
+
+def build_notice_index_frame_from_db() -> pd.DataFrame:
+    session = SessionLocal()
+    try:
+        return build_notice_index_frame_from_session(session)
+    finally:
+        session.close()
 
 
 # --- Rules ---
@@ -478,6 +565,7 @@ def ingest_schedule() -> Tuple[pd.DataFrame, object, object]:
         session.close()
 
     _save_chunks_to_sqlite(chunks_df, "schedule")
+    reset_collection(DATASET_ARTIFACTS["schedule"].collection)
     return _persist_chunks("schedule", DATASET_ARTIFACTS["schedule"].collection, chunks_df)
 
 
@@ -713,6 +801,7 @@ def ingest_staff() -> Tuple[pd.DataFrame, object, object]:
         
     chunks_df = build_staff_chunks(df)
     _save_chunks_to_sqlite(chunks_df, "staff")
+    reset_collection(DATASET_ARTIFACTS["staff"].collection)
     return _persist_chunks("staff", DATASET_ARTIFACTS["staff"].collection, chunks_df)
 
 
@@ -831,6 +920,7 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
                 })
             if data:
                 df = pd.DataFrame(data)
+                reset_collection(DATASET_ARTIFACTS["schedule"].collection)
                 results["schedule"] = _persist_chunks("schedule", DATASET_ARTIFACTS["schedule"].collection, df)
 
         # 4. Courses
@@ -879,6 +969,7 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
                 })
             if data:
                 df = pd.DataFrame(data)
+                reset_collection(DATASET_ARTIFACTS["staff"].collection)
                 results["staff"] = _persist_chunks("staff", DATASET_ARTIFACTS["staff"].collection, df)
 
     finally:

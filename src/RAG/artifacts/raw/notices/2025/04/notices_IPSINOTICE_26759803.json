@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "IPSINOTICE:26759803",
+  "collected_at": "2026-05-12T10:45:54.618560+09:00",
+  "raw_record": {
+    "게시판": "입학공지",
+    "게시판코드": "IPSINOTICE",
+    "원문글ID": 26759803,
+    "제목": "(주)한화오션 석사 산학장학생 모집",
+    "카테고리": null,
+    "게시일": "2025-04-23",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/IPSINOTICE/detail/26759803",
+    "본문HTML": "<p>\n\n</p><p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'><span style=\"box-sizing: border-box; font-size: 13pt;\">동국대학교 공과대학 정보통신공학과는 (주)한화오션과 스마트오션모빌리티 전공 석사과정을 운영하고 있으며</span></p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'> </p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'><span style=\"box-sizing: border-box; font-size: 13pt;\">우수 인재를 유치하고자 아래와 같이 산학장학생을 모집합니다.</span></p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'> </p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'><span style=\"box-sizing: border-box; font-size: 13pt;\">ㅁ 문의: 정보통신공학과 강준욱 교수님: 010-9120-6693, mrjoycity@hanmail.net</span></p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'> </p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'><span style=\"box-sizing: border-box; font-size: 13pt;\">ㅁ 대학원 모집요강: gs.dongguk.edu</span></p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'> </p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'> </p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'> </p>\n<p style='box-sizing: border-box; margin: 0px; padding: 0px; color: rgb(85, 85, 85); font-family: \"맑은 고딕\"; font-size: 13.3333px;'><span style=\"box-sizing: border-box; font-size: 13pt;\"><img alt=\"(주)한화오션\" src=\"/cmmn/fileView?path=/ckeditor//IPSINOTICE&amp;physical=1745374932547.jpg&amp;contentType=image\" style=\"width: 1280px; height: 1707px;\"/></span></p>\n<div style='box-sizing: border-box; color: rgb(85, 85, 85); font-family: Pretendard, 나눔고딕, NanumGothic, \"Nanum Gothic\", 돋움, Dotum, Arial, sans-serif; font-size: 17px;'> </div>\n<div style='box-sizing: border-box; color: rgb(85, 85, 85); font-family: Pretendard, 나눔고딕, NanumGothic, \"Nanum Gothic\", 돋움, Dotum, Arial, sans-serif; font-size: 17px;'><img alt=\"\"/></div>\n<div style='box-sizing: border-box; color: rgb(85, 85, 85); font-family: Pretendard, 나눔고딕, NanumGothic, \"Nanum Gothic\", 돋움, Dotum, Arial, sans-serif; font-size: 17px;'><img alt=\"\"/><img alt=\"\" style=\"box-sizing: border-box; border: 0px; vertical-align: top; max-width: 100%; height: auto !important;\"/></div>",
+    "본문": "동국대학교 공과대학 정보통신공학과는 (주)한화오션과 스마트오션모빌리티 전공 석사과정을 운영하고 있으며\n우수 인재를 유치하고자 아래와 같이 산학장학생을 모집합니다.\nㅁ 문의: 정보통신공학과 강준욱 교수님: 010-9120-6693, mrjoycity@hanmail.net\nㅁ 대학원 모집요강: gs.dongguk.edu",
+    "첨부파일": [
+      {
+        "name": "한화오션-산학장학생.jpg",
+        "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=%ED%95%9C%ED%99%94%EC%98%A4%EC%85%98-%EC%82%B0%ED%95%99%EC%9E%A5%ED%95%99%EC%83%9D.jpg&filepath=/files/article/IPSINOTICE/26759803/&filerealname=2F4B9313D7AD4F158EF6DFF718825F75.jpg"
+      }
+    ]
+  }
+}

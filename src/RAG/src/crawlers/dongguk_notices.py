@@ -30,21 +30,27 @@ HEADERS = {
 }
 SELECT_COLUMNS = [
     "board_name",
+    "board_code",
+    "article_id",
     "title",
     "category",
     "posted_at",
     "is_pinned",
     "detail_url",
+    "content_html",
     "content_text",
     "attachments",
 ]
 COLUMN_LABELS = {
     "board_name": "게시판",
+    "board_code": "게시판코드",
+    "article_id": "원문글ID",
     "title": "제목",
     "category": "카테고리",
     "posted_at": "게시일",
     "is_pinned": "상단고정",
     "detail_url": "상세URL",
+    "content_html": "본문HTML",
     "content_text": "본문",
     "attachments": "첨부파일",
 }
@@ -231,11 +237,12 @@ def collect_board(
     board_code: str,
     max_pages: Optional[int] = None,
     delay: float = DEFAULT_REQUEST_DELAY,
-    earliest_year: int = 2024, # 2024 -> 2023으로 변경
+    earliest_year: Optional[int] = 2023,
 ) -> pd.DataFrame:
     records: List[Dict[str, Any]] = []
     seen_ids: set[int] = set()
     page = 1
+    stop_collecting = False
 
     while True:
         if max_pages is not None and page > max_pages:
@@ -269,8 +276,11 @@ def collect_board(
             }
 
             posted_at = record["posted_at"]
-            if earliest_year and isinstance(posted_at, date):
+            if earliest_year and isinstance(posted_at, (date, datetime)):
                 if posted_at.year < earliest_year:
+                    if not record["is_pinned"]:
+                        stop_collecting = True
+                        break
                     continue
 
             records.append(record)
@@ -278,6 +288,8 @@ def collect_board(
             if delay:
                 time.sleep(delay)
 
+        if stop_collecting:
+            break
         page += 1
 
     if not records:
@@ -296,8 +308,9 @@ def collect_board(
 
 def crawl_notices(
     boards: Optional[Iterable[str]] = None,
-    max_pages: int = DEFAULT_MAX_PAGES,
+    max_pages: Optional[int] = DEFAULT_MAX_PAGES,
     delay: float = DEFAULT_REQUEST_DELAY,
+    earliest_year: Optional[int] = 2023,
 ) -> pd.DataFrame:
     boards = list(boards) if boards is not None else TARGET_BOARDS
     dataframes: List[pd.DataFrame] = []
@@ -307,7 +320,7 @@ def crawl_notices(
         if not board_code:
             print(f"⚠️ 게시판 코드를 찾을 수 없습니다: {board_name}")
             continue
-        df = collect_board(board_name, board_code, max_pages=max_pages, delay=delay)
+        df = collect_board(board_name, board_code, max_pages=max_pages, delay=delay, earliest_year=earliest_year)
         dataframes.append(df)
 
     if not dataframes:
