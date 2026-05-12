@@ -1,0 +1,25 @@
+{
+  "document_key": "notices:IPSINOTICE:26756608",
+  "dataset": "notices",
+  "source_type": "html_notice",
+  "source_id": "IPSINOTICE:26756608",
+  "board_name": "입학공지",
+  "board_code": "IPSINOTICE",
+  "article_id": 26756608,
+  "title": "2024학년도 후기 일반대학원 수시전형 신입생 모집 안내(내국인 - 원서접수 8.9~8.13)",
+  "category": "",
+  "published_at": "2024-08-07",
+  "detail_url": "https://www.dongguk.edu/article/IPSINOTICE/detail/26756608",
+  "content_text": "",
+  "content_html": "<p>\n\n</p><p style='box-sizing: border-box; font-family: Montserrat, s-core-dream, dotum, 돋움, gulim, 굴림, Tahoma, \"sans-serif\", sans-serif; margin: 0px; color: rgb(34, 34, 34); font-size: 17px; background-color: rgb(255, 255, 255); text-align: center;'><a href=\"https://gs.dongguk.edu/article/admission/detail/15216881?pageIndex=1\"><img alt=\"수시전형안내1\" src=\"https://gs.dongguk.edu/cmmn/fileView?path=/ckeditor//admission&amp;physical=1723006870021.jpg&amp;contentType=image\" style=\"box-sizing: border-box; border: 0px; width: 1100px; height: 1378px;\"/></a></p>\n<p style='box-sizing: border-box; font-family: Montserrat, s-core-dream, dotum, 돋움, gulim, 굴림, Tahoma, \"sans-serif\", sans-serif; margin: 0px; color: rgb(34, 34, 34); font-size: 17px; background-color: rgb(255, 255, 255); text-align: center;'><img alt=\"수시전형안내2\" src=\"https://gs.dongguk.edu/cmmn/fileView?path=/ckeditor//admission&amp;physical=1723006571693.jpg&amp;contentType=image\" style=\"box-sizing: border-box; border: 0px; width: 1100px; height: 538px;\"/></p>",
+  "attachments": [
+    {
+      "name": "1. 2024-후기 일반대학원 수시전형 모집요강.pdf",
+      "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=1.%202024-%ED%9B%84%EA%B8%B0%20%EC%9D%BC%EB%B0%98%EB%8C%80%ED%95%99%EC%9B%90%20%EC%88%98%EC%8B%9C%EC%A0%84%ED%98%95%20%EB%AA%A8%EC%A7%91%EC%9A%94%EA%B0%95.pdf&filepath=/files/article/IPSINOTICE/26756608/&filerealname=7A5E2A1A7D5042198B6B8087F342DE82.pdf"
+    }
+  ],
+  "is_pinned": false,
+  "schema_version": 1,
+  "collected_at": "2026-05-12T10:45:54.630740+09:00",
+  "content_hash": "6ae7322659153770c4edd3b761a42559c7b6ea10"
+}

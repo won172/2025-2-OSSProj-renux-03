@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime, Float, Boolean, UniqueConstraint
 
 def kst_now():
     return datetime.now(timezone(timedelta(hours=9)))
@@ -126,7 +126,63 @@ class PendingItem(Base):
     created_at = Column(DateTime, default=kst_now)
 
 
-# 8. 통합 청크 (Chunks)
+# 8. 수집 원본/정규화 메타데이터
+class SourceDocument(Base):
+    __tablename__ = "source_documents"
+    __table_args__ = (
+        UniqueConstraint("dataset", "source_id", name="uq_source_documents_dataset_source_id"),
+        UniqueConstraint("document_key", name="uq_source_documents_document_key"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    dataset = Column(String, index=True, nullable=False)
+    source_type = Column(String, nullable=False)
+    source_id = Column(String, index=True, nullable=False)
+    source_url = Column(Text)
+    document_key = Column(String, index=True, nullable=False)
+    title = Column(String)
+    category = Column(String, index=True)
+    published_at = Column(String, index=True)
+    status = Column(String, default="active", index=True)
+    content_hash = Column(String, index=True)
+    schema_version = Column(Integer, default=1)
+    raw_path = Column(Text)
+    normalized_path = Column(Text)
+    collected_at = Column(DateTime, default=kst_now, index=True)
+    last_parsed_at = Column(DateTime, nullable=True)
+    last_indexed_at = Column(DateTime, nullable=True)
+    parse_error = Column(Text, nullable=True)
+    miss_count = Column(Integer, default=0)
+
+
+class IngestionRun(Base):
+    __tablename__ = "ingestion_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dataset = Column(String, index=True, nullable=False)
+    started_at = Column(DateTime, default=kst_now, index=True)
+    finished_at = Column(DateTime, nullable=True)
+    status = Column(String, default="running", index=True)
+    documents_seen = Column(Integer, default=0)
+    documents_new = Column(Integer, default=0)
+    documents_updated = Column(Integer, default=0)
+    documents_deleted = Column(Integer, default=0)
+    documents_failed = Column(Integer, default=0)
+    error_summary = Column(Text, nullable=True)
+
+
+class DocumentQualityCheck(Base):
+    __tablename__ = "document_quality_checks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_key = Column(String, index=True, nullable=False)
+    check_type = Column(String, index=True, nullable=False)
+    severity = Column(String, index=True, nullable=False)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=kst_now, index=True)
+
+
+# 9. 통합 청크 (Chunks)
 class Chunk(Base):
     __tablename__ = "chunks"
 
@@ -151,9 +207,105 @@ class Chunk(Base):
     custom_knowledge = relationship("CustomKnowledge", back_populates="chunks")
 
 
+# 10. RAG 질문/답변 평가 로그
+class RagQueryLog(Base):
+    __tablename__ = "rag_query_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String, index=True)
+    session_id = Column(String, index=True)
+    question = Column(Text)
+    expanded_question = Column(Text)
+    route = Column(Text)
+    answer = Column(Text)
+    fallback_triggered = Column(Boolean, default=False)
+    fallback_reason = Column(String, nullable=True)
+    date_filter_applied = Column(Boolean, default=False)
+    date_filter_relaxed = Column(Boolean, default=False)
+    analysis_intent = Column(String, nullable=True)
+    analysis_entities_json = Column(Text, nullable=True)
+    analysis_time_focus = Column(String, nullable=True)
+    analysis_search_queries_json = Column(Text, nullable=True)
+    analysis_needs_clarification = Column(Boolean, default=False)
+    analysis_clarification_reason = Column(Text, nullable=True)
+    analysis_used = Column(Boolean, default=False)
+    analysis_failed = Column(Boolean, default=False)
+    matched_queries_json = Column(Text, nullable=True)
+    top_hybrid_score = Column(Float, nullable=True)
+    source_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=kst_now, index=True)
+
+    retrievals = relationship("RagRetrievalLog", back_populates="query_log")
+
+
+# 11. RAG 검색 문서/점수 평가 로그
+class RagRetrievalLog(Base):
+    __tablename__ = "rag_retrieval_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    query_log_id = Column(Integer, ForeignKey("rag_query_logs.id"), nullable=False, index=True)
+    rank = Column(Integer)
+    dataset = Column(String, index=True)
+    chunk_id = Column(String, index=True)
+    title = Column(Text)
+    url = Column(Text)
+    published_at = Column(String)
+    vector_score = Column(Float, nullable=True)
+    sparse_score = Column(Float, nullable=True)
+    hybrid_score = Column(Float, nullable=True)
+    recency_score = Column(Float, nullable=True)
+    final_score = Column(Float, nullable=True)
+    sort_date = Column(String, nullable=True)
+    snippet = Column(Text)
+    created_at = Column(DateTime, default=kst_now, index=True)
+
+    query_log = relationship("RagQueryLog", back_populates="retrievals")
+
+def _ensure_sqlite_columns(table_name: str, columns: dict[str, str]) -> None:
+    with engine.begin() as connection:
+        existing = {
+            row[1]
+            for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        for column_name, column_type in columns.items():
+            if column_name in existing:
+                continue
+            connection.exec_driver_sql(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+            )
+
+
+def ensure_runtime_schema() -> None:
+    """기존 SQLite 파일에 누락된 운영 로그 컬럼을 보강합니다."""
+    _ensure_sqlite_columns(
+        "rag_query_logs",
+        {
+            "fallback_reason": "VARCHAR",
+            "date_filter_applied": "BOOLEAN DEFAULT 0",
+            "date_filter_relaxed": "BOOLEAN DEFAULT 0",
+            "analysis_intent": "VARCHAR",
+            "analysis_entities_json": "TEXT",
+            "analysis_time_focus": "VARCHAR",
+            "analysis_search_queries_json": "TEXT",
+            "analysis_needs_clarification": "BOOLEAN DEFAULT 0",
+            "analysis_clarification_reason": "TEXT",
+            "analysis_used": "BOOLEAN DEFAULT 0",
+            "analysis_failed": "BOOLEAN DEFAULT 0",
+            "matched_queries_json": "TEXT",
+        },
+    )
+    _ensure_sqlite_columns(
+        "rag_retrieval_logs",
+        {
+            "sort_date": "VARCHAR",
+        },
+    )
+
+
 def init_db():
     """데이터베이스와 테이블을 생성합니다."""
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_schema()
 
 def reset_db():
     """DB를 초기화합니다 (모든 테이블 삭제 후 재생성)."""

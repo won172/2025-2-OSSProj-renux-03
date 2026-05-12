@@ -1,0 +1,25 @@
+{
+  "document_key": "notices:JANGHAKNOTICE:26764371",
+  "dataset": "notices",
+  "source_type": "html_notice",
+  "source_id": "JANGHAKNOTICE:26764371",
+  "board_name": "장학공지",
+  "board_code": "JANGHAKNOTICE",
+  "article_id": 26764371,
+  "title": "[홍보] 2026년도 강원랜드 멘토링 장학 장학생 모집",
+  "category": "",
+  "published_at": "2026-04-17",
+  "detail_url": "https://www.dongguk.edu/article/JANGHAKNOTICE/detail/26764371",
+  "content_text": "",
+  "content_html": "<p>\n\n</p><p style=\"text-align: center;\"><img alt=\"공고 포스터\" src=\"/cmmn/fileView?path=/ckeditor//JANGHAKNOTICE&amp;physical=1776390459729.jpg&amp;contentType=image\" style=\"width: 1192px; height: 1684px;\"/></p>",
+  "attachments": [
+    {
+      "name": "2026 강원랜드 멘토링 장학 장학생(대학생) 모집 안내문.pdf",
+      "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=2026%20%EA%B0%95%EC%9B%90%EB%9E%9C%EB%93%9C%20%EB%A9%98%ED%86%A0%EB%A7%81%20%EC%9E%A5%ED%95%99%20%EC%9E%A5%ED%95%99%EC%83%9D%28%EB%8C%80%ED%95%99%EC%83%9D%29%20%EB%AA%A8%EC%A7%91%20%EC%95%88%EB%82%B4%EB%AC%B8.pdf&filepath=/files/article/JANGHAKNOTICE/26764371/&filerealname=ADA8F836BDA2470992332B5ACCF0D19F.pdf"
+    }
+  ],
+  "is_pinned": false,
+  "schema_version": 1,
+  "collected_at": "2026-05-12T10:45:54.579514+09:00",
+  "content_hash": "fce014a7ea5d770f128e3a0c1923a52b85707736"
+}

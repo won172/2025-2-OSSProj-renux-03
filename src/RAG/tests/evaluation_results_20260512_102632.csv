@@ -1,0 +1,32 @@
+﻿question,expected_dataset,actual_route,hit,smalltalk_route_hit,keyword_score,fallback,fallback_reason,source_count,top_hybrid_score,final_score,date_filter_relaxed,recent_notice_query,analysis_intent,analysis_used,analysis_failed,analysis_needs_clarification,matched_queries_json
+동국대학교 2026학년도 입학 전형에 대해 알려줘,notices,notices,True,False,1.0,False,,10,0.2597246158231146,0.7468416003925977,False,False,notices,True,False,True,"[""동국대학교 2026학년도 입학 전형에 대해 알려줘"", ""동국대학교 2026학년도 입학 전형"", ""2026학년도 동국대학교 입학 정보"", ""동국대학교 입학 전형 안내""]"
+장학금 신청 기간이 언제야?,notices,notices,True,False,1.0,False,,10,0.34611347376955437,0.7247163789635582,False,False,notices,True,False,True,"[""장학금 신청 기간이 언제야?"", ""장학금 신청 기간이 언제인가요?"", ""장학금 신청 기간"", ""장학금 신청 일정"", ""장학금 신청 마감일""]"
+오늘 올라온 장학금 뭐있지,notices,notices,True,False,0.0,False,,1,0.11005125045776368,0.9936785705187625,True,True,notices,True,False,True,"[""오늘 장학금 공지""]"
+최근 장학 공지 보여줘,notices,notices,True,False,0.3333333333333333,True,date_filter_eliminated_all,0,,,True,True,notices,True,False,True,[]
+최신 학사 공지 알려줘,notices,notices,True,False,0.5,False,,2,0.08899478912353516,0.9452328838713225,True,True,notices,True,False,True,"[""최신 학사 공지"", ""학사 공지""]"
+모집 공지 중 최근에 올라온 것 알려줘,notices,notices,True,False,0.3333333333333333,False,,5,0.16170024664043747,0.787934189966668,False,True,notices,True,False,True,"[""모집 공지 중 최근에 올라온 것 알려줘"", ""최근에 올라온 모집 공지 알려줘"", ""최근 모집 공지"", ""모집 공지""]"
+발표 난 공지 중 최신 소식 알려줘,notices,notices,True,False,0.6666666666666666,False,,3,0.12157975512067384,1.0842187698149681,True,True,notices,True,False,True,"[""발표 난 공지 중 최신 소식 알려줘"", ""최신 발표 난 공지 소식 알려줘"", ""최신 발표 난 공지"", ""발표 공지 최신 소식"", ""발표 관련 최신 공지""]"
+수강신청 취소는 어떻게 해?,rules,rules,True,False,0.6666666666666666,False,,10,0.41273595013970243,0.69,False,False,rules,True,False,True,"[""수강신청 취소는 어떻게 해?"", ""수강신청 취소 방법"", ""수강신청 취소 절차"", ""수강신청 취소 규정""]"
+휴학 신청은 어떻게 해?,rules,rules,True,False,0.6666666666666666,False,,10,0.315432155115628,0.69,False,False,rules,True,False,True,"[""휴학 신청은 어떻게 해?"", ""휴학 신청 방법"", ""휴학 신청 절차"", ""휴학 신청 관련 규정""]"
+복학하려면 어떤 절차가 필요해?,rules,rules,True,False,0.6666666666666666,False,,10,0.2902193684358771,0.72,False,False,rules,True,False,True,"[""복학하려면 어떤 절차가 필요해?"", ""복학 절차는 무엇인가요?"", ""복학 절차"", ""복학 방법"", ""복학 신청""]"
+재수강 기준이 어떻게 돼?,rules,rules,True,False,0.6666666666666666,False,,10,0.4176325071251994,0.72,False,False,rules,True,False,True,"[""재수강 기준이 어떻게 돼?"", ""재수강 기준이 어떻게 되나요?"", ""재수강 기준"", ""재수강 규정"", ""재수강 관련 정보""]"
+성적 정정은 언제까지 가능한가요?,rules,rules,True,False,0.6666666666666666,False,,10,0.3116151408252405,0.69,False,False,rules,True,False,True,"[""성적 정정은 언제까지 가능한가요?"", ""성적 정정 기한"", ""성적 정정 마감일"", ""성적 정정 기간""]"
+졸업 요건이 어떻게 돼?,rules,rules,True,False,0.6666666666666666,False,,10,0.34074452636752095,0.72,False,False,rules,True,False,True,"[""졸업 요건이 어떻게 돼?"", ""졸업 요건이 어떻게 되나요?"", ""졸업 요건"", ""졸업 조건"", ""졸업 관련 규정""]"
+이번 학기 종강일이 언제야?,schedule,schedule,True,False,0.5,False,,10,0.4935873808353185,0.8608745202334175,False,False,schedule,True,False,True,"[""이번 학기 종강일이 언제야?"", ""이번 학기 종강일이 언제인가요?"", ""이번 학기 종강일"", ""종강일"", ""학기 종강일""]"
+이번 주 학사일정 알려줘,schedule,schedule,True,False,0.0,True,date_filter_eliminated_all,0,,,False,False,schedule,True,False,True,[]
+시험 기간이 언제야?,schedule,schedule,True,False,0.6666666666666666,False,,10,0.35768173883076493,0.9593529391891936,False,False,schedule,True,False,True,"[""시험 기간이 언제야?"", ""시험 기간이 언제인지 알고 싶어."", ""시험 기간"", ""시험 일정"", ""시험 날짜""]"
+수강신청 기간이 언제야?,schedule,schedule,True,False,0.6666666666666666,False,,10,0.45951333888065493,0.9038161207015859,False,False,schedule,True,False,True,"[""수강신청 기간이 언제야?"", ""수강신청 기간이 언제인가요?"", ""수강신청 기간"", ""수강신청 일정"", ""수강신청 날짜""]"
+방학 시작일이 언제야?,schedule,schedule,True,False,0.6666666666666666,False,,10,0.5752761160728883,0.8814846864249355,False,False,schedule,True,False,True,"[""방학 시작일이 언제야?"", ""방학 시작일이 언제인가요?"", ""방학 시작일"", ""방학 일정"", ""방학 날짜""]"
+이번 달 학사일정 알려줘,schedule,schedule,True,False,0.0,True,date_filter_eliminated_all,0,,,False,False,schedule,True,False,False,[]
+컴퓨터공학과 사무실 전화번호 알려줘,staff,staff,True,False,1.0,False,,10,0.5700299183007825,0.72,False,False,staff,True,False,False,"[""컴퓨터공학과 사무실 전화번호 알려줘"", ""컴퓨터공학과 사무실 전화번호"", ""컴퓨터공학과 전화번호"", ""사무실 전화번호 컴퓨터공학과"", ""컴퓨터공학과 연락처""]"
+학생지원팀 연락처 알려줘,staff,staff,True,False,1.0,False,,10,0.5418397066098016,0.69,False,False,staff,True,False,False,"[""학생지원팀 연락처 알려줘"", ""학생지원팀 연락처"", ""학생지원팀 전화번호"", ""학생지원팀 부서 연락처""]"
+행정실 내선번호 알려줘,staff,staff,True,False,0.3333333333333333,True,no_results,0,,,False,False,staff,True,False,True,[]
+장학 담당 부서 연락처 알려줘,staff,staff,True,False,0.6666666666666666,True,score_below_threshold,0,0.11878066879719001,,False,False,staff,True,False,True,"[""장학 담당 부서 연락처 알려줘"", ""장학 담당 부서 연락처"", ""장학 부서 전화번호"", ""장학 관련 부서 연락처""]"
+통계학과 교과과정에 대해 알려줘,courses,courses,True,False,0.0,False,,10,0.12116351127624513,0.69,False,False,courses,True,False,True,"[""통계학과 교과과정에 대해 알려줘"", ""통계학과 교과과정"", ""통계학과 전공 필수 과목"", ""통계학과 이수구분""]"
+전공필수 과목이 뭐야?,courses,courses,True,False,0.0,True,score_below_threshold,0,0.016621780395507813,,False,False,courses,True,False,True,"[""전공필수 과목이 뭐야?"", ""전공필수 과목이 무엇인가요?"", ""전공필수 과목"", ""필수 과목"", ""전공 과목"", ""전공필수 교과목이 뭐야?""]"
+선수과목이 필요한 과목이 있어?,courses,courses,True,False,0.0,True,score_below_threshold,0,0.09011536136917675,,False,False,courses,True,False,True,"[""선수과목이 필요한 과목이 있어?"", ""선수과목이 필요한 과목이 있나요?"", ""선수과목이 필요한 과목"", ""필수 선수과목"", ""선수과목 관련 정보"", ""선수교과목이 필요한 교과목이 있어?""]"
+이수구분은 어떻게 나뉘어?,courses,courses,True,False,0.0,True,score_below_threshold,0,0.056083576634755716,,False,False,courses,True,False,True,"[""이수구분은 어떻게 나뉘어?"", ""이수구분 나뉘는 방법"", ""이수구분 종류"", ""이수구분 설명""]"
+안녕,smalltalk,smalltalk,True,True,1.0,False,,0,,,False,False,,False,False,False,
+고마워,smalltalk,smalltalk,True,True,1.0,False,,0,,,False,False,,False,False,False,
+너 이름이 뭐야?,smalltalk,smalltalk,True,True,1.0,False,,0,,,False,False,,False,False,False,
+오늘 기분 어때?,smalltalk,smalltalk,True,True,1.0,False,,0,,,False,False,,False,False,False,

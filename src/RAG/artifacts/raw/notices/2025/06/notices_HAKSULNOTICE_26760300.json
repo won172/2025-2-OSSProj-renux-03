@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "HAKSULNOTICE:26760300",
+  "collected_at": "2026-05-12T10:45:54.611752+09:00",
+  "raw_record": {
+    "게시판": "학술공지",
+    "게시판코드": "HAKSULNOTICE",
+    "원문글ID": 26760300,
+    "제목": "공지 [동국대학교 문화학술원 HK+사업단] 제17회 국외명사초청특강 - 아시아(말라카, 마카오, 마닐라)에서 유럽의 빚: 물질 문화와 소비가 국제관계를 바꾼 방식 1580~1770",
+    "카테고리": null,
+    "게시일": "2025-06-02",
+    "상단고정": true,
+    "상세URL": "https://www.dongguk.edu/article/HAKSULNOTICE/detail/26760300",
+    "본문HTML": "<p>\n\n</p><p> </p>\n<p><img alt=\"제 17회 국외명사초청특강 포스터\" src=\"/cmmn/fileView?path=/ckeditor//HAKSULNOTICE&amp;physical=1749016989329.jpg&amp;contentType=image\" style=\"width: 891px; height: 1260px;\"/></p>",
+    "본문": "",
+    "첨부파일": [
+      {
+        "name": "제 17회 국외명사초청특강 포스터.jpg",
+        "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=%EC%A0%9C%2017%ED%9A%8C%20%EA%B5%AD%EC%99%B8%EB%AA%85%EC%82%AC%EC%B4%88%EC%B2%AD%ED%8A%B9%EA%B0%95%20%ED%8F%AC%EC%8A%A4%ED%84%B0.jpg&filepath=/files/article/HAKSULNOTICE/26760300/&filerealname=83303BB2F59B4CA098445D0F7B504A19.jpg"
+      }
+    ]
+  }
+}

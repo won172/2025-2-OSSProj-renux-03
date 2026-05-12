@@ -17,4 +17,11 @@ public class ChatMessage
     public string Content { get; set; } = null!;
     [Required]
     public DateTime CreatedTime { get; init; } = DateTime.Now.ToUniversalTime();
+
+    public string? SourcesJson { get; set; }
+
+    [Required]
+    public bool IsFallback { get; set; } = false;
+
+    public string? FallbackReason { get; set; }
 }

@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeExternalLinks from 'rehype-external-links'
 import remarkGfm from 'remark-gfm'
 import { apiFetch } from '../../api/client'
+import SourceCards, { type ChatSource } from '../../components/chat/SourceCards'
 import type { ActiveChat } from '../../types/chat'
 
 interface ChatPageMessage {
@@ -12,6 +13,9 @@ interface ChatPageMessage {
   isAsk: boolean
   content: string
   createdTime: string | number
+  sources?: ChatSource[] | null
+  isFallback?: boolean
+  fallbackReason?: string | null
 }
 
 const epochTicks = 621355968000000000 // .NET DateTime epoch ticks
@@ -27,6 +31,13 @@ const formatMessageTime = (value?: string | number) => {
   }).format(date)
 }
 
+const getFallbackLabel = (reason?: string | null) => {
+  if (reason === 'date_filter_eliminated_all') return '날짜 범위 재확인'
+  if (reason === 'score_below_threshold') return '근거 약함'
+  if (reason === 'dataset_unavailable') return '일시적 조회 실패'
+  return '근거 부족'
+}
+
 const ChatPage = () => {
   const navigate = useNavigate()
   const { chatId } = useParams<{ chatId: string }>()
@@ -37,6 +48,10 @@ const ChatPage = () => {
   const [inputValue, setInputValue] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const showRagScores = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem('renux-user-role') === 'UNIVERSITY_COUNCIL'
+  }, [])
   // 채팅방 ID가 없으면 홈으로 리다이렉트
   useEffect(() => {//
     if (!chatId) {
@@ -186,8 +201,9 @@ const ChatPage = () => {
                 return (
                   <li
                     key={message.id}
-                    className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'}`}
+                    className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'} ${!message.isAsk && message.isFallback ? 'chat-bubble--fallback' : ''}`}
                   >
+                    {!message.isAsk && message.isFallback && <span className="chat-fallback-badge">{getFallbackLabel(message.fallbackReason)}</span>}
                     <ReactMarkdown
                       className="chat-bubble__text"
                       remarkPlugins={[remarkGfm]}
@@ -206,6 +222,13 @@ const ChatPage = () => {
                     >
                       {message.content}
                     </ReactMarkdown>
+                    {!message.isAsk && (
+                      <SourceCards
+                        sources={message.sources}
+                        showScores={showRagScores}
+                        isFallback={message.isFallback}
+                      />
+                    )}
                     {messageTime && <time className="chat-bubble__time">{messageTime}</time>}
                   </li>
                 )

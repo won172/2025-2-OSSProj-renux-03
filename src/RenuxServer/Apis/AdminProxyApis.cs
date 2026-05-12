@@ -7,22 +7,68 @@ static public class AdminProxyApis
         var app = application.MapGroup("/admin");
         string RagServiceUrl = application.Configuration["RagServiceUrl"] ?? "http://rag-service:8000";
 
-        app.MapGet("/pending", async (HttpResponse response) => 
+        app.MapGet("pending", async (HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) => 
         {
-            using var client = new HttpClient();
+            logger.LogInformation("Proxying /admin/pending to {Url}/admin/pending", RagServiceUrl);
+            var client = httpClientFactory.CreateClient();
             var proxyRes = await client.GetAsync($"{RagServiceUrl}/admin/pending");
             response.StatusCode = (int)proxyRes.StatusCode;
             var contentStream = await proxyRes.Content.ReadAsStreamAsync();
             return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
         });
 
-        app.MapGet("/items", async (HttpResponse response) => 
+        app.MapGet("items", async (HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) => 
         {
-            using var client = new HttpClient();
+            logger.LogInformation("Proxying /admin/items to {Url}/admin/items", RagServiceUrl);
+            var client = httpClientFactory.CreateClient();
             var proxyRes = await client.GetAsync($"{RagServiceUrl}/admin/items");
             response.StatusCode = (int)proxyRes.StatusCode;
             var contentStream = await proxyRes.Content.ReadAsStreamAsync();
             return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
+        });
+
+        app.MapGet("rag/status", async (HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
+        {
+            logger.LogInformation("Proxying /admin/rag/status to {Url}/admin/rag/status", RagServiceUrl);
+            var client = httpClientFactory.CreateClient();
+            var proxyRes = await client.GetAsync($"{RagServiceUrl}/admin/rag/status");
+            response.StatusCode = (int)proxyRes.StatusCode;
+            var contentStream = await proxyRes.Content.ReadAsStreamAsync();
+            return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
+        });
+
+        app.MapGet("rag-logs-list", async (HttpRequest request, HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
+        {
+            string url = $"{RagServiceUrl}/admin/rag/logs{request.QueryString}";
+            logger.LogInformation("Proxying /admin/rag-logs-list to {Url}", url);
+            try 
+            {
+                var client = httpClientFactory.CreateClient();
+                var proxyRes = await client.GetAsync(url);
+                logger.LogInformation("RAG service response: {Status}", proxyRes.StatusCode);
+                response.StatusCode = (int)proxyRes.StatusCode;
+                var contentStream = await proxyRes.Content.ReadAsStreamAsync();
+                return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error proxying to RAG service at {Url}", url);
+                return Results.Problem(detail: ex.Message, statusCode: 500);
+            }
+        });
+
+        app.MapGet("rag-logs/export", async (HttpRequest request, HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
+        {
+            logger.LogInformation("Proxying /admin/rag-logs/export to {Url}/admin/rag-logs/export", RagServiceUrl);
+            var client = httpClientFactory.CreateClient();
+            var proxyRes = await client.GetAsync($"{RagServiceUrl}/admin/rag-logs/export{request.QueryString}");
+            response.StatusCode = (int)proxyRes.StatusCode;
+            if (proxyRes.Content.Headers.ContentDisposition != null)
+            {
+                response.Headers.ContentDisposition = proxyRes.Content.Headers.ContentDisposition.ToString();
+            }
+            var contentStream = await proxyRes.Content.ReadAsStreamAsync();
+            return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "text/csv");
         });
 
         app.MapPost("/submit", async (HttpRequest request, HttpResponse response) => 

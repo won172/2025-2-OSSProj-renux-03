@@ -12,6 +12,7 @@ WORKDIR /app
 # Create virtual environment
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+ENV PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu"
 
 # Install Python dependencies
 COPY requirements.txt .

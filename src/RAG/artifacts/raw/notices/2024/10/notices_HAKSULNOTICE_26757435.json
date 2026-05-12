@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "HAKSULNOTICE:26757435",
+  "collected_at": "2026-05-12T10:45:54.627434+09:00",
+  "raw_record": {
+    "게시판": "학술공지",
+    "게시판코드": "HAKSULNOTICE",
+    "원문글ID": 26757435,
+    "제목": "[북한연구학회] 2024 북한연구학회 추계학술회의",
+    "카테고리": null,
+    "게시일": "2024-10-11",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/HAKSULNOTICE/detail/26757435",
+    "본문HTML": "<p>\n\n</p><p> </p>\n<p style=\"text-align: center;\"><img alt=\"2024 북한연구학회 추계학술회의\" src=\"/cmmn/fileView?path=/ckeditor//ACARESE&amp;physical=1728607565439.jpg&amp;contentType=image\" style=\"width: 800px; height: 514px;\"/></p>\n<p style=\"text-align: center;\"> </p>\n<p style=\"text-align: center;\"> </p>\n<p style=\"text-align: center;\"><img alt=\"2024 북한연구학회 추계학술회의\" src=\"/cmmn/fileView?path=/ckeditor//ACARESE&amp;physical=1728607575047.jpg&amp;contentType=image\" style=\"width: 1134px; height: 2266px;\"/></p>",
+    "본문": "",
+    "첨부파일": []
+  }
+}

@@ -43,8 +43,6 @@ services:
         build:
             context: ../RAG
             dockerfile: Dockerfile
-        ports:
-            - "8000:8000"
         volumes:
             - ../RAG/huggingface_cache:/root/.cache/huggingface
             - ../RAG/artifacts:/app/artifacts
@@ -53,7 +51,9 @@ services:
             - ../RAG/data:/app/data
         depends_on:
             - redis
-        env_file: .env
+        env_file:
+            - .env
+            - ../RAG/.env
         environment:
             - OPENAI_API_KEY=${OPENAI_API_KEY}
             - REDIS_URL=redis://redis:6379/0

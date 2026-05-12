@@ -102,6 +102,12 @@ def get_existing_ids(name: str, ids: Iterable[str]) -> set[str]:
     return set(result.get("ids", []))
 
 
+def count_items(name: str) -> int:
+    """지정된 Chroma 컬렉션의 문서 수를 반환합니다."""
+    collection = get_collection(name)
+    return collection.count()
+
+
 def reset_collection(name: str) -> None:
     """컬렉션을 삭제한 뒤 다시 만들어 재빌드에 활용합니다."""
     client = get_client()
@@ -112,4 +118,4 @@ def reset_collection(name: str) -> None:
     client.create_collection(name=name)
 
 
-__all__ = ["get_client", "get_collection", "add_items", "upsert_items", "delete_items", "get_all_ids", "reset_collection"]
+__all__ = ["get_client", "get_collection", "add_items", "upsert_items", "delete_items", "get_all_ids", "count_items", "reset_collection"]

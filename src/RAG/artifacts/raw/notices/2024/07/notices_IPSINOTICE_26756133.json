@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "IPSINOTICE:26756133",
+  "collected_at": "2026-05-12T10:45:54.631077+09:00",
+  "raw_record": {
+    "게시판": "입학공지",
+    "게시판코드": "IPSINOTICE",
+    "원문글ID": 26756133,
+    "제목": "2024학년도 2학기 시간제 등록생 모집 안내",
+    "카테고리": null,
+    "게시일": "2024-07-08",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/IPSINOTICE/detail/26756133",
+    "본문HTML": "<p>\n\n</p><p><img alt=\"2024학년도 2학기 시간제 등록생 모집안내\" src=\"/cmmn/fileView?path=/ckeditor//IPSINOTICE&amp;physical=1720406736757.jpg&amp;contentType=image\" style=\"width: 1338px; height: 1338px;\"/><img alt=\"\"/></p>",
+    "본문": "",
+    "첨부파일": [
+      {
+        "name": "2. 2024학년도 2학기 시간제 등록생 입학원서 및 개인정보 제공 동의서.hwp",
+        "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=2.%202024%ED%95%99%EB%85%84%EB%8F%84%202%ED%95%99%EA%B8%B0%20%EC%8B%9C%EA%B0%84%EC%A0%9C%20%EB%93%B1%EB%A1%9D%EC%83%9D%20%EC%9E%85%ED%95%99%EC%9B%90%EC%84%9C%20%EB%B0%8F%20%EA%B0%9C%EC%9D%B8%EC%A0%95%EB%B3%B4%20%EC%A0%9C%EA%B3%B5%20%EB%8F%99%EC%9D%98%EC%84%9C.hwp&filepath=/files/article/IPSINOTICE/26756133/&filerealname=D2281DA59EE0435586DF9369E48B5CAD.hwp"
+      },
+      {
+        "name": "1. 2024학년도 2학기 시간제 등록생 모집요강.hwp",
+        "url": "https://www.dongguk.edu/cmmn/fileDown.do?filename=1.%202024%ED%95%99%EB%85%84%EB%8F%84%202%ED%95%99%EA%B8%B0%20%EC%8B%9C%EA%B0%84%EC%A0%9C%20%EB%93%B1%EB%A1%9D%EC%83%9D%20%EB%AA%A8%EC%A7%91%EC%9A%94%EA%B0%95.hwp&filepath=/files/article/IPSINOTICE/26756133/&filerealname=90DD6421FD9E44AA956C2617E894B584.hwp"
+      }
+    ]
+  }
+}

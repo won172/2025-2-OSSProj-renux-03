@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "HAKSANOTICE:26764638",
+  "collected_at": "2026-05-12T10:45:54.543789+09:00",
+  "raw_record": {
+    "게시판": "학사공지",
+    "게시판코드": "HAKSANOTICE",
+    "원문글ID": 26764638,
+    "제목": "공지 문과대학 대학원 FAIR(진학상담)-2026. 5. 12(화), 명진라운지",
+    "카테고리": "대학원",
+    "게시일": "2026-05-06",
+    "상단고정": true,
+    "상세URL": "https://www.dongguk.edu/article/HAKSANOTICE/detail/26764638",
+    "본문HTML": "<p>\n\n</p><p style=\"text-align: center;\"><img alt=\"문과대학대학원페어 홍보포스터\" src=\"/cmmn/fileView?path=/ckeditor//HAKSANOTICE&amp;physical=1778053122123.png&amp;contentType=image\" style=\"width: 800px; height: 1131px;\"/></p>",
+    "본문": "",
+    "첨부파일": []
+  }
+}

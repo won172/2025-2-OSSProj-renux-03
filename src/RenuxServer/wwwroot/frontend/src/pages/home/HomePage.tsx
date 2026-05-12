@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import { apiFetch } from '../../api/client'
 import donggukLogo from '../../assets/images/dongguk-logo.png'
 import dongddokiLogo from '../../assets/images/dongddoki-logo.png'
+import SourceCards, { type ChatSource } from '../../components/chat/SourceCards'
 import type { Department } from '../../types/organization'
 import type { ActiveChat } from '../../types/chat'
 import type { AuthNameResponse, UserRole } from '../../types/auth'
@@ -16,6 +17,9 @@ type ChatPageMessage = {
   isAsk: boolean
   content: string
   createdTime: string | number
+  sources?: ChatSource[] | null
+  isFallback?: boolean
+  fallbackReason?: string | null
 }
 
 const mapRoleNameToUserRole = (roleName?: string | null): UserRole => {
@@ -28,6 +32,13 @@ const mapRoleNameToUserRole = (roleName?: string | null): UserRole => {
     return 'DEPARTMENT_COUNCIL'
   }
   return 'STUDENT'
+}
+
+const getFallbackLabel = (reason?: string | null) => {
+  if (reason === 'date_filter_eliminated_all') return '날짜 범위 재확인'
+  if (reason === 'score_below_threshold') return '근거 약함'
+  if (reason === 'dataset_unavailable') return '일시적 조회 실패'
+  return '근거 부족'
 }
 
 const HomePage = () => {
@@ -443,6 +454,7 @@ const HomePage = () => {
   const roleLabel = roleLabelMap[userRole] // '일반학생'
   const showDeptAdminButton = isAuthenticated && userRole === 'DEPARTMENT_COUNCIL' // '학생회'
   const showUnivAdminButton = isAuthenticated && userRole === 'UNIVERSITY_COUNCIL' // '총학생회'
+  const showRagScores = userRole === 'UNIVERSITY_COUNCIL'
   const visibleChats = activeChats.length > 0 ? activeChats : [] 
 
   const formatMessageTime = (value?: string | number) => {
@@ -668,8 +680,9 @@ const HomePage = () => {
                     return (
                       <li
                         key={message.id}
-                        className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'}`}
+                        className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'} ${!message.isAsk && message.isFallback ? 'chat-bubble--fallback' : ''}`}
                       >
+                        {!message.isAsk && message.isFallback && <span className="chat-fallback-badge">{getFallbackLabel(message.fallbackReason)}</span>}
                         <ReactMarkdown
                           className="chat-bubble__text"
                           remarkPlugins={[remarkGfm]}
@@ -688,6 +701,13 @@ const HomePage = () => {
                         >
                           {message.content}
                         </ReactMarkdown>
+                        {!message.isAsk && (
+                          <SourceCards
+                            sources={message.sources}
+                            showScores={showRagScores}
+                            isFallback={message.isFallback}
+                          />
+                        )}
                         {messageTime && <time className="chat-bubble__time">{messageTime}</time>}
                       </li>
                     )

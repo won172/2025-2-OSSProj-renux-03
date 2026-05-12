@@ -23,6 +23,93 @@ interface ApiOrganization {
     ManagerName?: string
 }
 
+interface RagDatasetStatus {
+  key: string
+  collection: string
+  chroma_count: number | null
+  cached_chunk_count: number
+  chunk_artifact_exists: boolean
+  chunk_artifact_mtime: string | null
+  latest_document_published_at?: string | null
+  vectorizer_exists: boolean
+  vectorizer_mtime: string | null
+  last_successful_indexed_at?: string | null
+  vectorizer_sklearn_version?: string | null
+  status: 'ok' | 'degraded' | 'error'
+  error?: string | null
+}
+
+interface RagAdminStatus {
+  status: 'ok' | 'degraded' | 'error'
+  generated_at: string
+  datasets: RagDatasetStatus[]
+  pending_items: {
+    pending: number
+    approved: number
+    rejected: number
+  }
+  rag_logs: {
+    total_queries: number
+    fallback_count: number
+    latest_query_at: string | null
+    fallback_reasons?: Record<string, number>
+  }
+  notices_ingestion?: {
+    last_collection_at: string | null
+    last_successful_ingestion_at: string | null
+    ingestion_summary: {
+      status: string | null
+      documents_seen: number
+      documents_new: number
+      documents_updated: number
+      documents_deleted: number
+      documents_failed: number
+    }
+    stage_summary: {
+      raw_documents: number
+      normalized_documents: number
+      indexed_documents: number
+    }
+    quality_summary: {
+      parse_failed: number
+      severities: Record<string, number>
+      recent_checks: Array<{
+        document_key: string
+        check_type: string
+        severity: string
+        message: string
+        created_at: string
+      }>
+    }
+  }
+  error?: string
+}
+
+const getStatusLabel = (status?: string) => {
+  if (status === 'ok') return '정상'
+  if (status === 'degraded') return '주의'
+  if (status === 'error') return '오류'
+  return '확인 중'
+}
+
+const getStatusPillClass = (status?: string) => {
+  if (status === 'ok') return 'success'
+  if (status === 'error') return 'danger'
+  return 'pending'
+}
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
 const UniversityAdminPage = () => {
   const navigate = useNavigate()
   const [organizations, setOrganizations] = useState<CouncilOrganization[]>([])
@@ -31,6 +118,8 @@ const UniversityAdminPage = () => {
   
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [ragStatus, setRagStatus] = useState<RagAdminStatus | null>(null)
+  const [ragStatusError, setRagStatusError] = useState<string | null>(null)
 
   // Fetch Data
   useEffect(() => {
@@ -124,6 +213,17 @@ const UniversityAdminPage = () => {
                 setError('검수 대기 데이터를 불러오는데 실패했습니다.');
             }
 
+            // 3. Fetch RAG operation status
+            try {
+                const statusData = await apiFetch<RagAdminStatus>(`/admin/rag/status?t=${new Date().getTime()}`)
+                setRagStatus(statusData)
+                setRagStatusError(null)
+            } catch (e) {
+                console.error('Failed to fetch RAG status:', e);
+                setRagStatus(null)
+                setRagStatusError('RAG 운영 상태를 불러오지 못했습니다.')
+            }
+
         } catch (e) { 
             console.error('An unexpected error occurred during admin data fetch:', e);
             setError('관리자 데이터를 불러오는 중 예상치 못한 오류가 발생했습니다.');
@@ -141,6 +241,11 @@ const UniversityAdminPage = () => {
 
   const registeredCount = organizations.length
   const pendingCount = pendingReviews.filter(r => r.status === 'pending').length
+  const systemStatus = ragStatus?.status ?? (ragStatusError ? 'error' : undefined)
+  const systemStatusLabel = getStatusLabel(systemStatus)
+  const fallbackRate = ragStatus && ragStatus.rag_logs.total_queries > 0
+    ? Math.round((ragStatus.rag_logs.fallback_count / ragStatus.rag_logs.total_queries) * 100)
+    : 0
 
   const handleNavigateHome = () => navigate('/')
 
@@ -238,9 +343,11 @@ const UniversityAdminPage = () => {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                 <div>
                     <p className="admin-card__label">시스템 상태</p>
-                    <strong className="admin-card__value">양호</strong>
+                    <strong className="admin-card__value">{systemStatusLabel}</strong>
                 </div>
-                <span className="admin-card__icon admin-card__icon--green" aria-hidden="true">🟢</span>
+                <span className={`admin-card__icon ${systemStatus === 'ok' ? 'admin-card__icon--green' : 'admin-card__icon--blue'}`} aria-hidden="true">
+                  {systemStatus === 'ok' ? '●' : '!'}
+                </span>
               </div>
             </article>
           </div>
@@ -248,7 +355,7 @@ const UniversityAdminPage = () => {
 
         <div className="admin-dashboard-grid">
           {/* Left Panel: Organizations */}
-          <section className="admin-panel glass-panel full-height">
+          <section className="admin-panel admin-panel--organizations glass-panel full-height">
             <header className="admin-panel__header">
               <div>
                 <h2 className="admin-panel__title">학생회 조직 현황</h2>
@@ -376,6 +483,211 @@ const UniversityAdminPage = () => {
             </div>
           </section>
         </div>
+
+        <section className="admin-panel glass-panel" style={{ marginTop: '16px' }}>
+          <header className="admin-panel__header">
+            <div>
+              <h2 className="admin-panel__title">RAG 인덱스 상태</h2>
+              <p className="admin-panel__subtitle">
+                ChromaDB 컬렉션, 로컬 아티팩트, 평가 로그 현황
+              </p>
+            </div>
+            <span className={`status-pill status-pill--${getStatusPillClass(systemStatus)}`}>
+              {systemStatusLabel}
+            </span>
+          </header>
+
+          {ragStatusError ? (
+            <div className="admin-alert admin-alert--danger">{ragStatusError}</div>
+          ) : ragStatus ? (
+            <>
+              <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '16px' }}>
+                <article 
+                  className="admin-card admin-card--compact"
+                  onClick={() => navigate('/admin/logs')}
+                  style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
+                  onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                  onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                >
+                  <p className="admin-card__label">총 질문 로그</p>
+                  <strong className="admin-card__value">{ragStatus.rag_logs.total_queries}</strong>
+                </article>
+                <article className="admin-card admin-card--compact">
+                  <p className="admin-card__label">Fallback 비율</p>
+                  <strong className="admin-card__value">{fallbackRate}%</strong>
+                </article>
+                <article className="admin-card admin-card--compact">
+                  <p className="admin-card__label">승인 대기</p>
+                  <strong className="admin-card__value">{ragStatus.pending_items.pending}</strong>
+                </article>
+                <article className="admin-card admin-card--compact">
+                  <p className="admin-card__label">최근 질문</p>
+                  <strong className="admin-card__value" style={{ fontSize: '1rem' }}>
+                    {formatDateTime(ragStatus.rag_logs.latest_query_at)}
+                  </strong>
+                </article>
+              </div>
+
+              {!!ragStatus.rag_logs.fallback_reasons && Object.keys(ragStatus.rag_logs.fallback_reasons).length > 0 && (
+                <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '16px' }}>
+                  {Object.entries(ragStatus.rag_logs.fallback_reasons).map(([reason, count]) => (
+                    <article key={reason} className="admin-card admin-card--compact">
+                      <p className="admin-card__label">{reason}</p>
+                      <strong className="admin-card__value">{count}</strong>
+                    </article>
+                  ))}
+                </div>
+              )}
+
+              <div className="admin-table">
+                <div className="admin-table__head" style={{ gridTemplateColumns: '0.8fr 1.1fr 0.7fr 0.7fr 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr 0.7fr' }}>
+                  <span>Dataset</span>
+                  <span>Collection</span>
+                  <span>Chroma</span>
+                  <span>Cache</span>
+                  <span>Chunk</span>
+                  <span>Vectorizer</span>
+                  <span>최신 문서일</span>
+                  <span>마지막 인덱싱</span>
+                  <span>TF-IDF 버전</span>
+                  <span>상태</span>
+                </div>
+                <ul className="admin-table__body">
+                  {ragStatus.datasets.map((dataset) => (
+                    <li
+                      key={dataset.key}
+                      className="admin-table__row"
+                      style={{ gridTemplateColumns: '0.8fr 1.1fr 0.7fr 0.7fr 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr 0.7fr' }}
+                    >
+                      <span>{dataset.key}</span>
+                      <span>{dataset.collection}</span>
+                      <span>{dataset.chroma_count ?? '-'}</span>
+                      <span>{dataset.cached_chunk_count}</span>
+                      <span title={formatDateTime(dataset.chunk_artifact_mtime)}>
+                        {dataset.chunk_artifact_exists ? '있음' : '없음'}
+                      </span>
+                      <span title={formatDateTime(dataset.vectorizer_mtime)}>
+                        {dataset.vectorizer_exists ? '있음' : '없음'}
+                      </span>
+                      <span>{dataset.latest_document_published_at ?? '-'}</span>
+                      <span title={formatDateTime(dataset.last_successful_indexed_at)}>{formatDateTime(dataset.last_successful_indexed_at)}</span>
+                      <span>{dataset.vectorizer_sklearn_version ?? '-'}</span>
+                      <span className={`status-pill status-pill--${getStatusPillClass(dataset.status)}`}>
+                        {getStatusLabel(dataset.status)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {ragStatus.notices_ingestion && (
+                <section style={{ marginTop: '16px' }}>
+                  <header className="admin-panel__header" style={{ padding: 0, marginBottom: '12px' }}>
+                    <div>
+                      <h3 className="admin-panel__title" style={{ fontSize: '1rem' }}>Notices 운영 상태</h3>
+                      <p className="admin-panel__subtitle">
+                        raw / normalized / indexed 수집 상태와 품질 경고
+                      </p>
+                    </div>
+                    <span className={`status-pill status-pill--${getStatusPillClass(ragStatus.notices_ingestion.ingestion_summary.status === 'failed' ? 'error' : ragStatus.notices_ingestion.ingestion_summary.documents_failed > 0 ? 'degraded' : 'ok')}`}>
+                      {ragStatus.notices_ingestion.ingestion_summary.status ?? '미실행'}
+                    </span>
+                  </header>
+
+                  <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '16px' }}>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">마지막 수집</p>
+                      <strong className="admin-card__value" style={{ fontSize: '1rem' }}>
+                        {formatDateTime(ragStatus.notices_ingestion.last_collection_at)}
+                      </strong>
+                    </article>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">마지막 성공 run</p>
+                      <strong className="admin-card__value" style={{ fontSize: '1rem' }}>
+                        {formatDateTime(ragStatus.notices_ingestion.last_successful_ingestion_at)}
+                      </strong>
+                    </article>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">파싱 실패</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.quality_summary.parse_failed}</strong>
+                    </article>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">품질 경고</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.quality_summary.severities.warning ?? 0}</strong>
+                    </article>
+                  </div>
+
+                  <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: '16px' }}>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">Seen</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.ingestion_summary.documents_seen}</strong>
+                    </article>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">신규</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.ingestion_summary.documents_new}</strong>
+                    </article>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">수정</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.ingestion_summary.documents_updated}</strong>
+                    </article>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">숨김/삭제</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.ingestion_summary.documents_deleted}</strong>
+                    </article>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">실패</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.ingestion_summary.documents_failed}</strong>
+                    </article>
+                  </div>
+
+                  <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '16px' }}>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">Raw 문서</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.stage_summary.raw_documents}</strong>
+                    </article>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">Normalized 문서</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.stage_summary.normalized_documents}</strong>
+                    </article>
+                    <article className="admin-card admin-card--compact">
+                      <p className="admin-card__label">Indexed 문서</p>
+                      <strong className="admin-card__value">{ragStatus.notices_ingestion.stage_summary.indexed_documents}</strong>
+                    </article>
+                  </div>
+
+                  {ragStatus.notices_ingestion.quality_summary.recent_checks.length > 0 && (
+                    <div className="admin-table">
+                      <div className="admin-table__head" style={{ gridTemplateColumns: '0.9fr 0.8fr 0.8fr 2fr 0.9fr' }}>
+                        <span>문서</span>
+                        <span>검사</span>
+                        <span>심각도</span>
+                        <span>메시지</span>
+                        <span>시각</span>
+                      </div>
+                      <ul className="admin-table__body">
+                        {ragStatus.notices_ingestion.quality_summary.recent_checks.map((check) => (
+                          <li
+                            key={`${check.document_key}-${check.check_type}-${check.created_at}`}
+                            className="admin-table__row"
+                            style={{ gridTemplateColumns: '0.9fr 0.8fr 0.8fr 2fr 0.9fr' }}
+                          >
+                            <span title={check.document_key}>{check.document_key}</span>
+                            <span>{check.check_type}</span>
+                            <span>{check.severity}</span>
+                            <span>{check.message}</span>
+                            <span title={formatDateTime(check.created_at)}>{formatDateTime(check.created_at)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </section>
+              )}
+            </>
+          ) : (
+            <div className="admin-table__empty">RAG 운영 상태를 확인하는 중입니다.</div>
+          )}
+        </section>
 
       </div>
     </div>

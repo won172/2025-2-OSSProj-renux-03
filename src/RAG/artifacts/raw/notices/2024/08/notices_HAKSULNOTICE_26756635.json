@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "HAKSULNOTICE:26756635",
+  "collected_at": "2026-05-12T10:45:54.630366+09:00",
+  "raw_record": {
+    "게시판": "학술공지",
+    "게시판코드": "HAKSULNOTICE",
+    "원문글ID": 26756635,
+    "제목": "[문화학술원 HK+사업단] 제28회 콜로키움- \"근세 일본 무가 사회속의 증답의례\"",
+    "카테고리": null,
+    "게시일": "2024-08-08",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/HAKSULNOTICE/detail/26756635",
+    "본문HTML": "<p>\n\n</p><p><img alt=\".....\" src=\"/cmmn/fileView?path=/ckeditor//HAKSULNOTICE&amp;physical=1723098333974.jpg&amp;contentType=image\" style=\"width: 891px; height: 1260px;\"/></p>",
+    "본문": "",
+    "첨부파일": []
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "BUDDHISTEVENT:26764372",
+  "collected_at": "2026-05-12T10:45:54.579990+09:00",
+  "raw_record": {
+    "게시판": "행사공지",
+    "게시판코드": "BUDDHISTEVENT",
+    "원문글ID": 26764372,
+    "제목": "공지 [종학연구소] 건학 120주년 기념, 「청년 무문관 하루 수행」 참여 신청 안내",
+    "카테고리": null,
+    "게시일": "2026-04-17",
+    "상단고정": true,
+    "상세URL": "https://www.dongguk.edu/article/BUDDHISTEVENT/detail/26764372",
+    "본문HTML": "<p>\n\n</p><p style=\"text-align: center;\"><img alt=\"건학 120주년 기념 '청년 무문관 하루 수행'\" src=\"/cmmn/fileView?path=/ckeditor//BUDDHISTEVENT&amp;physical=1776391092830.png&amp;contentType=image\" style=\"width: 1000px; height: 1406px;\"/></p>\n<p><span style=\"font-size:15pt;\">1.  일시: 2026년 5월 12일(화) 오전 10시 ~ 오후 5시<br/>\n2. 장소: 동국대학교 중앙도서관 4층 선(명상)홀<br/>\n3. 대상: 학부생 및 대학원생 20명<br/>\n4. 신청기한: <span style=\"color:#0000FF;\"><strong>4월 25일(토) 오후 1시 마감</strong></span><br/>\n5. 신청링크: (구글폼)<strong><span style=\"color:#0000FF;\"> </span><u><a href=\"https://forms.gle/2LY9JfAQ2rAdtTnF8\"><span style=\"color:#0000FF;\">https://forms.gle/2LY9JfAQ2rAdtTnF8</span></a></u></strong><br/>\n6. 특전: 학부생 유고결석 인정(<u>※ 5.12.(화) 수업</u>) , 신행 마일리지 1점, 수료증 발급<br/>\n7.  문의: 02-6713-5148, jonghak@dongguk.edu<br/>\n8. 주관: 동국대학교 불교학술원 종학연구소</span></p>\n<p> </p>",
+    "본문": "1.  일시: 2026년 5월 12일(화) 오전 10시 ~ 오후 5시\n2. 장소: 동국대학교 중앙도서관 4층 선(명상)홀\n3. 대상: 학부생 및 대학원생 20명\n4. 신청기한:\n4월 25일(토) 오후 1시 마감\n5. 신청링크: (구글폼)\nhttps://forms.gle/2LY9JfAQ2rAdtTnF8\n6. 특전: 학부생 유고결석 인정(\n※ 5.12.(화) 수업\n) , 신행 마일리지 1점, 수료증 발급\n7.  문의: 02-6713-5148, jonghak@dongguk.edu\n8. 주관: 동국대학교 불교학술원 종학연구소",
+    "첨부파일": []
+  }
+}

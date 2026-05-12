@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset": "notices",
+  "source_id": "HAKSULNOTICE:26759468",
+  "collected_at": "2026-05-12T10:45:54.619546+09:00",
+  "raw_record": {
+    "게시판": "학술공지",
+    "게시판코드": "HAKSULNOTICE",
+    "원문글ID": 26759468,
+    "제목": "[HK+사업단] 제13회 국내학술대회_청대 만문사료로 본 동유라시아의 정치 사회와 물품 교류",
+    "카테고리": null,
+    "게시일": "2025-03-28",
+    "상단고정": false,
+    "상세URL": "https://www.dongguk.edu/article/HAKSULNOTICE/detail/26759468",
+    "본문HTML": "<p>\n\n</p><p><img alt=\"000000\" src=\"/cmmn/fileView?path=/ckeditor//HAKSULNOTICE&amp;physical=1743146993555.jpg&amp;contentType=image\" style=\"width: 902px; height: 1260px;\"/></p>",
+    "본문": "",
+    "첨부파일": []
+  }
+}

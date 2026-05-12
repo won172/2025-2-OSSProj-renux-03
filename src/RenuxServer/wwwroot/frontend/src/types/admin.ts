@@ -43,3 +43,14 @@ export interface DepartmentKnowledge {
   createdAt: string
   rejectionReason?: string
 }
+
+export interface RagChatLog {
+  id: number
+  question: string
+  answer: string
+  fallback_triggered: boolean
+  fallback_reason: string | null
+  created_at: string
+  route: string
+  source_count: number
+}
