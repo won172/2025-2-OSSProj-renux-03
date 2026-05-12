@@ -177,8 +177,8 @@ using (var scope = app.Services.CreateScope())
     }
     catch(Exception e)
     {
-        Console.WriteLine(e.Message);
-        return;
+        Console.Error.WriteLine(e.ToString());
+        throw;
     }
 }
 

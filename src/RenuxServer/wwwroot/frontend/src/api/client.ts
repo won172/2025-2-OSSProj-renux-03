@@ -11,7 +11,7 @@ export interface ApiError extends Error {
 }
 
 const defaultHeaders = {
-  'Content-Type': 'application/json',
+  Accept: 'application/json',
 }
 
 const configuredApiBaseUrl =
@@ -35,6 +35,15 @@ const buildRequestUrl = (input: RequestInfo) => {
   return `${configuredApiBaseUrl.replace(/\/$/, '')}${input}`
 }
 
+const isNgrokUrl = (value: string) => {
+  try {
+    const url = new URL(value)
+    return /(?:^|\.)ngrok(?:-free)?\.(?:app|dev)$/i.test(url.hostname)
+  } catch {
+    return false
+  }
+}
+
 const parseJson = async (response: Response) => {
   const text = await response.text()
   if (!text) return undefined
@@ -48,20 +57,31 @@ const parseJson = async (response: Response) => {
 
 export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options: ApiRequestOptions = {}) => {
   const { json, headers, ...rest } = options
+  const requestUrl = buildRequestUrl(input)
+  const resolvedHeaders = {
+    ...defaultHeaders,
+    ...headers,
+  } as Record<string, string>
+
+  if (json !== undefined) {
+    resolvedHeaders['Content-Type'] = 'application/json'
+  }
+
+  if (typeof requestUrl === 'string' && isNgrokUrl(requestUrl)) {
+    resolvedHeaders['ngrok-skip-browser-warning'] = 'true'
+  }
+
   const init: RequestInit = {
     ...rest,
     credentials: 'include',
-    headers: {
-      ...defaultHeaders,
-      ...headers,
-    },
+    headers: resolvedHeaders,
   }
 
   if (json !== undefined) {
     init.body = JSON.stringify(json)
   }
 
-  const response = await fetch(buildRequestUrl(input), init)
+  const response = await fetch(requestUrl, init)
 
   let parsedBody: unknown
   try {
