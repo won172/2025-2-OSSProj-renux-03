@@ -53,6 +53,9 @@ LLM_ROUTER_DESCRIPTIONS = {
 # OpenAI/LLM 기본 설정.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "gemma4:e4b")
+OLLAMA_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
 USE_QUERY_ANALYSIS = os.getenv("RAG_USE_QUERY_ANALYSIS", "1") == "1"
 QUERY_ANALYSIS_MAX_QUERIES = int(os.getenv("QUERY_ANALYSIS_MAX_QUERIES", "3"))
 
@@ -66,9 +69,13 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6380/0")
 DATA_SOURCES: Dict[str, Path] = {
     "notices": DATA_DIR / "dongguk_notices.csv",
     "rules": DATA_DIR / "dongguk_rule_texts.csv",
+    "rules_entry_year_guides": DATA_DIR / "dongguk_entry_year_guide_sections.csv",
     "schedule": DATA_DIR / "dongguk_schedule.csv",
     "courses_desc": DATA_DIR / "dongguk_statistics_course_descriptions.csv",
     "courses_major": DATA_DIR / "dongguk_statistics_major_course.csv",
+    "courses_all": DATA_DIR / "dongguk_courses_all.csv",
+    "courses_catalog": DATA_DIR / "dongguk_departments_catalog.csv",
+    "courses_curriculum_sources": DATA_DIR / "dongguk_department_curriculum_sources.csv",
     "staff": DATA_DIR / "dongguk_staff_contacts.csv",
 }
 
@@ -96,6 +103,9 @@ __all__ = [
     "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
     "OPENAI_API_KEY",
+    "OLLAMA_BASE_URL",
+    "OLLAMA_CHAT_MODEL",
+    "OLLAMA_TIMEOUT_SECONDS",
     "USE_QUERY_ANALYSIS",
     "QUERY_ANALYSIS_MAX_QUERIES",
     "MAX_HISTORY_STORE_SIZE",
