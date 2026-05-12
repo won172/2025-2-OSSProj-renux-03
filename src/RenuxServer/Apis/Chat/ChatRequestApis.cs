@@ -41,6 +41,35 @@ static public class ChatRequestApis
     private const string DefaultRagFailureMessage = "죄송합니다. 지금은 학교 정보 검색 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    static private CookieOptions BuildGuestCookieOptions(IConfiguration configuration)
+    {
+        bool secure = configuration.GetValue<bool?>("GuestCookie:Secure")
+            ?? configuration.GetValue<bool?>("GUEST_COOKIE_SECURE")
+            ?? true;
+
+        string sameSiteRaw =
+            configuration["GuestCookie:SameSite"]
+            ?? configuration["GUEST_COOKIE_SAMESITE"]
+            ?? "None";
+
+        SameSiteMode sameSite = sameSiteRaw.ToLowerInvariant() switch
+        {
+            "strict" => SameSiteMode.Strict,
+            "lax" => SameSiteMode.Lax,
+            "none" => SameSiteMode.None,
+            _ => SameSiteMode.None,
+        };
+
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = secure,
+            SameSite = sameSite,
+            IsEssential = true,
+            Path = "/"
+        };
+    }
+
     static public void AddChatApis(this WebApplication application)
     {
         var app = application.MapGroup("/chat");
@@ -71,7 +100,7 @@ static public class ChatRequestApis
             return Results.Ok(chats);
         });
 
-        app.MapPost("/start", async (ServerDbContext db, HttpContext context, StartChat stch, IMapper mapper) =>
+        app.MapPost("/start", async (ServerDbContext db, HttpContext context, StartChat stch, IMapper mapper, IConfiguration configuration) =>
         {
             DateTime time = DateTime.Now.ToUniversalTime();
             Guid id = Guid.NewGuid();
@@ -88,7 +117,7 @@ static public class ChatRequestApis
                 // Ensure the guest cookie exists for session consistency (optional but good practice)
                 if (!context.Request.Cookies.ContainsKey("renux-server-guest"))
                 {
-                    CookieOptions opt = new() { HttpOnly = true, SameSite = SameSiteMode.Strict };
+                    CookieOptions opt = BuildGuestCookieOptions(configuration);
                     context.Response.Cookies.Append("renux-server-guest", Guid.NewGuid().ToString(), opt);
                 }
 
@@ -316,7 +345,7 @@ static public class ChatRequestApis
         ILogger logger)
     {
         string requestId = context.TraceIdentifier;
-        var ragUrl = configuration["RagServiceUrl"] ?? "http://rag-service:8000";
+        var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
         var timeoutSeconds = configuration.GetValue<int?>("RagServiceTimeoutSeconds") ?? 30;
 
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));

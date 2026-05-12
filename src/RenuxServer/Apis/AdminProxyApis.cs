@@ -5,7 +5,7 @@ static public class AdminProxyApis
     static public void AddAdminProxyApis(this WebApplication application)
     {
         var app = application.MapGroup("/admin");
-        string RagServiceUrl = application.Configuration["RagServiceUrl"] ?? "http://rag-service:8000";
+        string RagServiceUrl = application.Configuration["RagServiceUrl"] ?? application.Configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
 
         app.MapGet("pending", async (HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) => 
         {

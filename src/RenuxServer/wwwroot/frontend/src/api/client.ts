@@ -14,6 +14,27 @@ const defaultHeaders = {
   'Content-Type': 'application/json',
 }
 
+const configuredApiBaseUrl =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)
+  || (import.meta.env.VITE_DEV_SERVER_PROXY_TARGET as string | undefined)
+  || ''
+
+const buildRequestUrl = (input: RequestInfo) => {
+  if (typeof input !== 'string') {
+    return input
+  }
+
+  if (!configuredApiBaseUrl || /^https?:\/\//i.test(input)) {
+    return input
+  }
+
+  if (!input.startsWith('/')) {
+    return input
+  }
+
+  return `${configuredApiBaseUrl.replace(/\/$/, '')}${input}`
+}
+
 const parseJson = async (response: Response) => {
   const text = await response.text()
   if (!text) return undefined
@@ -40,7 +61,7 @@ export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options:
     init.body = JSON.stringify(json)
   }
 
-  const response = await fetch(input, init)
+  const response = await fetch(buildRequestUrl(input), init)
 
   let parsedBody: unknown
   try {
