@@ -13,6 +13,8 @@ CONNECTIONSTRING="Host=db; Port=5432; Database=[db입력(위와 동일)]; Userna
 JWT_kEY=[키 입력]
 
 OPENAI_API_KEY=[openai api 키 입력]
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+OLLAMA_CHAT_MODEL=gemma4:e4b
 REDIS_URL=redis://localhost:3679/0 # redis ConnectionString
 ```
 

@@ -36,6 +36,7 @@ services:
             - ConnectionStrings__RenuxServer=${CONNECTIONSTRING}
             - Jwt__Key=${JWT_KEY}
             - RAG_SERVICE_URL=http://rag-service:8000
+            - RagServiceTimeoutSeconds=${RAG_SERVICE_TIMEOUT_SECONDS:-120}
         restart: on-failure
  
     rag-service:
@@ -43,6 +44,8 @@ services:
         build:
             context: ../RAG
             dockerfile: Dockerfile
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
         volumes:
             - ../RAG/huggingface_cache:/root/.cache/huggingface
             - ../RAG/artifacts:/app/artifacts
@@ -56,6 +59,9 @@ services:
             - ../RAG/.env
         environment:
             - OPENAI_API_KEY=${OPENAI_API_KEY}
+            - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+            - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-gemma4:e4b}
+            - OLLAMA_TIMEOUT_SECONDS=${OLLAMA_TIMEOUT_SECONDS:-120}
             - REDIS_URL=redis://redis:6379/0
         restart: on-failure
 

@@ -387,19 +387,31 @@ def build_rule_chunks(df: pd.DataFrame) -> pd.DataFrame:
             continue
         filename = _first_nonempty(row, ["filename", "파일명", "규정명", "title"])
         rel_dir = _first_nonempty(row, ["relative_dir", "경로", "folder"])
-        doc_id = make_doc_id("rules", rel_dir, filename or text[:40])
+        entry_year = _first_nonempty(row, ["entry_year", "학번", "입학년도"])
+        section = _first_nonempty(row, ["section", "섹션", "section_name"])
+        college_name = _first_nonempty(row, ["college_name", "단과대학", "대학"])
+        source_type = _first_nonempty(row, ["source_type", "문서유형"]) or "rules_text"
+        source_file = _first_nonempty(row, ["source_file", "source_filename", "파일명", "filename"])
+        published_at = _first_nonempty(row, ["published_at", "게시일", "기준일"])
+        title = _first_nonempty(row, ["title", "규정명", "filename", "파일명"]) or text[:80] or "학칙 문서"
+        doc_id = make_doc_id("rules", rel_dir, filename or title, entry_year, section, college_name)
         docs.append(
             {
                 "doc_id": doc_id,
-                "title": filename or text[:80] or "학칙 문서",
+                "title": title,
                 "text": text,
-                "topics": "규정",
+                "topics": section or "규정",
                 "relative_dir": rel_dir,
                 "filename": filename,
                 "source": "rules",
                 "url": "",
-                "published_at": "",
+                "published_at": published_at,
                 "rule_id": row.get("db_id"),
+                "entry_year": entry_year,
+                "section": section,
+                "college_name": college_name,
+                "source_type": source_type,
+                "source_file": source_file,
             }
         )
 
@@ -409,15 +421,32 @@ def build_rule_chunks(df: pd.DataFrame) -> pd.DataFrame:
         chunk_overlap=CHUNK_OVERLAP,
         include_title=True,
     )
-    return pd.DataFrame(chunks)
+    chunks_df = pd.DataFrame(chunks)
+    if not chunks_df.empty:
+        chunks_df.drop_duplicates(subset=["chunk_id"], inplace=True)
+    return chunks_df
 
 
 def ingest_rules() -> Tuple[pd.DataFrame, object, object]:
     path = DATA_SOURCES["rules"]
+    entry_year_guides_path = DATA_SOURCES["rules_entry_year_guides"]
     if not path.exists():
         raise FileNotFoundError(f"Rule CSV not found: {path}")
 
-    df = pd.read_csv(path).fillna("").astype(str)
+    if not entry_year_guides_path.exists():
+        try:
+            from src.crawlers.dongguk_entry_year_guide import build_entry_year_guide_dataframe
+
+            guide_df = build_entry_year_guide_dataframe()
+            if not guide_df.empty:
+                guide_df.to_csv(entry_year_guides_path, index=False, encoding="utf-8-sig")
+        except Exception:
+            pass
+
+    frames = [pd.read_csv(path).fillna("").astype(str)]
+    if entry_year_guides_path.exists():
+        frames.append(pd.read_csv(entry_year_guides_path).fillna("").astype(str))
+    df = pd.concat(frames, ignore_index=True).fillna("").astype(str)
     
     session = SessionLocal()
     try:
@@ -578,9 +607,19 @@ def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
     
     for _, row in combined.iterrows():
         db_id = row.get("db_id")
-        title = next((str(row.get(col, "")).strip() for col in title_candidates if str(row.get(col, "")).strip()), "통계학과 교과")
+        title = next((str(row.get(col, "")).strip() for col in title_candidates if str(row.get(col, "")).strip()), "교과목 정보")
         code = str(row.get("학수번호", "")).strip()
-        doc_id = make_doc_id("courses", code or title, row.get("_source_table"))
+        major_name = str(row.get("major", "")).strip() or str(row.get("department_name", "")).strip()
+        college_name = str(row.get("college_name", "")).strip()
+        curriculum_url = str(row.get("curriculum_url", "")).strip() or str(row.get("source_url", "")).strip()
+        doc_id = make_doc_id(
+            "courses",
+            major_name,
+            code or title,
+            curriculum_url,
+            row.get("section_title", ""),
+            row.get("_source_table"),
+        )
 
         text_parts: List[str] = []
         for col, value in row.items():
@@ -610,10 +649,11 @@ def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
                 "source_table": row.get("_source_table", ""),
                 "topics": row.get("_source_table", ""),
                 "source": "courses",
-                "url": "",
+                "url": curriculum_url,
                 "published_at": "",
                 "course_id": db_id,
-                "major": row.get("major", ""), # 메타데이터에 major 추가
+                "major": major_name,
+                "college_name": college_name,
             }
         )
 
@@ -623,43 +663,90 @@ def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
         chunk_overlap=0,
         include_title=True,
     )
-    return pd.DataFrame(chunks)
+    chunks_df = pd.DataFrame(chunks)
+    if not chunks_df.empty:
+        chunks_df.drop_duplicates(subset=["chunk_id"], inplace=True)
+    return chunks_df
+
+
+def _first_nonempty_value(row: pd.Series, candidates: Iterable[str]) -> str:
+    for col in candidates:
+        if col not in row.index:
+            continue
+        value = str(row.get(col, "")).strip()
+        if value and value.lower() != "nan":
+            return value
+    return ""
+
+
+def _load_general_courses_df(path: Path) -> pd.DataFrame:
+    raw = pd.read_csv(path).fillna("").astype(str)
+    if raw.empty:
+        return raw
+
+    rows: list[dict[str, str]] = []
+    for _, row in raw.iterrows():
+        department_name = _first_nonempty_value(row, ["department_name", "department", "major", "학과", "학과명", "전공", "major_name"])
+        college_name = _first_nonempty_value(row, ["college_name", "college", "단과대학", "대학", "college_name_ko"])
+        course_code = _first_nonempty_value(row, ["course_code", "학수번호", "과목코드", "course_id"])
+        title = _first_nonempty_value(row, ["title", "course_name", "교과목명", "국문교과목명", "과목명", "교과목"])
+        description = _first_nonempty_value(row, ["description", "해설", "비고", "교과목해설", "설명"])
+        source_table = _first_nonempty_value(row, ["source_type", "source_table", "_source_table", "문서유형"]) or "general_courses"
+        curriculum_url = _first_nonempty_value(row, ["curriculum_url", "source_url", "url", "상세URL"])
+
+        normalized = row.to_dict()
+        normalized["_source_table"] = source_table
+        normalized["major"] = department_name
+        normalized["department_name"] = department_name
+        normalized["college_name"] = college_name
+        normalized["학수번호"] = course_code
+        normalized["title"] = title
+        normalized["description"] = description
+        normalized["curriculum_url"] = curriculum_url
+        rows.append(normalized)
+
+    df = pd.DataFrame(rows).fillna("").astype(str)
+    return df
 
 
 def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
+    all_courses_path = DATA_SOURCES["courses_all"]
     desc_path = DATA_SOURCES["courses_desc"]
     major_path = DATA_SOURCES["courses_major"]
 
-    if not desc_path.exists() or not major_path.exists():
-        raise FileNotFoundError("Course CSV files are missing.")
+    if all_courses_path.exists():
+        combined = _load_general_courses_df(all_courses_path)
+        if "record_type" in combined.columns:
+            non_error = combined[combined["record_type"].astype(str).str.strip() != "crawl_error"].copy()
+            if non_error.empty:
+                raise RuntimeError(
+                    "dongguk_courses_all.csv contains only crawl_error rows. "
+                    "Run the curriculum crawler in a network-enabled environment before ingesting."
+                )
+            combined = non_error
+    else:
+        if not desc_path.exists() or not major_path.exists():
+            raise FileNotFoundError("Course CSV files are missing.")
 
-    # 1. 두 데이터셋 로드
-    desc_df = pd.read_csv(desc_path).fillna("").astype(str)
-    major_df = pd.read_csv(major_path).fillna("").astype(str)
+        desc_df = pd.read_csv(desc_path).fillna("").astype(str)
+        major_df = pd.read_csv(major_path).fillna("").astype(str)
+        combined = pd.merge(major_df, desc_df, on="학수번호", how="outer", suffixes=("", "_desc"))
+        combined = combined.fillna("")
+        combined["_source_table"] = "combined_statistics"
+        combined["major"] = "통계학과"
+        combined["department_name"] = "통계학과"
+        combined["college_name"] = ""
+        combined["curriculum_url"] = ""
 
-    # 2. '학수번호' 기준으로 병합 (Outer join으로 누락 방지)
-    # suffixes는 충돌 시 붙는데, 여기서는 서로 다른 컬럼이 많아 유용함.
-    combined = pd.merge(major_df, desc_df, on="학수번호", how="outer", suffixes=("", "_desc"))
-    combined = combined.fillna("")
-
-    # 3. 메타데이터 및 공통 필드 정리
-    combined["_source_table"] = "combined_statistics"
-    combined["major"] = "통계학과"
-
-    # --- 이수대상 데이터 정제 (검색 용이성을 위해 정규화) ---
-    # 예: "학사3,4년" -> "3학년, 4학년", "학사2년" -> "2학년"
-    if "이수대상" in combined.columns:
-        def _normalize_grade(val: str) -> str:
-            val = val.replace("학사", "")
-            if "," in val:
-                # "3,4년" -> "3,4" -> ["3", "4"] -> "3학년, 4학년"
-                parts = val.replace("년", "").split(",")
-                return ", ".join([f"{p.strip()}학년" for p in parts])
-            else:
-                # "2년" -> "2학년"
+        if "이수대상" in combined.columns:
+            def _normalize_grade(val: str) -> str:
+                val = val.replace("학사", "")
+                if "," in val:
+                    parts = val.replace("년", "").split(",")
+                    return ", ".join([f"{p.strip()}학년" for p in parts])
                 return val.replace("년", "학년")
-        
-        combined["이수대상"] = combined["이수대상"].apply(_normalize_grade)
+
+            combined["이수대상"] = combined["이수대상"].apply(_normalize_grade)
 
     session = SessionLocal()
     try:
@@ -671,8 +758,7 @@ def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
         title_candidates = ["교과목명", "국문교과목명", "course_name", "title", "교과목"]
         
         for _, row in combined.iterrows():
-            # 제목 찾기 (교과목명 우선, 없으면 국문교과목명 등)
-            title = next((str(row.get(col, "")).strip() for col in title_candidates if str(row.get(col, "")).strip()), "통계학과 교과")
+            title = next((str(row.get(col, "")).strip() for col in title_candidates if str(row.get(col, "")).strip()), "교과목 정보")
             code = str(row.get("학수번호", "")).strip()
             
             # 전체 데이터를 JSON으로 저장
@@ -680,8 +766,7 @@ def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
             safe_dict = {k: str(v) for k, v in row_dict.items()}
             raw_json = json.dumps(safe_dict, ensure_ascii=False)
             
-            # 해설(Description) 필드 확보
-            description = str(row.get("해설", "")).strip()
+            description = str(row.get("description", "")).strip() or str(row.get("해설", "")).strip()
 
             obj = Course(
                 course_code=code, title=title, 

@@ -1,4 +1,4 @@
-import donggukLogo from '../../assets/images/dongguk-logo.png'
+import dongddokiLogo from '../../assets/images/dongddoki-logo.png'
 
 interface AppHeaderProps {
   isAuthenticated: boolean
@@ -37,7 +37,7 @@ const AppHeader = ({
         </button>
         <div>
           <div className="chatbot-hero__badge">
-                  <img src={donggukLogo} alt="동국대학교 로고" className="chatbot-hero__badge-logo" />
+                  <img src={dongddokiLogo} alt="동똑이 로고" className="chatbot-hero__badge-logo" />
                 </div>
           {/*}
           <p className="chatbot-hero__badge" aria-hidden="true">

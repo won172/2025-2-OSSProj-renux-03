@@ -10,13 +10,13 @@ from pydantic import BaseModel, Field, ValidationError
 
 from src.config import OPENAI_MODEL, QUERY_ANALYSIS_MAX_QUERIES
 
-VALID_INTENTS = {"notices", "rules", "schedule", "staff", "courses", "smalltalk", "unknown"}
+VALID_INTENTS = {"notices", "rules", "schedule", "staff", "courses", "unknown"}
 VALID_TIME_FOCUS = {"today", "recent", "this_week", "this_month", "none"}
 
 
 class QueryAnalysisResult(BaseModel):
     normalized_question: str = Field(description="원문 의미를 크게 바꾸지 않은 정규화 질문")
-    intent: Literal["notices", "rules", "schedule", "staff", "courses", "smalltalk", "unknown"]
+    intent: Literal["notices", "rules", "schedule", "staff", "courses", "unknown"]
     entities: Dict[str, List[str]] = Field(default_factory=dict)
     time_focus: Literal["today", "recent", "this_week", "this_month", "none"] = "none"
     search_queries: List[str] = Field(default_factory=list)
@@ -37,7 +37,7 @@ prompt = PromptTemplate(
 4. search_queries는 최대 {max_queries}개만 생성하세요.
 5. search_queries에는 원문을 크게 벗어나지 않는 검색용 표현만 넣으세요.
 6. intent는 반드시 다음 중 하나만 고르세요:
-   notices, rules, schedule, staff, courses, smalltalk, unknown
+   notices, rules, schedule, staff, courses, unknown
 7. time_focus는 반드시 다음 중 하나만 고르세요:
    today, recent, this_week, this_month, none
 8. 모호하지만 검색은 가능하면 needs_clarification=true로 두고도 search_queries는 생성하세요.
@@ -48,8 +48,6 @@ intent 기준:
 - schedule: 개강, 종강, 시험, 수강신청 기간, 학사일정
 - staff: 전화번호, 내선, 부서 연락처, 사무실
 - courses: 교과과정, 전공필수, 선수과목, 이수구분, 개설 과목
-- smalltalk: 인사, 감사, 가벼운 잡담
-
 사용자 질문:
 {query}
 

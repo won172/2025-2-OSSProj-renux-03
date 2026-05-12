@@ -62,7 +62,10 @@ from src.pipelines.ingest import (
 from src.search.hybrid import load_tfidf, hybrid_search_with_meta
 from src.search.hybrid import read_tfidf_metadata
 from src.services.answer import format_citations
-from src.services.langchain_chat import append_manual_history, generate_langchain_answer, generate_smalltalk_answer
+from src.services.langchain_chat import (
+    append_manual_history,
+    generate_langchain_answer,
+)
 from src.services.query_analysis import QueryAnalysisResult, analyze_query
 from src.models.embedding import get_embedder, encode_texts
 from src.services.router import route_query
@@ -205,7 +208,6 @@ class QueryAnalysisMeta:
 _datasets: Dict[str, DatasetCache] = {}
 FALLBACK_REASON_NO_RESULTS = "no_results"
 FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL = "date_filter_eliminated_all"
-FALLBACK_REASON_SCORE_BELOW_THRESHOLD = "score_below_threshold"
 FALLBACK_REASON_DATASET_UNAVAILABLE = "dataset_unavailable"
 DATASET_REASON_EMPTY_COLLECTION = "empty_collection"
 DATASET_REASON_ARTIFACT_MISSING = "artifact_missing"
@@ -214,6 +216,23 @@ DATASET_REASON_VERSION_MISMATCH = "version_mismatch"
 NOTICE_RECENCY_TERMS = ("장학", "공지", "모집", "발표")
 RECENT_QUERY_TERMS = ("오늘", "최근", "최신", "방금", "올라온", "새로")
 NOTICE_FOCUS_TERMS = ("장학", "학사", "입학", "유학생", "수강", "휴학", "복학", "등록", "졸업")
+ENTRY_YEAR_GUIDE_SOURCE_TYPE = "entry_year_guide_pdf"
+ENTRY_YEAR_GUIDE_TERMS = (
+    "학번",
+    "신입생",
+    "졸업",
+    "졸업기준",
+    "이수",
+    "이수기준",
+    "교양",
+    "복수전공",
+    "다전공",
+    "전과",
+    "수강신청",
+    "재수강",
+    "학점포기",
+)
+COURSE_GRADE_TERMS = ("1학년", "2학년", "3학년", "4학년", "1학기", "2학기")
 NOTICE_BOARD_ALIASES = {
     "일반공지": "일반공지",
     "일반 공지": "일반공지",
@@ -272,51 +291,6 @@ SCHOOL_INFO_TERMS = (
     "교과과정",
     "과목",
 )
-SMALL_TALK_TERMS = (
-    "안녕",
-    "하이",
-    "반가워",
-    "ㅎㅇ",
-    "고마워",
-    "감사",
-    "땡큐",
-    "이름이뭐야",
-    "누구야",
-    "정체가뭐야",
-    "잘가",
-    "잘자",
-    "바이",
-    "bye",
-    "오늘기분어때",
-    "기분어때",
-    "잘지내",
-    "요즘어때",
-    "상태어때",
-    "심심해",
-    "농담해줘",
-    "웃긴얘기해줘",
-    "멋지다",
-    "귀엽다",
-    "좋아해",
-)
-SMALL_TALK_BLOCK_TERMS = (
-    "상담",
-    "우울",
-    "불안",
-    "진로",
-    "진학",
-    "투자",
-    "재정",
-    "법률",
-    "소송",
-    "의학",
-    "병원",
-    "약",
-    "치료",
-    "건강",
-)
-
-
 class SourceChunk(BaseModel):
     source: str
     metadata: Dict
@@ -417,12 +391,6 @@ def _build_retrieval_fallback_answer(
             base_msg += "- **날짜 범위 재확인**: 요청하신 날짜 범위 안에서는 확인된 공지를 찾지 못했습니다. 날짜를 넓혀서 다시 질문해 보세요.\n"
     elif reason == FALLBACK_REASON_DATASET_UNAVAILABLE:
         base_msg += "- **잠시 후 재시도**: 일부 학교 자료 인덱스를 지금 조회하지 못했습니다. 잠시 후 다시 질문해 주세요.\n"
-    elif reason == FALLBACK_REASON_SCORE_BELOW_THRESHOLD:
-        if policy_name == "recent_notices":
-            base_msg += "- **최신 공지 키워드 보강**: 최근 공지 후보는 있었지만 충분히 일치하는 근거로 보기 어려웠습니다. 장학명이나 정확한 공지 제목을 포함해 다시 질문해 주세요.\n"
-        else:
-            base_msg += "- **키워드 보강**: 관련 문서는 있었지만 충분히 일치하는 근거로 보기 어려웠습니다. 장학명이나 공지 제목을 포함해 다시 질문해 주세요.\n"
-
     if route and "staff" in route:
         base_msg += "- **부서 연락처 확인**: 질문하신 내용과 관련된 부서의 연락처를 찾으시려면 '어느 부서 전화번호 알려줘'와 같이 다시 질문해 보세요.\n"
     elif route and "notices" in route:
@@ -444,15 +412,9 @@ def _get_current_kst_string() -> str:
     return datetime.now(kst).strftime("%Y년 %m월 %d일 %H시 %M분 (KST)")
 
 
-def _is_small_talk_query(raw_query: str) -> bool:
+def _has_school_info_terms(raw_query: str) -> bool:
     normalized = re.sub(r"\s+", "", raw_query.lower())
-    if not normalized:
-        return False
-    if any(term in normalized for term in SCHOOL_INFO_TERMS):
-        return False
-    if any(term in normalized for term in SMALL_TALK_BLOCK_TERMS):
-        return False
-    return any(term in normalized for term in SMALL_TALK_TERMS)
+    return any(term in normalized for term in SCHOOL_INFO_TERMS)
 
 
 def _calculate_recency_score(sort_date, dataset: str, now: pd.Timestamp) -> float:
@@ -488,6 +450,93 @@ def _extract_notice_board_filter(query: str, route: List[str]) -> str | None:
     return None
 
 
+def _extract_entry_year_from_query(query: str) -> int | None:
+    explicit_match = re.search(r"\b(20\d{2})\s*(?:학번|신입생)?", query)
+    if explicit_match:
+        year = int(explicit_match.group(1))
+        if 2000 <= year <= 2099:
+            return year
+
+    short_match = re.search(r"\b(\d{2})\s*학번", query)
+    if short_match:
+        year = 2000 + int(short_match.group(1))
+        if 2000 <= year <= 2099:
+            return year
+    return None
+
+
+def _has_entry_year_guide_intent(query: str) -> bool:
+    return any(term in query for term in ENTRY_YEAR_GUIDE_TERMS)
+
+
+def _should_append_rules_route(query: str, route: List[str]) -> bool:
+    if "rules" in route:
+        return False
+    if "courses" in route and _has_entry_year_guide_intent(query):
+        return True
+    return False
+
+
+def _is_entry_year_guide_row(row: pd.Series) -> bool:
+    return str(row.get("source_type", "")).strip() == ENTRY_YEAR_GUIDE_SOURCE_TYPE
+
+
+def _latest_entry_year_in_frame(merged: pd.DataFrame) -> int | None:
+    if merged.empty or "entry_year" not in merged.columns:
+        return None
+    years = pd.to_numeric(merged["entry_year"], errors="coerce").dropna()
+    if years.empty:
+        return None
+    return int(years.max())
+
+
+def _build_guide_context_prefix(merged: pd.DataFrame, route: List[str], entry_year: int | None) -> str:
+    if merged.empty or "source_type" not in merged.columns:
+        return ""
+
+    guide_mask = merged["source_type"].astype(str).eq(ENTRY_YEAR_GUIDE_SOURCE_TYPE)
+    if not guide_mask.any():
+        return ""
+
+    latest_year = _latest_entry_year_in_frame(merged[guide_mask])
+    effective_year = entry_year or latest_year
+
+    if "courses" in route:
+        year_label = f"{effective_year}학번 기준" if effective_year is not None else "최신 기준"
+        return (
+            f"안내 메모: 학번별 PDF 자료가 함께 검색되었습니다. 이 자료는 {year_label} 이수기준·졸업기준 안내용입니다. "
+            "세부 과목표나 학년별 개설과목 목록처럼 단정하지 말고, 과목표가 확인되지 않으면 그 점을 명시하세요.\n\n"
+        )
+    return ""
+
+
+def _build_guide_answer_prefix(merged: pd.DataFrame, route: List[str], entry_year: int | None) -> str:
+    if merged.empty or "source_type" not in merged.columns:
+        return ""
+
+    guide_mask = merged["source_type"].astype(str).eq(ENTRY_YEAR_GUIDE_SOURCE_TYPE)
+    if not guide_mask.any():
+        return ""
+
+    latest_year = _latest_entry_year_in_frame(merged[guide_mask])
+    effective_year = entry_year or latest_year
+    if effective_year is None:
+        return ""
+
+    if "courses" in route:
+        has_course_chunks = "dataset" in merged.columns and (merged["dataset"].astype(str) == "courses").any()
+        if not has_course_chunks:
+            return (
+                f"세부 과목표는 제공된 자료에서 충분히 확인되지 않아, 아래는 {effective_year}학년도 신입생 기준의 "
+                "이수기준·졸업기준을 바탕으로 안내합니다.\n\n"
+            )
+        return f"참고: 일부 안내는 {effective_year}학년도 신입생 기준입니다.\n\n"
+
+    if entry_year is None:
+        return f"참고: 아래 내용은 최신 기준인 {effective_year}학년도 신입생 기준을 우선 반영했습니다.\n\n"
+    return ""
+
+
 def _analysis_to_meta(result: QueryAnalysisResult | None, *, failed: bool = False) -> QueryAnalysisMeta:
     if result is None:
         return QueryAnalysisMeta(result=None, used=False, failed=failed)
@@ -520,6 +569,14 @@ def _merge_routes(analysis: QueryAnalysisMeta, routed: List[str]) -> List[str]:
 
 
 def _resolve_retrieval_policy(query: str, route: List[str]) -> RetrievalPolicy:
+    staff_lookup_min_score = min(
+        MIN_RETRIEVAL_SCORE,
+        max(MIN_RETRIEVAL_SCORE - 0.03, 0.08),
+    )
+    courses_min_score = min(
+        MIN_RETRIEVAL_SCORE,
+        max(MIN_RETRIEVAL_SCORE - 0.07, 0.05),
+    )
     recent_notice_query = _is_recent_notice_query(query, route)
     if recent_notice_query:
         return RetrievalPolicy(
@@ -529,9 +586,9 @@ def _resolve_retrieval_policy(query: str, route: List[str]) -> RetrievalPolicy:
             prefer_notices_with_dates=True,
         )
     if _is_staff_lookup_query(query, route):
-        return RetrievalPolicy(name="staff_lookup", min_score=MIN_RETRIEVAL_SCORE + 0.02)
-    if "courses" in route and len(route) == 1:
-        return RetrievalPolicy(name="courses", min_score=MIN_RETRIEVAL_SCORE)
+        return RetrievalPolicy(name="staff_lookup", min_score=staff_lookup_min_score)
+    if "courses" in route and "notices" not in route and set(route).issubset({"courses", "rules"}):
+        return RetrievalPolicy(name="courses", min_score=courses_min_score)
     if any(dataset in route for dataset in ("rules", "schedule")) and "notices" not in route:
         return RetrievalPolicy(name="rules_schedule", min_score=MIN_RETRIEVAL_SCORE)
     if "notices" in route:
@@ -603,6 +660,7 @@ async def _retrieve_frames(
     final_where_filter: Dict,
     notice_board_filter: str | None,
     date_filter: QueryDateFilter | None,
+    entry_year: int | None,
     request_id: str,
 ) -> tuple[List[pd.DataFrame], bool, List[str]]:
     frames: List[pd.DataFrame] = []
@@ -629,7 +687,6 @@ async def _retrieve_frames(
             current_dataset_filter.pop("major", None)
         if dataset == "notices" and notice_board_filter:
             current_dataset_filter["topics"] = {"$eq": notice_board_filter}
-
         final_filter = current_dataset_filter if current_dataset_filter else None
         search_func = functools.partial(
             hybrid_search_with_meta,
@@ -670,6 +727,7 @@ async def _retrieve_frames_for_queries(
     final_where_filter: Dict,
     notice_board_filter: str | None,
     date_filter: QueryDateFilter | None,
+    entry_year: int | None,
     request_id: str,
 ) -> tuple[List[pd.DataFrame], bool, List[str]]:
     all_frames: List[pd.DataFrame] = []
@@ -683,6 +741,7 @@ async def _retrieve_frames_for_queries(
             final_where_filter=final_where_filter,
             notice_board_filter=notice_board_filter,
             date_filter=date_filter,
+            entry_year=entry_year,
             request_id=request_id,
         )
         for frame in frames:
@@ -755,6 +814,7 @@ def _prepare_merged_results(
     recent_notice_query: bool,
     policy: RetrievalPolicy,
     query: str,
+    entry_year: int | None = None,
 ) -> pd.DataFrame:
     if merged.empty or "hybrid_score" not in merged.columns:
         return merged
@@ -792,6 +852,17 @@ def _prepare_merged_results(
         merged["matched_query_count"] = 1
     merged["query_match_bonus"] = (merged["matched_query_count"].clip(lower=1) - 1) * 0.03
     merged["final_score"] = merged["final_score"] + merged["query_match_bonus"]
+    if "source_type" in merged.columns:
+        guide_mask = merged["source_type"].astype(str).eq(ENTRY_YEAR_GUIDE_SOURCE_TYPE)
+        if guide_mask.any() and _has_entry_year_guide_intent(query):
+            if entry_year is not None and "entry_year" in merged.columns:
+                matched_year_mask = guide_mask & merged["entry_year"].astype(str).eq(str(entry_year))
+                merged.loc[matched_year_mask, "final_score"] = merged.loc[matched_year_mask, "final_score"] + 0.12
+            elif "entry_year" in merged.columns:
+                latest_year = _latest_entry_year_in_frame(merged[guide_mask])
+                if latest_year is not None:
+                    latest_mask = guide_mask & merged["entry_year"].astype(str).eq(str(latest_year))
+                    merged.loc[latest_mask, "final_score"] = merged.loc[latest_mask, "final_score"] + 0.06
 
     if recent_notice_query and policy.prefer_notices_with_dates:
         focus_terms = _extract_notice_focus_terms(query)
@@ -1678,71 +1749,74 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
 
     session_id = req.session_id or str(uuid.uuid4())
 
-    if _is_small_talk_query(raw_query):
+    analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
+    if USE_QUERY_ANALYSIS:
+        analysis_result = await analyze_query(raw_query)
+        analysis_meta = _analysis_to_meta(analysis_result, failed=analysis_result is None)
+
+    if (
+        analysis_meta.result is not None
+        and analysis_meta.result.intent == "unknown"
+        and not _has_school_info_terms(raw_query)
+    ):
         current_date = _get_current_kst_string()
+        context_text = "일반 대화입니다. 학교 자료 검색이 필요한 질문이 아니면 자연스럽고 짧게 답하세요."
         try:
-            small_talk_answer = await generate_smalltalk_answer(
+            answer = await generate_langchain_answer(
                 question=raw_query,
+                context=context_text,
                 session_id=session_id,
                 current_date=current_date,
             )
         except Exception:
-            _log_event(logging.ERROR, "small_talk_generation_failed", exc_info=True, request_id=request_id)
-            small_talk_answer = "안녕하세요. 가벼운 대화는 짧게 도와드릴 수 있고, 학교 정보가 필요하면 바로 질문해 주세요."
-            await run_in_threadpool(append_manual_history, session_id, raw_query, small_talk_answer)
-        _log_event(
-            logging.INFO,
-            "small_talk_answered",
-            request_id=request_id,
-            session_id=session_id,
-            raw_query=raw_query,
-        )
+            _log_event(logging.ERROR, "llm_generation_failed", exc_info=True, request_id=request_id)
+            answer = "저는 동똑이에요. 지금 응답이 잠깐 매끄럽지 않았지만, 계속 편하게 물어보셔도 됩니다."
+
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id,
             session_id,
             raw_query,
             raw_query,
-            ["smalltalk"],
-            small_talk_answer,
+            ["unknown"],
+            answer,
             False,
             None,
             False,
             False,
-            None,
-            None,
-            None,
-            None,
-            False,
-            None,
-            False,
-            False,
+            analysis_meta.result.intent,
+            json.dumps(analysis_meta.result.entities, ensure_ascii=False),
+            analysis_meta.result.time_focus,
+            json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
+            analysis_meta.result.needs_clarification,
+            analysis_meta.result.clarification_reason,
+            analysis_meta.used,
+            analysis_meta.failed,
             None,
             None,
             [],
         )
         return AskResponse(
-            answer=small_talk_answer,
+            answer=answer,
             citations="",
-            route=["smalltalk"],
+            route=["unknown"],
             sources=[],
             fallback_triggered=False,
             fallback_reason=None,
         )
 
-    analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
-    if USE_QUERY_ANALYSIS:
-        analysis_result = await analyze_query(raw_query)
-        analysis_meta = _analysis_to_meta(analysis_result, failed=analysis_result is None)
-
-    expanded_query = expand_query(raw_query)
-    retrieval_queries = _build_retrieval_queries(raw_query, expanded_query, analysis_meta)
+    query_for_retrieval = raw_query
+    expanded_query = expand_query(query_for_retrieval)
+    retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta)
+    if raw_query not in retrieval_queries:
+        retrieval_queries.insert(0, raw_query)
     semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
     _log_event(
         logging.INFO,
         "ask_started",
         request_id=request_id,
         raw_query=raw_query,
+        query_for_retrieval=query_for_retrieval,
         expanded_query=expanded_query,
         retrieval_queries=retrieval_queries,
         analysis_intent=None if analysis_meta.result is None else analysis_meta.result.intent,
@@ -1763,6 +1837,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         else expanded_query
     )
     route = _merge_routes(analysis_meta, routed)
+    if _should_append_rules_route(semantic_query, route):
+        route.append("rules")
+    entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
     date_filter = await run_in_threadpool(
         extract_date_filter_from_query,
         semantic_query,
@@ -1779,6 +1856,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         final_where_filter=final_where_filter,
         notice_board_filter=notice_board_filter,
         date_filter=date_filter,
+        entry_year=entry_year,
         request_id=request_id,
     )
 
@@ -1796,6 +1874,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             final_where_filter=final_where_filter,
             notice_board_filter=notice_board_filter,
             date_filter=relaxed_filter,
+            entry_year=entry_year,
             request_id=request_id,
         )
         if relaxed_frames:
@@ -1808,34 +1887,57 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     else:
         merged = _merge_query_hits(frames)
 
-    merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query)
+    merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query, entry_year=entry_year)
     merged = merged.head(DEFAULT_TOP_K).reset_index(drop=True)
+
+    def _evaluate_fallback(current_merged: pd.DataFrame) -> tuple[float | None, bool, float, str | None]:
+        top_score = None
+        if not current_merged.empty and "hybrid_score" in current_merged.columns:
+            top_score = _clean_response_float(current_merged["hybrid_score"].max())
+
+        topic_aligned = _has_notice_topic_alignment(current_merged, semantic_query)
+        allow_recent_answer = (
+            retrieval_policy.allow_recency_override
+            and recent_notice_query
+            and not current_merged.empty
+            and topic_aligned
+        )
+        min_score = retrieval_policy.min_score
+        if recent_notice_query and retrieval_policy.allow_recency_override and not topic_aligned:
+            min_score = max(MIN_RETRIEVAL_SCORE, retrieval_policy.min_score)
+
+        reason = None
+        if current_merged.empty:
+            if unavailable_datasets and len(unavailable_datasets) == len(route):
+                reason = FALLBACK_REASON_DATASET_UNAVAILABLE
+            elif date_filter_eliminated_any:
+                reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
+            else:
+                reason = FALLBACK_REASON_NO_RESULTS
+        return top_score, topic_aligned, min_score, reason
+
+    top_hybrid_score, notice_topic_aligned, effective_min_score, fallback_reason = _evaluate_fallback(merged)
+
+    if fallback_reason is not None and "courses" in route and "rules" not in route:
+        guide_frames, _, guide_unavailable = await _retrieve_frames_for_queries(
+            route=["rules"],
+            queries=retrieval_queries,
+            final_where_filter=final_where_filter,
+            notice_board_filter=None,
+            date_filter=None,
+            entry_year=entry_year,
+            request_id=request_id,
+        )
+        unavailable_datasets = list(dict.fromkeys(unavailable_datasets + guide_unavailable))
+        if guide_frames:
+            frames.extend(guide_frames)
+            route.append("rules")
+            merged = _merge_query_hits(frames)
+            merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query, entry_year=entry_year)
+            merged = merged.head(DEFAULT_TOP_K).reset_index(drop=True)
+            top_hybrid_score, notice_topic_aligned, effective_min_score, fallback_reason = _evaluate_fallback(merged)
+
     matched_queries = _collect_matched_queries(merged)
-
-    top_hybrid_score = None
-    if not merged.empty and "hybrid_score" in merged.columns:
-        top_hybrid_score = _clean_response_float(merged["hybrid_score"].max())
-
-    notice_topic_aligned = _has_notice_topic_alignment(merged, semantic_query)
-    allow_recent_notice_answer = (
-        retrieval_policy.allow_recency_override
-        and recent_notice_query
-        and not merged.empty
-        and notice_topic_aligned
-    )
-    effective_min_score = retrieval_policy.min_score
-    if recent_notice_query and retrieval_policy.allow_recency_override and not notice_topic_aligned:
-        effective_min_score = max(MIN_RETRIEVAL_SCORE, retrieval_policy.min_score)
-    fallback_reason = None
-    if merged.empty:
-        if unavailable_datasets and len(unavailable_datasets) == len(route):
-            fallback_reason = FALLBACK_REASON_DATASET_UNAVAILABLE
-        elif date_filter_eliminated_any:
-            fallback_reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
-        else:
-            fallback_reason = FALLBACK_REASON_NO_RESULTS
-    elif (top_hybrid_score is None or top_hybrid_score < effective_min_score) and not allow_recent_notice_answer:
-        fallback_reason = FALLBACK_REASON_SCORE_BELOW_THRESHOLD
 
     if fallback_reason is not None:
         fallback_answer = _build_retrieval_fallback_answer(
@@ -1940,6 +2042,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         context_parts.append(part)
     
     context_text = "\n\n---\n\n".join(context_parts) if context_parts else "검색된 관련 문서가 없습니다. 일반적인 대화로 응답해주세요."
+    guide_context_prefix = _build_guide_context_prefix(merged, route, entry_year)
+    if guide_context_prefix:
+        context_text = guide_context_prefix + context_text
     context_text = context_text[:MAX_CONTEXT_LENGTH] # 최대 길이 제한 유지 
     # LLM에게 현재 날짜를 전달하여 "오늘", "이번 학기" 등의 표현을 해석하도록 돕습니다.
     current_date = _get_current_kst_string()
@@ -1954,6 +2059,10 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     except Exception as e:
         _log_event(logging.ERROR, "llm_generation_failed", exc_info=True, request_id=request_id)
         answer = "죄송합니다. 답변을 생성하는 도중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+
+    guide_answer_prefix = _build_guide_answer_prefix(merged, route, entry_year)
+    if guide_answer_prefix and not answer.startswith(guide_answer_prefix):
+        answer = guide_answer_prefix + answer
 
     # 후처리: 과도한 볼드체 제거 대신 가독성 유지 (필요 시 최소화)
     # answer = answer.replace("**", "")
