@@ -237,7 +237,6 @@ const HomePage = () => {
     navigate('/auth/in')
   }
 
-  const handleSignup = () => navigate('/auth/up')
   const handleLogout = async () => {
     try {
       await apiFetch('/auth/signout', { method: 'GET' })
@@ -554,9 +553,6 @@ const HomePage = () => {
                             <button className="ghost-btn small" type="button" onClick={handleLogin}>
                                 로그인
                             </button>
-                            <button className="ghost-btn small" type="button" onClick={handleSignup}>
-                                회원가입
-                            </button>
                         </>
                     )}
                 </div>
@@ -598,7 +594,7 @@ const HomePage = () => {
                 <span className="buddy-topbar__badge">{roleLabel}</span>
               </>
             ) : (
-              <span className="buddy-topbar__text buddy-topbar__text--muted">로그인하면 개인화 정보가 표시됩니다</span>
+              <span className="buddy-topbar__text buddy-topbar__text--muted">로그인 기능만 제공 중입니다</span>
             )}
           </div>
           <div className="buddy-topbar__meta buddy-topbar__meta--actions">
@@ -620,9 +616,6 @@ const HomePage = () => {
               <>
                 <button className="ghost-btn small" type="button" onClick={handleLogin}>
                   로그인
-                </button>
-                <button className="ghost-btn small" type="button" onClick={handleSignup}>
-                  회원가입
                 </button>
               </>
             )}
@@ -664,8 +657,8 @@ const HomePage = () => {
                       <p>학사 일정, 장학금, 규정 등 궁금한 내용을 자유롭게 질문하세요.</p>
                     </li>
                     <li>
-                      <strong>로그인 혜택</strong>
-                      <p>로그인하면 대화 내역이 저장되고, 소속 학과에 맞는 맞춤형 답변을 받을 수 있습니다.</p>
+                      <strong>로그인 기능</strong>
+                      <p>로그인하면 대화 내역이 저장되고, 소속 학과에 맞는 맞춤형 답변을 받을 수 있습니다. 회원가입은 현재 비활성화되어 있습니다.</p>
                     </li>
                   </ol>
                 </div>
