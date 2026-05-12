@@ -10,6 +10,7 @@ primary_region = 'nrt'
 
 [env]
   ASPNETCORE_URLS = "http://+:8080"
+  RagServiceTimeoutSeconds = "90"
 
 [http_service]
   internal_port = 8080

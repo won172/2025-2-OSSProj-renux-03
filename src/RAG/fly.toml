@@ -8,19 +8,24 @@ primary_region = 'nrt'
 
 [build]
 
+[env]
+  HF_HOME = "/app/artifacts/huggingface_cache"
+  HUGGINGFACE_HUB_CACHE = "/app/artifacts/huggingface_cache"
+  SENTENCE_TRANSFORMERS_HOME = "/app/artifacts/huggingface_cache"
+
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = 'stop'
+  auto_stop_machines = 'off'
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ['app']
 
 [[vm]]
-  memory = '1gb'
+  memory = '2gb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 1024
+  memory_mb = 2048
 
 [[mounts]]
   source = "rag_data"
