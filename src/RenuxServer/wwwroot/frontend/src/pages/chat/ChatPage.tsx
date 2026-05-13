@@ -116,38 +116,86 @@ const ChatPage = () => {
 
     // 서버는 ChatMessageDto 구조를 기대하므로(아이디/시간 포함) 즉시 요청 보내기 전에 낙관적으로 목록에 추가합니다.
     setMessages((prev) => [...prev, newMessage])
+    
+    // 스트리밍을 위한 빈 답변 메시지 미리 추가
+    const botMessageId = typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `bot-${Date.now()}`
+    const botPlaceholder: ChatPageMessage = {
+      id: botMessageId,
+      chatId,
+      isAsk: false,
+      content: '',
+      createdTime: new Date().toISOString(),
+      sources: []
+    }
+    setMessages((prev) => [...prev, botPlaceholder])
+    
     setInputValue('')
     setIsSending(true)
 
     try {
-      const { id, chatId, content, createdTime } = newMessage
-      await apiFetch('/chat/msg', {
+      const { id, chatId: msgChatId, content, createdTime } = newMessage
+      
+      const response = await fetch(`${(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')}/chat/stream`, {
         method: 'POST',
-        json: {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+        },
+        body: JSON.stringify({
           id,
-          chatId,
+          chatId: msgChatId,
           isAsk: true,
           content,
           createdTime,
-        }, // CreatedTime은 ISO 문자열로 전달
+        }),
+        credentials: 'include',
       })
 
+      if (!response.ok) throw new Error('Streaming failed')
 
-      // 새 답변까지 반영하려면 최신 메시지를 다시 불러옵니다. (추후에는 전용 최신 로딩 API로 최적화 가능)
-      const refreshed = await apiFetch<ChatPageMessage[]>('/chat/load', {
-        method: 'POST',
-        json: { chatId, lastTime: new Date().toISOString() },
-      })
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No reader available')
 
+      const decoder = new TextDecoder()
+      let accumulatedAnswer = ''
 
-      if (Array.isArray(refreshed)) {
-        setMessages(refreshed.reverse())
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          
+          try {
+            const data = JSON.parse(line.substring(6))
+            if (data.type === 'metadata') {
+              setMessages((prev) => 
+                prev.map((msg) => 
+                  msg.id === botMessageId 
+                    ? { ...msg, sources: data.sources, isFallback: data.fallback_triggered, fallbackReason: data.fallback_reason } 
+                    : msg
+                )
+              )
+            } else if (data.type === 'text') {
+              accumulatedAnswer += data.content
+              setMessages((prev) => 
+                prev.map((msg) => 
+                  msg.id === botMessageId ? { ...msg, content: accumulatedAnswer } : msg
+                )
+              )
+            }
+          } catch (e) {
+            console.warn('Failed to parse SSE data', e)
+          }
+        }
       }
     } catch (sendErr) {
       console.error('Failed to send message', sendErr)
       setSendError('메시지를 전송하지 못했습니다. 다시 시도해주세요.')
-      // 요청이 실패하면 낙관적으로 추가했던 메시지를 제거하고 입력값을 복구합니다.
-      setMessages((prev) => prev.filter((msg) => msg.id !== newMessage.id))
+      setMessages((prev) => prev.filter((msg) => msg.id !== newMessage.id && msg.id !== botMessageId))
       setInputValue(trimmed)
     } finally {
       setIsSending(false)

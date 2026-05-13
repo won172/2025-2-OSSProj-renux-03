@@ -226,6 +226,110 @@ static public class ChatRequestApis
             return Results.Ok(applyDto);
         });
 
+        app.MapPost("/stream", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper, ILogger<Program> logger, IConfiguration configuration, IHttpClientFactory httpClientFactory) =>
+        {
+            bool isAuthenticated = context.Request.Cookies.ContainsKey("renux-server-token");
+            string sessionId = askDto.ChatId.ToString();
+            string question = askDto.Content;
+
+            // Authenticated: Save User's question first
+            ChatMessage? ask = null;
+            if (isAuthenticated)
+            {
+                ask = mapper.Map<ChatMessage>(askDto);
+                await db.ChatMessages.AddAsync(ask);
+                await db.SaveChangesAsync();
+            }
+
+            var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
+            var client = httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromMinutes(5); // Streaming needs longer timeout
+
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{ragUrl}/ask/stream")
+            {
+                Content = JsonContent.Create(new { question, sessionId })
+            };
+            request.Headers.TryAddWithoutValidation("X-Request-ID", context.TraceIdentifier);
+
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+            
+            context.Response.ContentType = "text/event-stream";
+            context.Response.Headers.CacheControl = "no-cache";
+            context.Response.Headers.Connection = "keep-alive";
+
+            using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+            var fullAnswer = new System.Text.StringBuilder();
+            List<ChatSourceDto> sources = [];
+            bool fallbackTriggered = false;
+            string? fallbackReason = null;
+
+            while (!reader.EndOfStream)
+            {
+                var line = await reader.ReadLineAsync();
+                if (string.IsNullOrEmpty(line)) continue;
+
+                await context.Response.WriteAsync($"{line}\n");
+                await context.Response.Body.FlushAsync();
+
+                if (line.StartsWith("data: "))
+                {
+                    try
+                    {
+                        var json = line.Substring(6);
+                        var chunk = JsonSerializer.Deserialize<JsonElement>(json);
+                        if (chunk.TryGetProperty("type", out var typeProp))
+                        {
+                            var type = typeProp.GetString();
+                            if (type == "metadata")
+                            {
+                                if (chunk.TryGetProperty("sources", out var sourcesProp))
+                                {
+                                    var ragSources = JsonSerializer.Deserialize<List<RagSource>>(sourcesProp.GetRawText());
+                                    sources = MapSources(ragSources);
+                                }
+                                if (chunk.TryGetProperty("fallback_triggered", out var fbProp))
+                                {
+                                    fallbackTriggered = fbProp.GetBoolean();
+                                }
+                                if (chunk.TryGetProperty("fallback_reason", out var fbrProp))
+                                {
+                                    fallbackReason = fbrProp.GetString();
+                                }
+                            }
+                            else if (type == "text")
+                            {
+                                if (chunk.TryGetProperty("content", out var contentProp))
+                                {
+                                    fullAnswer.Append(contentProp.GetString());
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Failed to parse streaming chunk: {Line}", line);
+                    }
+                }
+            }
+
+            // After stream: Save AI's response if authenticated
+            if (isAuthenticated && ask != null)
+            {
+                ChatMessage reply = new()
+                {
+                    ChatId = ask.ChatId,
+                    Content = fullAnswer.ToString(),
+                    IsAsk = false,
+                    CreatedTime = DateTime.Now.ToUniversalTime(),
+                    SourcesJson = SerializeSources(sources),
+                    IsFallback = fallbackTriggered,
+                    FallbackReason = fallbackReason
+                };
+                await db.ChatMessages.AddAsync(reply);
+                await db.SaveChangesAsync();
+            }
+        });
+
         app.MapPost("/load", async (ServerDbContext db, HttpContext context, LoadChat load) =>
         {
             // For guests, return empty list (no persistence)

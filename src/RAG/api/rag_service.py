@@ -65,6 +65,7 @@ from src.services.answer import format_citations
 from src.services.langchain_chat import (
     append_manual_history,
     generate_langchain_answer,
+    generate_langchain_answer_stream,
 )
 from src.services.query_analysis import QueryAnalysisResult, analyze_query
 from src.models.embedding import get_embedder, encode_texts
@@ -545,17 +546,29 @@ def _analysis_to_meta(result: QueryAnalysisResult | None, *, failed: bool = Fals
 
 def _build_retrieval_queries(raw_query: str, expanded_query: str, analysis: QueryAnalysisMeta) -> List[str]:
     queries: List[str] = []
-    candidates = [raw_query]
+    
+    # 1. 원문은 항상 포함
+    queries.append(raw_query.strip())
+    
+    # 2. 분석 결과가 있으면 분석된 쿼리 추가 (원문과 다를 경우만)
     if analysis.result is not None:
-        candidates.append(analysis.result.normalized_question)
-        candidates.extend(analysis.result.search_queries[:QUERY_ANALYSIS_MAX_QUERIES])
-    candidates.append(expanded_query)
-
-    for candidate in candidates:
-        cleaned = candidate.strip()
-        if cleaned and cleaned not in queries:
-            queries.append(cleaned)
-    return queries
+        norm = analysis.result.normalized_question.strip()
+        if norm and norm not in queries:
+            queries.append(norm)
+            
+        for sq in analysis.result.search_queries[:QUERY_ANALYSIS_MAX_QUERIES]:
+            cleaned = sq.strip()
+            if cleaned and cleaned not in queries:
+                queries.append(cleaned)
+    
+    # 3. 확장 쿼리는 분석 결과가 없을 때만 보조적으로 사용하거나, 
+    # 분석 결과가 있더라도 쿼리 개수가 너무 적을 때만 추가 (최대 3개로 제한)
+    if len(queries) < 3:
+        expanded = expanded_query.strip()
+        if expanded and expanded not in queries:
+            queries.append(expanded)
+            
+    return queries[:3] # 최종적으로 최대 3개만 사용
 
 
 def _merge_routes(analysis: QueryAnalysisMeta, routed: List[str]) -> List[str]:
@@ -695,7 +708,7 @@ async def _retrieve_frames(
             tfidf_vectorizer=vectorizer,
             tfidf_matrix=matrix,
             query=query,
-            top_k=DEFAULT_TOP_K * 3,
+            top_k=DEFAULT_TOP_K * 2,
             alpha=HYBRID_ALPHA,
             where_filter=final_filter,
         )
@@ -1739,6 +1752,240 @@ async def reject_pending(item_id: int):
     finally:
         session.close()
 
+
+@app.post("/ask/stream")
+async def ask_stream(req: AskRequest, request: Request):
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    raw_query = req.question.strip()
+    if not raw_query:
+        raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
+
+    session_id = req.session_id or str(uuid.uuid4())
+
+    async def stream_generator():
+        analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
+        if USE_QUERY_ANALYSIS:
+            analysis_result = await analyze_query(raw_query)
+            analysis_meta = _analysis_to_meta(analysis_result, failed=analysis_result is None)
+
+        # 1. 일반 대화 처리 (검색 불필요한 경우)
+        if (
+            analysis_meta.result is not None
+            and analysis_meta.result.intent == "unknown"
+            and not _has_school_info_terms(raw_query)
+        ):
+            current_date = _get_current_kst_string()
+            context_text = "일반 대화입니다. 학교 자료 검색이 필요한 질문이 아니면 자연스럽고 짧게 답하세요."
+            
+            # 메타데이터 전송 (소스 없음)
+            yield f"data: {json.dumps({'type': 'metadata', 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
+            
+            full_answer = []
+            async for chunk in generate_langchain_answer_stream(
+                question=raw_query,
+                context=context_text,
+                session_id=session_id,
+                current_date=current_date
+            ):
+                full_answer.append(chunk)
+                yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+            
+            # 로깅은 스트림 종료 후 수행 (별도 태스크로 처리하거나 여기서 대략 수행)
+            await run_in_threadpool(
+                _save_rag_evaluation_log,
+                request_id, session_id, raw_query, raw_query, ["unknown"], "".join(full_answer),
+                False, None, False, False, analysis_meta.result.intent,
+                json.dumps(analysis_meta.result.entities, ensure_ascii=False),
+                analysis_meta.result.time_focus,
+                json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
+                analysis_meta.result.needs_clarification, analysis_meta.result.clarification_reason,
+                analysis_meta.used, analysis_meta.failed, None, None, []
+            )
+            return
+
+        # 2. RAG 검색 프로세스
+        query_for_retrieval = raw_query
+        expanded_query = expand_query(query_for_retrieval)
+        retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta)
+        if raw_query not in retrieval_queries:
+            retrieval_queries.insert(0, raw_query)
+        semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
+        
+        user_major = req.major
+        final_where_filter = {}
+        if user_major and user_major != "Default": 
+            final_where_filter["major"] = {"$eq": user_major}
+
+        routed = await route_query(semantic_query)
+        route = _merge_routes(analysis_meta, routed)
+        if _should_append_rules_route(semantic_query, route):
+            route.append("rules")
+        
+        entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
+        date_filter = await run_in_threadpool(extract_date_filter_from_query, semantic_query)
+        date_filter_applied = date_filter is not None
+        date_filter_relaxed = False
+        recent_notice_query = _is_recent_notice_query(semantic_query, route)
+        notice_board_filter = _extract_notice_board_filter(semantic_query, route)
+        retrieval_policy = _resolve_retrieval_policy(semantic_query, route)
+
+        frames, date_filter_eliminated_any, unavailable_datasets = await _retrieve_frames_for_queries(
+            route=route, queries=retrieval_queries, final_where_filter=final_where_filter,
+            notice_board_filter=notice_board_filter, date_filter=date_filter, entry_year=entry_year, request_id=request_id
+        )
+
+        if not frames and date_filter is not None and date_filter.relaxed_start and date_filter.relaxed_end:
+            date_filter_relaxed = True
+            relaxed_filter = QueryDateFilter(
+                start=date_filter.relaxed_start, end=date_filter.relaxed_end,
+                label=f"{date_filter.label}_relaxed", is_relative=date_filter.is_relative
+            )
+            relaxed_frames, _, relaxed_unavailable = await _retrieve_frames_for_queries(
+                route=route, queries=retrieval_queries, final_where_filter=final_where_filter,
+                notice_board_filter=notice_board_filter, date_filter=relaxed_filter, entry_year=entry_year, request_id=request_id
+            )
+            if relaxed_frames:
+                frames = relaxed_frames
+            unavailable_datasets = list(dict.fromkeys(unavailable_datasets + relaxed_unavailable))
+
+        if not frames:
+            merged = pd.DataFrame()
+        else:
+            merged = _merge_query_hits(frames)
+
+        merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query, entry_year=entry_year)
+        merged = merged.head(DEFAULT_TOP_K).reset_index(drop=True)
+
+        # 3. Fallback 체크
+        top_hybrid_score = None
+        if not merged.empty and "hybrid_score" in merged.columns:
+            top_hybrid_score = _clean_response_float(merged["hybrid_score"].max())
+
+        topic_aligned = _has_notice_topic_alignment(merged, semantic_query)
+        min_score = retrieval_policy.min_score
+        
+        fallback_reason = None
+        if merged.empty:
+            if unavailable_datasets and len(unavailable_datasets) == len(route):
+                fallback_reason = FALLBACK_REASON_DATASET_UNAVAILABLE
+            elif date_filter_eliminated_any:
+                fallback_reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
+            else:
+                fallback_reason = FALLBACK_REASON_NO_RESULTS
+
+        if fallback_reason is not None:
+            fallback_answer = _build_retrieval_fallback_answer(
+                route=route, reason=fallback_reason, date_filter_relaxed=date_filter_relaxed,
+                policy_name=retrieval_policy.name, clarification_reason=(
+                    analysis_meta.result.clarification_reason if analysis_meta.result and analysis_meta.result.needs_clarification else None
+                )
+            )
+            yield f"data: {json.dumps({'type': 'metadata', 'sources': [], 'citations': '', 'route': route, 'fallback_triggered': True, 'fallback_reason': fallback_reason}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'text', 'content': fallback_answer}, ensure_ascii=False)}\n\n"
+            
+            await run_in_threadpool(
+                _save_rag_evaluation_log,
+                request_id, session_id, raw_query, expanded_query, route, fallback_answer,
+                True, fallback_reason, date_filter_applied, date_filter_relaxed,
+                None if analysis_meta.result is None else analysis_meta.result.intent,
+                None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
+                None if analysis_meta.result is None else analysis_meta.result.time_focus,
+                None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
+                False if analysis_meta.result is None else analysis_meta.result.needs_clarification,
+                None if analysis_meta.result is None else analysis_meta.result.clarification_reason,
+                analysis_meta.used, analysis_meta.failed, None, top_hybrid_score, []
+            )
+            await run_in_threadpool(append_manual_history, session_id, raw_query, fallback_answer)
+            return
+
+        # 4. 컨텍스트 구성 및 스트리밍 시작
+        context_parts = []
+        for idx, row in merged.iterrows():
+            part = f"문서 {idx+1} [출처: {row.get('source', '알 수 없음')}]:\n"
+            if row.get('title'): part += f"제목: {row.get('title')}\n"
+            if row.get('published_at'): part += f"게시일: {row.get('published_at')}\n"
+            if row.get('url'): part += f"URL: {row.get('url')}\n"
+            part += f"내용:\n{row['chunk_text']}\n"
+            
+            attachments_str = row.get('attachments')
+            if attachments_str and attachments_str.strip():
+                try:
+                    attachments = json.loads(attachments_str)
+                    if isinstance(attachments, list):
+                        links = [f"- [{a['name']}]({a['url']})" for a in attachments if isinstance(a, dict) and 'name' in a and 'url' in a]
+                        if links: part += "\n첨부파일:\n" + "\n".join(links) + "\n"
+                except: pass
+            context_parts.append(part)
+
+        context_text = "\n\n---\n\n".join(context_parts)
+        guide_prefix = _build_guide_context_prefix(merged, route, entry_year)
+        if guide_prefix: context_text = guide_prefix + context_text
+        context_text = context_text[:MAX_CONTEXT_LENGTH]
+        current_date = _get_current_kst_string()
+
+        # 소스 데이터 정리
+        score_cols = {"vector_score", "sparse_score", "hybrid_score", "norm_recency", "final_score"}
+        internal_cols = {"chunk_text", "dataset", "sort_date", "sort_timestamp", "norm_hybrid", "recent_notice_priority", "matched_query_count", "query_match_bonus"} | score_cols
+        sources = [
+            SourceChunk(
+                source=_clean_response_str(row.get("dataset")) or "",
+                metadata={col: _clean_response_value(row.get(col)) for col in row.index if col not in internal_cols},
+                snippet=_clean_response_str(row.get("chunk_text")) or "",
+                chunk_id=_clean_response_str(row.get("chunk_id")),
+                title=_clean_response_str(row.get("title")),
+                url=_clean_response_str(row.get("url")),
+                published_at=_clean_response_str(row.get("published_at")),
+                vector_score=_clean_response_float(row.get("vector_score")),
+                sparse_score=_clean_response_float(row.get("sparse_score")),
+                hybrid_score=_clean_response_float(row.get("hybrid_score")),
+                recency_score=_clean_response_float(row.get("norm_recency")),
+                final_score=_clean_response_float(row.get("final_score")),
+                sort_date=_clean_response_str(row.get("sort_date")),
+            ).dict()
+            for _, row in merged.iterrows()
+        ]
+        
+        citations_raw = await run_in_threadpool(format_citations, merged)
+        citations = re.sub(r'<[^>]+>', '', citations_raw)
+
+        # 메타데이터 먼저 전송
+        yield f"data: {json.dumps({'type': 'metadata', 'sources': sources, 'citations': citations, 'route': route, 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
+
+        # 답변 스트리밍 시작
+        full_answer = []
+        guide_ans_prefix = _build_guide_answer_prefix(merged, route, entry_year)
+        if guide_ans_prefix:
+            full_answer.append(guide_ans_prefix)
+            yield f"data: {json.dumps({'type': 'text', 'content': guide_ans_prefix}, ensure_ascii=False)}\n\n"
+
+        async for chunk in generate_langchain_answer_stream(
+            question=semantic_query,
+            context=context_text,
+            session_id=session_id,
+            current_date=current_date
+        ):
+            full_answer.append(chunk)
+            yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+
+        # 최종 로깅
+        final_answer = "".join(full_answer)
+        await run_in_threadpool(
+            _save_rag_evaluation_log,
+            request_id, session_id, raw_query, expanded_query, route, final_answer,
+            False, None, date_filter_applied, date_filter_relaxed,
+            None if analysis_meta.result is None else analysis_meta.result.intent,
+            None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
+            None if analysis_meta.result is None else analysis_meta.result.time_focus,
+            None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
+            False if analysis_meta.result is None else analysis_meta.result.needs_clarification,
+            None if analysis_meta.result is None else analysis_meta.result.clarification_reason,
+            analysis_meta.used, analysis_meta.failed, 
+            json.dumps(_collect_matched_queries(merged), ensure_ascii=False),
+            top_hybrid_score, 
+            [SourceChunk(**s) for s in sources]
+        )
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
 @app.post("/ask", response_model=AskResponse)
 async def ask(req: AskRequest, request: Request) -> AskResponse:
