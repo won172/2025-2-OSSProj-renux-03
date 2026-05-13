@@ -106,28 +106,48 @@ def _chat_with_ollama(messages: list[dict[str, str]]) -> str:
     return content.strip()
 
 
+import httpx
+import json
+
+async def _chat_with_ollama_stream(messages: list[dict[str, str]]):
+    async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
+        async with client.stream(
+            "POST",
+            f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
+            json={
+                "model": OLLAMA_CHAT_MODEL,
+                "messages": messages,
+                "stream": True,
+                "think": False,
+                "options": {
+                    "temperature": 0.2,
+                },
+            },
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                    content = payload.get("message", {}).get("content")
+                    if content:
+                        yield content
+                    if payload.get("done"):
+                        break
+                except json.JSONDecodeError:
+                    continue
+
 async def generate_langchain_answer(question: str, context: str, session_id: str | None = None, current_date: str = "") -> str:
     """LangChain 메시지 이력을 활용해 답변을 생성합니다."""
-    return await _generate_answer(question=question, context=context, session_id=session_id, current_date=current_date, mode="rag")
-
-
-async def _generate_answer(
-    *,
-    question: str,
-    context: str,
-    session_id: str | None,
-    current_date: str,
-    mode: str,
-) -> str:
-    """대화 이력을 포함해 Ollama로 답변을 생성하고 저장합니다."""
     actual_session_id = session_id or "default_session"
-    logger.info(f"Generating answer for session_id: {actual_session_id}, mode: {mode}")
+    logger.info(f"Generating answer for session_id: {actual_session_id}")
 
     history = _get_session_history(actual_session_id)
     messages: list[dict[str, str]] = [
         {
             "role": "system",
-            "content": _get_system_prompt(mode).format(current_date=current_date),
+            "content": _get_system_prompt("rag").format(current_date=current_date),
         }
     ]
     for message in history.messages:
@@ -140,7 +160,7 @@ async def _generate_answer(
             "content": _build_user_prompt(
                 question=question,
                 context=context or "컨텍스트가 제공되지 않았습니다.",
-                mode=mode,
+                mode="rag",
             ),
         }
     )
@@ -150,6 +170,42 @@ async def _generate_answer(
     history.add_ai_message(answer)
     return answer
 
+async def generate_langchain_answer_stream(question: str, context: str, session_id: str | None = None, current_date: str = ""):
+    """LangChain 메시지 이력을 활용해 답변을 스트리밍으로 생성합니다."""
+    actual_session_id = session_id or "default_session"
+    logger.info(f"Generating streaming answer for session_id: {actual_session_id}")
+
+    history = _get_session_history(actual_session_id)
+    messages: list[dict[str, str]] = [
+        {
+            "role": "system",
+            "content": _get_system_prompt("rag").format(current_date=current_date),
+        }
+    ]
+    for message in history.messages:
+        serialized = _serialize_message(message)
+        if serialized is not None:
+            messages.append(serialized)
+    messages.append(
+        {
+            "role": "user",
+            "content": _build_user_prompt(
+                question=question,
+                context=context or "컨텍스트가 제공되지 않았습니다.",
+                mode="rag",
+            ),
+        }
+    )
+
+    full_answer = []
+    async for chunk in _chat_with_ollama_stream(messages):
+        full_answer.append(chunk)
+        yield chunk
+    
+    answer_text = "".join(full_answer)
+    history.add_user_message(question)
+    history.add_ai_message(answer_text)
+
 
 def append_manual_history(session_id: str | None, question: str, answer: str) -> None:
     actual_session_id = session_id or "default_session"
@@ -157,8 +213,8 @@ def append_manual_history(session_id: str | None, question: str, answer: str) ->
     history.add_user_message(question)
     history.add_ai_message(answer)
 
-
 __all__ = [
     "generate_langchain_answer",
+    "generate_langchain_answer_stream",
     "append_manual_history",
 ]
