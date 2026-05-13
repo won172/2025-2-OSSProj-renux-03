@@ -2,18 +2,29 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from functools import lru_cache
 
+import httpx
 import redis
 import requests
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_redis import RedisChatMessageHistory
 
-from src.config import OLLAMA_BASE_URL, OLLAMA_CHAT_MODEL, OLLAMA_TIMEOUT_SECONDS, REDIS_URL
+from src.config import (
+    OLLAMA_BASE_URL,
+    OLLAMA_CHAT_MODEL,
+    OLLAMA_CONNECT_TIMEOUT_SECONDS,
+    OLLAMA_REQUEST_RETRIES,
+    OLLAMA_TIMEOUT_SECONDS,
+    REDIS_URL,
+)
 
 load_dotenv()
 
@@ -83,21 +94,44 @@ def _serialize_message(message: BaseMessage) -> dict[str, str] | None:
     return {"role": role, "content": content}
 
 
-def _chat_with_ollama(messages: list[dict[str, str]]) -> str:
-    response = requests.post(
-        f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
-        json={
-            "model": OLLAMA_CHAT_MODEL,
-            "messages": messages,
-            "stream": False,
-            "think": False,
-            "options": {
-                "temperature": 0.2,
-            },
-        },
-        timeout=OLLAMA_TIMEOUT_SECONDS,
+def _create_ollama_session() -> requests.Session:
+    session = requests.Session()
+    retries = Retry(
+        total=OLLAMA_REQUEST_RETRIES,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["POST"],
+        raise_on_status=False,
     )
-    response.raise_for_status()
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def _chat_with_ollama(messages: list[dict[str, str]]) -> str:
+    session = _create_ollama_session()
+    try:
+        response = session.post(
+            f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
+            json={
+                "model": OLLAMA_CHAT_MODEL,
+                "messages": messages,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                },
+            },
+            timeout=(OLLAMA_CONNECT_TIMEOUT_SECONDS, OLLAMA_TIMEOUT_SECONDS),
+        )
+        response.raise_for_status()
+    except requests.exceptions.ReadTimeout as exc:
+        logger.error("Ollama request read timed out after %s seconds", OLLAMA_TIMEOUT_SECONDS, exc_info=exc)
+        raise RuntimeError("Ollama request timed out. Please try again later.") from exc
+    except requests.exceptions.RequestException as exc:
+        logger.error("Ollama request failed", exc_info=exc)
+        raise RuntimeError("Ollama request failed. Please check Ollama availability.") from exc
+
     payload = response.json()
     message = payload.get("message", {})
     content = message.get("content")
@@ -106,11 +140,14 @@ def _chat_with_ollama(messages: list[dict[str, str]]) -> str:
     return content.strip()
 
 
-import httpx
-import json
-
 async def _chat_with_ollama_stream(messages: list[dict[str, str]]):
-    async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            connect=OLLAMA_CONNECT_TIMEOUT_SECONDS,
+            read=OLLAMA_TIMEOUT_SECONDS,
+            write=OLLAMA_CONNECT_TIMEOUT_SECONDS,
+        )
+    ) as client:
         async with client.stream(
             "POST",
             f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
@@ -118,7 +155,6 @@ async def _chat_with_ollama_stream(messages: list[dict[str, str]]):
                 "model": OLLAMA_CHAT_MODEL,
                 "messages": messages,
                 "stream": True,
-                "think": False,
                 "options": {
                     "temperature": 0.2,
                 },

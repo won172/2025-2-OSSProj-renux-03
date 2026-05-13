@@ -450,7 +450,7 @@ static public class ChatRequestApis
     {
         string requestId = context.TraceIdentifier;
         var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
-        var timeoutSeconds = configuration.GetValue<int?>("RagServiceTimeoutSeconds") ?? 30;
+        var timeoutSeconds = configuration.GetValue<int?>("RagServiceTimeoutSeconds") ?? 300;
 
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, timeoutCts.Token);

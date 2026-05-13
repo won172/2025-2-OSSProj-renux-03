@@ -36,7 +36,7 @@ services:
             - ConnectionStrings__RenuxServer=${CONNECTIONSTRING}
             - Jwt__Key=${JWT_KEY}
             - RAG_SERVICE_URL=http://rag-service:8000
-            - RagServiceTimeoutSeconds=${RAG_SERVICE_TIMEOUT_SECONDS:-120}
+            - RagServiceTimeoutSeconds=${RAG_SERVICE_TIMEOUT_SECONDS:-300}
         restart: on-failure
  
     rag-service:
@@ -44,8 +44,6 @@ services:
         build:
             context: ../RAG
             dockerfile: Dockerfile
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
         volumes:
             - ../RAG/huggingface_cache:/root/.cache/huggingface
             - ../RAG/artifacts:/app/artifacts
@@ -54,16 +52,36 @@ services:
             - ../RAG/data:/app/data
         depends_on:
             - redis
+            - ollama
         env_file:
             - .env
             - ../RAG/.env
         environment:
             - OPENAI_API_KEY=${OPENAI_API_KEY}
-            - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+            - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
             - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
-            - OLLAMA_TIMEOUT_SECONDS=${OLLAMA_TIMEOUT_SECONDS:-120}
+            - OLLAMA_TIMEOUT_SECONDS=${OLLAMA_TIMEOUT_SECONDS:-300}
             - REDIS_URL=redis://redis:6379/0
         restart: on-failure
+
+    ollama:
+        container_name: renux_ollama
+        image: ollama/ollama:latest
+        ports:
+            - "11434:11434"
+        volumes:
+            - ollama_data:/root/.ollama
+        environment:
+            - NVIDIA_VISIBLE_DEVICES=all
+            - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
+        restart: always
 
     redis:
         container_name: renux_redis_internal
@@ -86,3 +104,4 @@ services:
 volumes:
     postgres_data_test:
     redis_data:
+    ollama_data:
