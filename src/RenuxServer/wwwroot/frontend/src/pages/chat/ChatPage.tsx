@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import rehypeExternalLinks from 'rehype-external-links'
@@ -48,6 +48,7 @@ const ChatPage = () => {
   const [inputValue, setInputValue] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
   const showRagScores = useMemo(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem('renux-user-role') === 'UNIVERSITY_COUNCIL'
@@ -84,6 +85,14 @@ const ChatPage = () => {
 
     loadInitialData()
   }, [chatId, navigate])
+
+  // 언마운트 시 진행 중인 스트림 reader를 취소해 누수를 막는다.
+  useEffect(() => {
+    return () => {
+      readerRef.current?.cancel().catch(() => {})
+      readerRef.current = null
+    }
+  }, [])
 
   const headerTitle = useMemo(() => {
     if (activeChat?.title) return activeChat.title
@@ -155,43 +164,59 @@ const ChatPage = () => {
 
       const reader = response.body?.getReader()
       if (!reader) throw new Error('No reader available')
+      readerRef.current = reader
 
       const decoder = new TextDecoder()
       let accumulatedAnswer = ''
 
+      // SSE 라인 파서. 네트워크 청크가 줄 중간에서 잘려도 토큰이 유실되지 않도록 buffer로 이월한다.
+      const processLine = (rawLine: string) => {
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+        if (!line.startsWith('data: ')) return
+        try {
+          const data = JSON.parse(line.substring(6))
+          if (data.type === 'metadata') {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId
+                  ? { ...msg, sources: data.sources, isFallback: data.fallback_triggered, fallbackReason: data.fallback_reason }
+                  : msg,
+              ),
+            )
+          } else if (data.type === 'text') {
+            accumulatedAnswer += data.content
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId ? { ...msg, content: accumulatedAnswer } : msg,
+              ),
+            )
+          }
+        } catch (e) {
+          console.warn('Failed to parse SSE data', e)
+        }
+      }
+
+      let buffer = ''
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        // 마지막 조각은 아직 완성되지 않았을 수 있으므로 다음 청크로 이월한다.
+        buffer = lines.pop() ?? ''
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          
-          try {
-            const data = JSON.parse(line.substring(6))
-            if (data.type === 'metadata') {
-              setMessages((prev) => 
-                prev.map((msg) => 
-                  msg.id === botMessageId 
-                    ? { ...msg, sources: data.sources, isFallback: data.fallback_triggered, fallbackReason: data.fallback_reason } 
-                    : msg
-                )
-              )
-            } else if (data.type === 'text') {
-              accumulatedAnswer += data.content
-              setMessages((prev) => 
-                prev.map((msg) => 
-                  msg.id === botMessageId ? { ...msg, content: accumulatedAnswer } : msg
-                )
-              )
-            }
-          } catch (e) {
-            console.warn('Failed to parse SSE data', e)
-          }
+          processLine(line)
         }
       }
+
+      // 스트림 종료 후 버퍼에 남은 완성 라인을 처리한다.
+      if (buffer.length > 0) {
+        processLine(buffer)
+      }
+
+      readerRef.current = null
     } catch (sendErr) {
       console.error('Failed to send message', sendErr)
       setSendError('메시지를 전송하지 못했습니다. 다시 시도해주세요.')

@@ -87,7 +87,7 @@
 * **Backend:** ASP.NET Core 9.0 (User Auth, Chat Session, DB Connection)
 * **LLM Server:** FastAPI (RAG Engine)
 * **Database:** PostgreSQL (Data Entity), ChromaDB (Vector Store), Redis (Cache)
-* **AI Model:** Ollama gemma4:e4b (Generation), OpenAI GPT-4o-mini (Query Analysis/Router), KURE-v1 (Embedding)
+* **AI Model:** OpenAI GPT-4o-mini (Generation, 기본) / Ollama 로컬 모델 (Generation, 선택 가능 — `LLM_PROVIDER`로 전환), OpenAI GPT-4o-mini (Query Analysis/Router), KURE-v1 (Embedding)
 
 | 시스템 아키텍처 | 유스케이스 다이어그램 | E-R 다이어그램 |
 | :---: | :---: | :---: |
@@ -108,7 +108,7 @@
 2.  **임베딩:** KURE-v1 모델을 사용하여 텍스트를 고차원 벡터로 변환 및 인덱싱.
 3.  **검색(Retrieval):** LLM Router로 의도 파악 -> Dense(Vector) + Sparse(TF-IDF) 하이브리드 검색. 이때, 사용자 학과 및 질문 내 날짜 정보를 기반으로 필터링을 적용합니다.
 4.  **재순위화(Reranking):** 벡터 점수, 키워드 점수, 최신성 가중치를 결합하여 문서 재정렬.
-5.  **생성(Generation):** 검색된 청크와 제약 조건(출처 표기, 현재 날짜 정보 전달 등)을 프롬프트에 주입하고 Ollama `gemma4:e4b`로 답변을 생성한 뒤, 불필요한 서식을 최소화합니다.
+5.  **생성(Generation):** 검색된 청크와 제약 조건(출처 표기, 현재 날짜 정보 전달 등)을 프롬프트에 주입하고 OpenAI GPT-4o-mini(기본) 또는 로컬 Ollama 모델로 답변을 생성한 뒤, 불필요한 서식을 최소화합니다. 생성 프로바이더는 `LLM_PROVIDER` 환경변수로 전환할 수 있으며, 한쪽 실패 시 반대 프로바이더로 자동 폴백합니다(`LLM_FALLBACK_ENABLED`).
 
 ### 4. 기대효과
 

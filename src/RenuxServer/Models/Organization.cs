@@ -14,7 +14,7 @@ public class Organization
     [Required]
     public bool IsActive { get; set; } = false;
     [Required]
-    public DateTime CreatedTime { get; init; } = DateTime.Now.ToUniversalTime();
+    public DateTime CreatedTime { get; init; } = DateTime.UtcNow;
     [Required]
-    public DateTime UpdatedTime { get; set; } = DateTime.Now.ToUniversalTime();
+    public DateTime UpdatedTime { get; set; } = DateTime.UtcNow;
 }

@@ -16,7 +16,7 @@ public class ChatMessage
     [Required]
     public string Content { get; set; } = null!;
     [Required]
-    public DateTime CreatedTime { get; init; } = DateTime.Now.ToUniversalTime();
+    public DateTime CreatedTime { get; init; } = DateTime.UtcNow;
 
     public string? SourcesJson { get; set; }
 

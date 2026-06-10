@@ -210,6 +210,9 @@ _datasets: Dict[str, DatasetCache] = {}
 FALLBACK_REASON_NO_RESULTS = "no_results"
 FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL = "date_filter_eliminated_all"
 FALLBACK_REASON_DATASET_UNAVAILABLE = "dataset_unavailable"
+FALLBACK_REASON_SCORE_BELOW_THRESHOLD = "score_below_threshold"
+# 학과 필터를 적용하지 않는 sentinel 값들(백엔드는 보통 null을 보내지만 방어적으로 처리).
+_NO_MAJOR_SENTINELS = {"Default", "Unknown"}
 DATASET_REASON_EMPTY_COLLECTION = "empty_collection"
 DATASET_REASON_ARTIFACT_MISSING = "artifact_missing"
 DATASET_REASON_VECTORIZER_MISSING = "vectorizer_missing"
@@ -322,6 +325,9 @@ class AskRequest(BaseModel):
     session_id: str | None = Field(None, description="대화 세션 ID (없으면 기본 세션)", alias="sessionId")
     major: str | None = Field(None, description="사용자 학과") # 새로 추가
 
+    class Config:
+        populate_by_name = True
+
 
 def _dataset_status_message(reason: str, **kwargs) -> str:
     if reason == DATASET_REASON_EMPTY_COLLECTION:
@@ -336,9 +342,6 @@ def _dataset_status_message(reason: str, **kwargs) -> str:
             f"{kwargs.get('artifact_version')} != {kwargs.get('runtime_version')}"
         )
     return "Dataset status is degraded."
-
-    class Config:
-        populate_by_name = True
 
 
 class SubmitRequest(BaseModel):
@@ -1813,7 +1816,8 @@ async def ask_stream(req: AskRequest, request: Request):
         
         user_major = req.major
         final_where_filter = {}
-        if user_major and user_major != "Default": 
+        # 백엔드는 학과 미지정 시 null을 보낸다("Unknown"/"Default"는 보내지 않지만 방어적으로 함께 제외).
+        if user_major and user_major not in _NO_MAJOR_SENTINELS:
             final_where_filter["major"] = {"$eq": user_major}
 
         routed = await route_query(semantic_query)
@@ -1863,7 +1867,15 @@ async def ask_stream(req: AskRequest, request: Request):
 
         topic_aligned = _has_notice_topic_alignment(merged, semantic_query)
         min_score = retrieval_policy.min_score
-        
+        if recent_notice_query and retrieval_policy.allow_recency_override and not topic_aligned:
+            min_score = max(MIN_RETRIEVAL_SCORE, retrieval_policy.min_score)
+        allow_recent_answer = (
+            retrieval_policy.allow_recency_override
+            and recent_notice_query
+            and not merged.empty
+            and topic_aligned
+        )
+
         fallback_reason = None
         if merged.empty:
             if unavailable_datasets and len(unavailable_datasets) == len(route):
@@ -1872,6 +1884,9 @@ async def ask_stream(req: AskRequest, request: Request):
                 fallback_reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
             else:
                 fallback_reason = FALLBACK_REASON_NO_RESULTS
+        # 결과가 있어도 최고 점수가 임계 미만이면 환각 방지를 위해 폴백 처리한다(비스트리밍 경로와 동일).
+        elif top_hybrid_score is not None and not allow_recent_answer and top_hybrid_score < min_score:
+            fallback_reason = FALLBACK_REASON_SCORE_BELOW_THRESHOLD
 
         if fallback_reason is not None:
             fallback_answer = _build_retrieval_fallback_answer(
@@ -1914,7 +1929,8 @@ async def ask_stream(req: AskRequest, request: Request):
                     if isinstance(attachments, list):
                         links = [f"- [{a['name']}]({a['url']})" for a in attachments if isinstance(a, dict) and 'name' in a and 'url' in a]
                         if links: part += "\n첨부파일:\n" + "\n".join(links) + "\n"
-                except: pass
+                except (json.JSONDecodeError, TypeError) as exc:
+                    _log_event(logging.WARNING, "attachment_parse_failed", error=str(exc))
             context_parts.append(part)
 
         context_text = "\n\n---\n\n".join(context_parts)
@@ -2074,7 +2090,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
 
     user_major = req.major
     final_where_filter: Dict = {}
-    if user_major and user_major != "Default": 
+    # 백엔드는 학과 미지정 시 null을 보낸다("Unknown"/"Default"는 보내지 않지만 방어적으로 함께 제외).
+    if user_major and user_major not in _NO_MAJOR_SENTINELS:
         final_where_filter["major"] = {"$eq": user_major}
 
     _log_event(logging.INFO, "ask_filters", request_id=request_id, filters=final_where_filter)
@@ -2161,6 +2178,10 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
             else:
                 reason = FALLBACK_REASON_NO_RESULTS
+        # 결과가 있어도 최고 점수가 임계 미만이면 환각 방지를 위해 폴백 처리한다.
+        # 단, 최신 공지 질의에서 recency override가 허용되고 주제가 일치하면 낮은 점수도 통과시킨다.
+        elif top_score is not None and not allow_recent_answer and top_score < min_score:
+            reason = FALLBACK_REASON_SCORE_BELOW_THRESHOLD
         return top_score, topic_aligned, min_score, reason
 
     top_hybrid_score, notice_topic_aligned, effective_min_score, fallback_reason = _evaluate_fallback(merged)

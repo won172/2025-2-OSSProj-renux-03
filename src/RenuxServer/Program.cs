@@ -108,6 +108,11 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 builder.Services.AddHttpClient();
+
+// CORS is credentialed (cookies), so the origin allowlist must be tight.
+// Production must set CORS_ALLOWED_ORIGINS explicitly (e.g. https://dgudongttok.vercel.app);
+// localhost is only permitted in Development. No wildcard origins.
+var isDevelopment = builder.Environment.IsDevelopment();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("FrontendCors", policy =>
@@ -115,22 +120,20 @@ builder.Services.AddCors(options =>
         policy
             .SetIsOriginAllowed(origin =>
             {
-                if (configuredCorsOrigins.Length > 0)
-                {
-                    return configuredCorsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
-                }
-
-                if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
-                    origin.StartsWith("https://localhost:", StringComparison.OrdinalIgnoreCase) ||
-                    origin.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase) ||
-                    origin.StartsWith("https://127.0.0.1:", StringComparison.OrdinalIgnoreCase))
+                // Explicit allowlist always wins.
+                if (configuredCorsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
                 {
                     return true;
                 }
 
-                if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                // Local development convenience only — never in production.
+                if (isDevelopment &&
+                    (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
+                     origin.StartsWith("https://localhost:", StringComparison.OrdinalIgnoreCase) ||
+                     origin.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase) ||
+                     origin.StartsWith("https://127.0.0.1:", StringComparison.OrdinalIgnoreCase)))
                 {
-                    return uri.Host.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase);
+                    return true;
                 }
 
                 return false;

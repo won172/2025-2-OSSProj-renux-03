@@ -288,27 +288,27 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
         
         # 3. ID 매핑
         raw_df["db_id"] = [obj.id for obj in notice_objs]
-        
+
+        # 4. DB에 남아있는 수동 데이터(manual notices)를 가져와서 raw_df에 합침
+        #    세션이 닫히기 전에 조회해야 하므로 try 블록 내부에서 처리한다.
+        manual_notices = session.query(Notice).filter(Notice.is_manual == 1).all()
+        manual_data = []
+        for n in manual_notices:
+            manual_data.append({
+                "게시판": n.board,
+                "제목": n.title,
+                "카테고리": n.category,
+                "게시일": n.published_date,
+                "상단고정": n.is_fixed,
+                "상세URL": n.detail_url,
+                "본문": n.content,
+                "첨부파일": n.attachments, # JSON string or list?
+                "db_id": n.id
+            })
     finally:
         session.close()
 
-    # 4. 청크 생성 및 저장
-    # DB에 남아있는 수동 데이터(manual notices)를 가져와서 raw_df에 합침
-    manual_notices = session.query(Notice).filter(Notice.is_manual == 1).all()
-    manual_data = []
-    for n in manual_notices:
-        manual_data.append({
-            "게시판": n.board,
-            "제목": n.title,
-            "카테고리": n.category,
-            "게시일": n.published_date,
-            "상단고정": n.is_fixed,
-            "상세URL": n.detail_url,
-            "본문": n.content,
-            "첨부파일": n.attachments, # JSON string or list?
-            "db_id": n.id
-        })
-    
+    # 5. 청크 생성 및 저장
     if manual_data:
         manual_df = pd.DataFrame(manual_data)
         # raw_df에는 db_id가 이미 있음 (3. ID 매핑 단계에서).

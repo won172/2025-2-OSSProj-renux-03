@@ -51,10 +51,25 @@ LLM_ROUTER_DESCRIPTIONS = {
 }
 
 # OpenAI/LLM 기본 설정.
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # 질의분석/라우터용 (항상 OpenAI)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# 답변 생성 프로바이더 선택: "openai" 또는 "ollama".
+# LLM_PROVIDER 로 전환하며, 둘 다 LangChain 채팅 인터페이스(.ainvoke/.astream)를 사용한다.
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+# 생성 실패 시 반대 프로바이더로 자동 폴백할지 여부 (비스트리밍 경로에만 적용).
+LLM_FALLBACK_ENABLED = os.getenv("LLM_FALLBACK_ENABLED", "1") == "1"
+
+# 답변 생성용 OpenAI 모델 설정.
+OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+OPENAI_CHAT_TEMPERATURE = float(os.getenv("OPENAI_CHAT_TEMPERATURE", "0.2"))
+OPENAI_CHAT_TIMEOUT_SECONDS = int(os.getenv("OPENAI_CHAT_TIMEOUT_SECONDS", "60"))
+OPENAI_CHAT_MAX_RETRIES = int(os.getenv("OPENAI_CHAT_MAX_RETRIES", "2"))
+
+# 답변 생성용 로컬(Ollama) 모델 설정.
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "qwen3:4b-instruct-2507-q4_K_M")
+OLLAMA_CHAT_TEMPERATURE = float(os.getenv("OLLAMA_CHAT_TEMPERATURE", "0.2"))
 OLLAMA_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
 USE_QUERY_ANALYSIS = os.getenv("RAG_USE_QUERY_ANALYSIS", "1") == "1"
 QUERY_ANALYSIS_MAX_QUERIES = int(os.getenv("QUERY_ANALYSIS_MAX_QUERIES", "1"))
@@ -64,6 +79,10 @@ MAX_HISTORY_STORE_SIZE = int(os.getenv("MAX_HISTORY_STORE_SIZE", "1000"))
 
 # Redis 대화 기록 백엔드 설정.
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6380/0")
+# 대화 이력 키의 만료 시간(초). 게스트 세션 등이 무한히 쌓여 메모리가 증가하는 것을 막는다.
+# 기본 7일. 0 이하로 설정하면 만료 없이 영구 보관한다.
+_redis_history_ttl_raw = int(os.getenv("REDIS_HISTORY_TTL_SECONDS", str(7 * 24 * 60 * 60)))
+REDIS_HISTORY_TTL_SECONDS = _redis_history_ttl_raw if _redis_history_ttl_raw > 0 else None
 
 # 노트북에서 가져온 입력 데이터 소스 경로.
 DATA_SOURCES: Dict[str, Path] = {
@@ -98,17 +117,26 @@ __all__ = [
     "HYBRID_ALPHA",
     "DEFAULT_TOP_K",
     "MIN_RETRIEVAL_SCORE",
+    "RECENCY_WEIGHT",
     "RECENCY_DECAY_DAYS_BY_DATASET",
     "MAX_CONTEXT_LENGTH",
     "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
     "OPENAI_API_KEY",
+    "LLM_PROVIDER",
+    "LLM_FALLBACK_ENABLED",
+    "OPENAI_CHAT_MODEL",
+    "OPENAI_CHAT_TEMPERATURE",
+    "OPENAI_CHAT_TIMEOUT_SECONDS",
+    "OPENAI_CHAT_MAX_RETRIES",
     "OLLAMA_BASE_URL",
     "OLLAMA_CHAT_MODEL",
+    "OLLAMA_CHAT_TEMPERATURE",
     "OLLAMA_TIMEOUT_SECONDS",
     "USE_QUERY_ANALYSIS",
     "QUERY_ANALYSIS_MAX_QUERIES",
     "MAX_HISTORY_STORE_SIZE",
     "REDIS_URL",
+    "REDIS_HISTORY_TTL_SECONDS",
     "DATA_SOURCES",
 ]

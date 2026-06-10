@@ -95,9 +95,9 @@ static public class AdminProxyApis
             return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "text/csv");
         });
 
-        app.MapPost("/submit", async (HttpRequest request, HttpResponse response) => 
+        app.MapPost("/submit", async (HttpRequest request, HttpResponse response, IHttpClientFactory httpClientFactory) =>
         {
-            using var client = new HttpClient();
+            var client = httpClientFactory.CreateClient();
             using var streamContent = new StreamContent(request.Body);
             if (request.ContentType != null)
             {
@@ -110,18 +110,18 @@ static public class AdminProxyApis
             return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
         });
 
-        app.MapPost("/approve/{id}", async (int id, HttpResponse response) => 
+        app.MapPost("/approve/{id}", async (int id, HttpResponse response, IHttpClientFactory httpClientFactory) =>
         {
-            using var client = new HttpClient();
+            var client = httpClientFactory.CreateClient();
             var proxyRes = await client.PostAsync($"{RagServiceUrl}/admin/approve/{id}", null);
             response.StatusCode = (int)proxyRes.StatusCode;
             var contentStream = await proxyRes.Content.ReadAsStreamAsync();
             return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
         });
 
-         app.MapPost("/reject/{id}", async (int id, HttpResponse response) => 
+         app.MapPost("/reject/{id}", async (int id, HttpResponse response, IHttpClientFactory httpClientFactory) =>
         {
-            using var client = new HttpClient();
+            var client = httpClientFactory.CreateClient();
             var proxyRes = await client.PostAsync($"{RagServiceUrl}/admin/reject/{id}", null);
             response.StatusCode = (int)proxyRes.StatusCode;
             var contentStream = await proxyRes.Content.ReadAsStreamAsync();
