@@ -164,9 +164,14 @@ def looks_like_department_name(text: str) -> bool:
     if any(term in normalized for term in EXCLUDED_DEPARTMENT_TERMS):
         return False
     lowered = normalized.lower()
-    return any(keyword in normalized for keyword in ("학과", "전공", "학부")) or any(
+    if any(keyword in normalized for keyword in ("학과", "전공", "학부")) or any(
         keyword in lowered for keyword in ("department", "major")
-    )
+    ):
+        return True
+    # "국어교육과", "한국음악과"처럼 '학과' 없이 '~과'로 끝나는 학과명 지원
+    # (단, '대학원'·'교육원' 등은 위 EXCLUDED_DEPARTMENT_TERMS에서 이미 걸러짐)
+    cleaned = clean_department_name(normalized)
+    return len(cleaned) >= 3 and cleaned.endswith("과")
 
 
 def looks_like_college_name(text: str) -> bool:

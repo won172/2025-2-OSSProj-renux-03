@@ -66,6 +66,19 @@ const DepartmentAdminPage = () => {
   const [notice, setNotice] = useState<string | null>(null)
   const [errorNotice, setErrorNotice] = useState<string | null>(null)
 
+  // 성공 알림 자동 소거: 3초 후 사라지도록
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(null), 3000)
+    return () => clearTimeout(timer)
+  }, [notice])
+
+  // 선택 항목 변경 시 이전 알림 소거
+  useEffect(() => {
+    setNotice(null)
+    setErrorNotice(null)
+  }, [selectedId])
+
   // Fetch user info to get department
   useEffect(() => {
     const fetchUserInfo = async () => {
@@ -234,20 +247,13 @@ const DepartmentAdminPage = () => {
       })
       
       if (submitResponse.status === 'ok' && submitResponse.id) {
-        // Optimistically add to list (re-fetch will update status properly if needed)
-        const newKnowledgeItem: DepartmentKnowledge = {
-          id: submitResponse.id.toString(),
-          title: `[${contentType === 'knowledge' ? '정보' : contentType === 'event' ? '행사' : '공지'}] ${newTitle}`,
-          content: newContent,
-          status: 'PENDING',
-          createdAt: new Date().toISOString(),
-        };
-        setKnowledgeList((prev) => [newKnowledgeItem, ...prev])
+        // 낙관적 타이틀 불일치 방지: 제출 직후 서버에서 최신 목록을 가져온다
+        await fetchItems()
         setNotice('성공적으로 제출되었습니다. 검수 승인 후 챗봇에 반영됩니다.')
       } else {
         setErrorNotice('제출에 실패했습니다. 응답 형식이 올바르지 않습니다.');
       }
-      
+
       setIsCreating(false)
       setNewTitle('')
       setNewContent('')
@@ -269,7 +275,8 @@ const DepartmentAdminPage = () => {
       setIsLoading(true)
       
       if (!id.startsWith('k-')) {
-         await apiFetch(`/admin/reject/${id}`, { method: 'POST' })
+         // 학과 관리자는 본인 학과 PENDING 요청을 /admin/cancel로 취소(reject는 대학 수준 전용)
+         await apiFetch(`/admin/cancel/${id}`, { method: 'POST' })
       }
 
       // Update status instead of removing
@@ -348,7 +355,7 @@ const DepartmentAdminPage = () => {
             </div>
           </article>
           <article className="admin-card admin-card--compact" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <button className="hero-btn hero-btn--primary" onClick={handleCreateClick} disabled={isLoading}>
+            <button type="button" className="hero-btn hero-btn--primary" onClick={handleCreateClick} disabled={isLoading}>
               + 새 정보 등록하기
             </button>
           </article>
@@ -407,10 +414,11 @@ const DepartmentAdminPage = () => {
                       
                       <form onSubmit={handleSubmit}>
                         <div className="admin-form-field">
-                          <label className="admin-form-label">등록 유형</label>
-                          <select 
-                            className="admin-input" 
-                            value={contentType} 
+                          <label className="admin-form-label" htmlFor="dept-content-type">등록 유형</label>
+                          <select
+                            id="dept-content-type"
+                            className="admin-input"
+                            value={contentType}
                             onChange={(e) => setContentType(e.target.value as 'knowledge' | 'event' | 'announcement')}
                             disabled={isLoading}
                           >
@@ -421,12 +429,13 @@ const DepartmentAdminPage = () => {
                         </div>
 
                         <div className="admin-form-field">
-                          <label className="admin-form-label">
+                          <label className="admin-form-label" htmlFor="dept-title">
                             {contentType === 'knowledge' ? '질문 (Question)' : contentType === 'event' ? '행사명 (Title)' : '제목 (Title)'}
                           </label>
-                          <input 
-                            type="text" 
-                            className="admin-input" 
+                          <input
+                            id="dept-title"
+                            type="text"
+                            className="admin-input"
                             placeholder={contentType === 'knowledge' ? "예: 졸업논문 제출 기한" : "제목을 입력하세요"}
                             value={newTitle}
                             onChange={(e) => setNewTitle(e.target.value)}
@@ -438,9 +447,10 @@ const DepartmentAdminPage = () => {
                         {(contentType === 'event' || contentType === 'announcement') && (
                           <div className="admin-form-field" style={{ display: 'flex', gap: '10px' }}>
                             <div style={{ flex: 1 }}>
-                              <label className="admin-form-label">{contentType === 'event' ? '시작일' : '게시일'}</label>
-                              <input 
-                                type="date" 
+                              <label className="admin-form-label" htmlFor="dept-start-date">{contentType === 'event' ? '시작일' : '게시일'}</label>
+                              <input
+                                id="dept-start-date"
+                                type="date"
                                 className="admin-input"
                                 value={startDate}
                                 onChange={(e) => setStartDate(e.target.value)}
@@ -449,9 +459,10 @@ const DepartmentAdminPage = () => {
                             </div>
                             {contentType === 'event' && (
                               <div style={{ flex: 1 }}>
-                                <label className="admin-form-label">종료일 (선택)</label>
-                                <input 
-                                  type="date" 
+                                <label className="admin-form-label" htmlFor="dept-end-date">종료일 (선택)</label>
+                                <input
+                                  id="dept-end-date"
+                                  type="date"
                                   className="admin-input"
                                   value={endDate}
                                   onChange={(e) => setEndDate(e.target.value)}
@@ -465,9 +476,10 @@ const DepartmentAdminPage = () => {
                         {/* Location for Event */}
                         {contentType === 'event' && (
                           <div className="admin-form-field">
-                            <label className="admin-form-label">장소</label>
-                            <input 
-                              type="text" 
+                            <label className="admin-form-label" htmlFor="dept-location">장소</label>
+                            <input
+                              id="dept-location"
+                              type="text"
                               className="admin-input"
                               placeholder="예: 공학관 101호"
                               value={location}
@@ -480,9 +492,10 @@ const DepartmentAdminPage = () => {
                         {/* Category for Announcement */}
                         {contentType === 'announcement' && (
                           <div className="admin-form-field">
-                            <label className="admin-form-label">카테고리</label>
-                            <input 
-                              type="text" 
+                            <label className="admin-form-label" htmlFor="dept-category">카테고리</label>
+                            <input
+                              id="dept-category"
+                              type="text"
                               className="admin-input"
                               placeholder="예: 학사, 장학, 채용"
                               value={category}
@@ -491,14 +504,15 @@ const DepartmentAdminPage = () => {
                             />
                           </div>
                         )}
-                        
+
                         <div className="admin-form-field">
-                          <label className="admin-form-label">
+                          <label className="admin-form-label" htmlFor="dept-content">
                             {contentType === 'knowledge' ? '답변 (Answer)' : '상세 내용'}
                           </label>
-                          <textarea 
-                            className="admin-textarea" 
-                            rows={10} 
+                          <textarea
+                            id="dept-content"
+                            className="admin-textarea"
+                            rows={10}
                             placeholder="상세 내용을 입력하세요."
                             value={newContent}
                             onChange={(e) => setNewContent(e.target.value)}
@@ -532,7 +546,7 @@ const DepartmentAdminPage = () => {
                         </span>
                         {/* 승인/반려 완료 항목에는 취소 버튼을 노출하지 않는다 — 승인된 항목을 실수로 반려 처리하는 사고 방지 */}
                         {selectedItem.status === 'PENDING' && (
-                          <button className="ghost-btn small ghost-btn--danger" onClick={() => handleDelete(selectedItem.id)} disabled={isLoading}>
+                          <button type="button" className="ghost-btn small ghost-btn--danger" onClick={() => handleDelete(selectedItem.id)} disabled={isLoading}>
                             {isLoading ? '처리 중...' : '요청 취소'}
                           </button>
                         )}

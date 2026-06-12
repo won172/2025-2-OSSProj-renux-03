@@ -15,10 +15,15 @@ def get_client() -> chromadb.PersistentClient:
     return chromadb.PersistentClient(path=str(CHROMA_DIR))
 
 
+# 신규 컬렉션은 cosine 거리로 생성한다(미지정 시 Chroma 기본값은 L2 —
+# 하이브리드 검색의 1-distance 유사도 변환이 cosine을 전제하므로 필수).
+_COLLECTION_METADATA = {"hnsw:space": "cosine"}
+
+
 def get_collection(name: str):
     """기존 컬렉션을 반환하거나 필요하면 새로 만듭니다."""
     client = get_client()
-    return client.get_or_create_collection(name=name)
+    return client.get_or_create_collection(name=name, metadata=_COLLECTION_METADATA)
 
 
 def add_items(
@@ -115,7 +120,7 @@ def reset_collection(name: str) -> None:
         client.delete_collection(name)
     except chromadb.errors.NotFoundError:
         pass
-    client.create_collection(name=name)
+    client.create_collection(name=name, metadata=_COLLECTION_METADATA)
 
 
 __all__ = ["get_client", "get_collection", "add_items", "upsert_items", "delete_items", "get_all_ids", "count_items", "reset_collection"]

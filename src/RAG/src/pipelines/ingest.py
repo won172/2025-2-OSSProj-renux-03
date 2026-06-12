@@ -122,7 +122,11 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
     artifacts.chunk_path = write_path
 
     # 4. TF-IDF 학습 (여전히 전체 데이터 필요)
-    vectorizer, matrix = train_tfidf(key, chunks_df["chunk_text"].tolist())
+    vectorizer, matrix = train_tfidf(
+        key,
+        chunks_df["chunk_text"].tolist(),
+        chunk_ids=chunks_df["chunk_id"].astype(str).tolist(),
+    )
     return chunks_df, vectorizer, matrix
 
 
@@ -143,7 +147,11 @@ def persist_dataset_artifacts_only(key: str, chunks_df: pd.DataFrame) -> Tuple[p
         chunks_df.to_csv(write_path, index=False, encoding="utf-8-sig")
     artifacts.chunk_path = write_path
 
-    vectorizer, matrix = train_tfidf(key, chunks_df["chunk_text"].tolist())
+    vectorizer, matrix = train_tfidf(
+        key,
+        chunks_df["chunk_text"].tolist(),
+        chunk_ids=chunks_df["chunk_id"].astype(str).tolist(),
+    )
     return chunks_df, vectorizer, matrix
 
 
@@ -218,6 +226,9 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
             attachments_str = json.dumps(raw_attachments, ensure_ascii=False)
         else:
             attachments_str = str(raw_attachments)
+            # CSV 결측(NaN)이 "nan" 문자열이 되어 다운스트림 json.loads를 실패시키는 것 방지
+            if attachments_str.strip().lower() in ("nan", "none", ""):
+                attachments_str = "[]"
 
         docs.append(
             {
@@ -471,6 +482,8 @@ def ingest_rules() -> Tuple[pd.DataFrame, object, object]:
         
     chunks_df = build_rule_chunks(df)
     _save_chunks_to_sqlite(chunks_df, "rules")
+    # 규정 파일이 삭제/개정되면 옛 doc_id 청크가 고아로 남으므로 전체 리셋 후 재적재
+    reset_collection(DATASET_ARTIFACTS["rules"].collection)
     return _persist_chunks("rules", DATASET_ARTIFACTS["rules"].collection, chunks_df)
 
 
@@ -657,10 +670,12 @@ def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
             }
         )
 
+    # 교과 설명이 비정상적으로 긴 경우 단일 거대 청크가 임베딩 품질을 해치므로
+    # 일반 청크의 2배 크기로 상한을 둔다(대부분의 교과목은 한 청크에 그대로 들어감).
     chunks = to_chunks(
         docs,
-        chunk_size=None, 
-        chunk_overlap=0,
+        chunk_size=CHUNK_SIZE * 2,
+        chunk_overlap=CHUNK_OVERLAP,
         include_title=True,
     )
     chunks_df = pd.DataFrame(chunks)
@@ -784,6 +799,9 @@ def ingest_courses() -> Tuple[pd.DataFrame, object, object]:
         
     chunks_df = build_course_chunks(combined)
     _save_chunks_to_sqlite(chunks_df, "courses")
+    # 교과 doc_id는 내용 기반이라 텍스트가 바뀌면 새 ID가 생긴다 —
+    # 컬렉션을 리셋하지 않으면 옛 청크가 고아로 남아 검색을 오염시킴(staff/schedule과 동일 패턴).
+    reset_collection(DATASET_ARTIFACTS["courses"].collection)
     return _persist_chunks("courses", DATASET_ARTIFACTS["courses"].collection, chunks_df)
 
 
@@ -794,23 +812,30 @@ def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
     exclude_cols = {"조직(트리)", "db_id", "raw_data"}
     
     for _, row in df.iterrows():
-        # row는 [조직(트리), Data_0, Data_1, ...] 형태
-        
+        # row는 명명 컬럼([조직(트리), 성명, 직위, 담당업무, 전화번호]) 또는
+        # 구버전([조직(트리), Data_0, Data_1, ...]) 형태 모두 지원
+
         # 1. 조직(트리) 정보
         dept = row.get("조직(트리)", "")
-        
+
         # 2. 나머지 데이터
         info_parts = []
         phone_number = ""
-        
+
+        # 명명 컬럼이 있으면 전화번호는 해당 컬럼을 우선 사용("770-2773" 같은 내선형 포함)
+        if "전화번호" in df.columns:
+            phone_number = str(row.get("전화번호", "")).strip()
+            if phone_number.lower() == "nan":
+                phone_number = ""
+
         for col in df.columns:
-            if col in exclude_cols or col.startswith("Unnamed"): continue
+            if col in exclude_cols or col == "전화번호" or col.startswith("Unnamed"): continue
             val = str(row.get(col, "")).strip()
             if not val or val.lower() == "nan":
                 continue
-            
-            # 전화번호 감지 (간단한 패턴)
-            if re.match(r'^\d{2,3}[-.]?\d{3,4}[-.]?\d{4}$', val):
+
+            # 전화번호 감지 (간단한 패턴 — 내선형 'NNN-NNNN'도 인식)
+            if not phone_number and re.match(r'^\d{2,4}[-.]?\d{3,4}([-.]?\d{4})?$', val):
                 phone_number = val
             else:
                 info_parts.append(val)

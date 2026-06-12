@@ -7,7 +7,13 @@ from typing import Iterable, List
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from src.config import EMBED_BATCH_SIZE, EMBED_DEVICE, EMBED_MODEL_NAME
+from src.config import (
+    EMBED_BATCH_SIZE,
+    EMBED_DEVICE,
+    EMBED_MODEL_NAME,
+    EMBED_PASSAGE_PREFIX,
+    EMBED_QUERY_PREFIX,
+)
 
 
 @lru_cache(maxsize=1)
@@ -21,11 +27,22 @@ def get_embedder() -> SentenceTransformer:
     return model
 
 
+def _apply_prefix(texts: Iterable[str], prefix: str) -> List[str]:
+    items = [t if isinstance(t, str) else str(t) for t in texts]
+    if not prefix:
+        return items
+    return [f"{prefix}{t}" for t in items]
+
+
 def encode_texts(texts: Iterable[str], normalize: bool = True) -> np.ndarray:
-    """프로젝트 기본 설정으로 텍스트 목록을 밀집 벡터로 변환합니다."""
+    """문서(passage) 텍스트 목록을 밀집 벡터로 변환합니다.
+
+    E5 계열처럼 문서 프리픽스를 요구하는 모델은 EMBED_PASSAGE_PREFIX로 지원.
+    KURE-v1/BGE-M3(기본 모델)는 프리픽스가 비어 있어 기존과 동일하게 동작한다.
+    """
     embedder = get_embedder()
     vectors = embedder.encode(
-        list(texts),
+        _apply_prefix(texts, EMBED_PASSAGE_PREFIX),
         batch_size=EMBED_BATCH_SIZE,
         convert_to_numpy=True,
         normalize_embeddings=normalize,
@@ -34,4 +51,17 @@ def encode_texts(texts: Iterable[str], normalize: bool = True) -> np.ndarray:
     return vectors
 
 
-__all__ = ["get_embedder", "encode_texts"]
+def encode_queries(texts: Iterable[str], normalize: bool = True) -> np.ndarray:
+    """검색 질의 텍스트 목록을 밀집 벡터로 변환합니다(질의 프리픽스 적용)."""
+    embedder = get_embedder()
+    vectors = embedder.encode(
+        _apply_prefix(texts, EMBED_QUERY_PREFIX),
+        batch_size=EMBED_BATCH_SIZE,
+        convert_to_numpy=True,
+        normalize_embeddings=normalize,
+        show_progress_bar=False,
+    )
+    return vectors
+
+
+__all__ = ["get_embedder", "encode_texts", "encode_queries"]

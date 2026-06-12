@@ -6,6 +6,7 @@ import logging
 import math
 import re
 import sys
+import threading
 import time
 import uuid
 import json
@@ -32,8 +33,12 @@ from src.config import (
     MAX_CONTEXT_LENGTH,
     MIN_RETRIEVAL_SCORE,
     QUERY_ANALYSIS_MAX_QUERIES,
+    RAG_DECOMPOSE_ENABLED,
+    RAG_MAX_SUBQUERIES,
     RECENCY_DECAY_DAYS_BY_DATASET,
+    PARENT_CONTEXT_ENABLED,
     RECENCY_WEIGHT,
+    RERANKER_CANDIDATES,
     USE_QUERY_ANALYSIS,
     VECTORIZER_DIR,
 )
@@ -53,27 +58,30 @@ from src.database import (
 )
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
+    build_notice_chunks,
     ingest_courses,
     ingest_notices,
     ingest_rules,
     ingest_schedule,
     ingest_staff, # 추가
 )
-from src.search.hybrid import load_tfidf, hybrid_search_with_meta
+from src.search.hybrid import load_tfidf_with_ids, hybrid_search_with_meta
 from src.search.hybrid import read_tfidf_metadata
 from src.services.answer import format_citations
 from src.services.langchain_chat import (
     append_manual_history,
     generate_langchain_answer,
     generate_langchain_answer_stream,
+    get_recent_history_text,
 )
 from src.services.query_analysis import QueryAnalysisResult, analyze_query
 from src.models.embedding import get_embedder, encode_texts
 from src.services.router import route_query
 from src.utils.date_parser import QueryDateFilter, extract_date_filter_from_query
 from src.utils.query_expansion import expand_query
+from src.utils.dept_college import college_grad_queries, personalized_grad_queries, user_scope_label
 from src.utils.preprocess import make_doc_id
-from src.vectorstore.chroma_client import count_items, upsert_items
+from src.vectorstore.chroma_client import count_items, upsert_items, delete_items
 
 app = FastAPI(
     title="동똑이",
@@ -189,6 +197,7 @@ class DatasetCache:
     chunk_path: Path
     chunk_mtime: float
     tfidf_mtime: float
+    tfidf_chunk_ids: list | None = None
 
 
 @dataclass(frozen=True)
@@ -207,6 +216,8 @@ class QueryAnalysisMeta:
 
 
 _datasets: Dict[str, DatasetCache] = {}
+# admin 리로드(del/재로드)와 검색 스레드의 _ensure_dataset 경합 방지용 락
+_datasets_lock = threading.Lock()
 FALLBACK_REASON_NO_RESULTS = "no_results"
 FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL = "date_filter_eliminated_all"
 FALLBACK_REASON_DATASET_UNAVAILABLE = "dataset_unavailable"
@@ -547,31 +558,78 @@ def _analysis_to_meta(result: QueryAnalysisResult | None, *, failed: bool = Fals
     return QueryAnalysisMeta(result=result, used=True, failed=False)
 
 
-def _build_retrieval_queries(raw_query: str, expanded_query: str, analysis: QueryAnalysisMeta) -> List[str]:
+def _is_compound_analysis(analysis: QueryAnalysisMeta) -> bool:
+    """질의 분해가 활성화되어 있고 분석이 복합 질문으로 판단했는지."""
+    return bool(
+        RAG_DECOMPOSE_ENABLED
+        and analysis.result is not None
+        and analysis.result.is_compound
+        and analysis.result.sub_queries
+    )
+
+
+def _user_profile_prefix(user_major: str | None) -> str:
+    """로그인 사용자의 소속 학과를 컨텍스트 상단에 명시해, 학과를 안 밝힌 질문도
+    본인 소속 기준으로 답하도록 유도한다(개인 맞춤형). 학과 미상이면 빈 문자열."""
+    major = user_major if user_major and user_major not in _NO_MAJOR_SENTINELS else None
+    if not major:
+        return ""
+    label = user_scope_label(major)
+    return (
+        f"[질문자 정보] 소속 학과: {label}. "
+        "질문에 학과·단과대를 따로 밝히지 않았다면 이 소속을 기준으로 답하세요. "
+        "단, 질문에 다른 학과·단과대가 명시되어 있으면 그쪽 기준을 따르세요.\n\n"
+    )
+
+
+def _build_retrieval_queries(
+    raw_query: str, expanded_query: str, analysis: QueryAnalysisMeta, user_major: str | None = None
+) -> List[str]:
     queries: List[str] = []
-    
+
     # 1. 원문은 항상 포함
     queries.append(raw_query.strip())
-    
+
     # 2. 분석 결과가 있으면 분석된 쿼리 추가 (원문과 다를 경우만)
     if analysis.result is not None:
         norm = analysis.result.normalized_question.strip()
         if norm and norm not in queries:
             queries.append(norm)
-            
+
         for sq in analysis.result.search_queries[:QUERY_ANALYSIS_MAX_QUERIES]:
             cleaned = sq.strip()
             if cleaned and cleaned not in queries:
                 queries.append(cleaned)
-    
-    # 3. 확장 쿼리는 분석 결과가 없을 때만 보조적으로 사용하거나, 
-    # 분석 결과가 있더라도 쿼리 개수가 너무 적을 때만 추가 (최대 3개로 제한)
+
+    # 2-1. 복합 질문이면 측면별 분해 서브쿼리를 추가한다. 각 서브쿼리는 route의 데이터셋들과
+    #      교차 검색되며(merge가 점수로 정리), 단순 질문은 이 경로를 타지 않아 영향이 없다.
+    compound = _is_compound_analysis(analysis)
+    if compound:
+        for sub in analysis.result.sub_queries:
+            cleaned = sub.query.strip()
+            if cleaned and cleaned not in queries:
+                queries.append(cleaned)
+
+    # 3. 확장 쿼리는 분석 결과가 없을 때나 쿼리가 너무 적을 때만 보조적으로 추가한다.
     if len(queries) < 3:
         expanded = expanded_query.strip()
         if expanded and expanded not in queries:
             queries.append(expanded)
-            
-    return queries[:3] # 최종적으로 최대 3개만 사용
+
+    # 단순 질문은 종전대로 최대 3개, 복합 질문은 분해 서브쿼리를 담을 수 있게 상한을 넓힌다.
+    cap = (2 + RAG_MAX_SUBQUERIES) if compound else 3
+    result = queries[:cap]
+
+    # 학과명으로 졸업 요건을 물으면 소속 단과대 기준 검색어를 보강한다(예: 통계학과 → 이과대학).
+    # 졸업기준 자료가 단과대 단위라 학과명만으로는 매칭이 약하기 때문. cap과 무관하게 항상 포함.
+    extra_queries = list(college_grad_queries(raw_query))
+    # 로그인 사용자가 학과를 안 밝히고 졸업요건을 물어도 본인 학과 기준 자료가 잡히도록 보강.
+    valid_major = user_major if user_major and user_major not in _NO_MAJOR_SENTINELS else None
+    extra_queries.extend(personalized_grad_queries(raw_query, valid_major))
+    for cq in extra_queries:
+        if cq not in result:
+            result.append(cq)
+    return result
 
 
 def _merge_routes(analysis: QueryAnalysisMeta, routed: List[str]) -> List[str]:
@@ -581,6 +639,12 @@ def _merge_routes(analysis: QueryAnalysisMeta, routed: List[str]) -> List[str]:
     for route_name in routed:
         if route_name not in merged:
             merged.append(route_name)
+    # 복합 질문이면 분해 서브쿼리가 가리키는 데이터셋을 합집합으로 더해, 요건·과목·일정·연락처가
+    # 한 답변에 융합되도록 한다(예: 졸업 준비 → rules+courses+schedule+staff).
+    if _is_compound_analysis(analysis):
+        for dataset in analysis.result.decomposed_datasets:
+            if dataset not in merged:
+                merged.append(dataset)
     return merged or ["notices"]
 
 
@@ -669,6 +733,71 @@ def _apply_date_filter(hits: pd.DataFrame, dataset: str, date_filter: QueryDateF
     return filtered, was_eliminated
 
 
+def _expand_chunk_with_neighbors(row: pd.Series) -> str:
+    """검색된 청크에 같은 문서의 앞뒤 이웃 청크를 결합해 반환합니다 (parent-document 확장).
+
+    검색은 작은 청크(정밀)로 하되 생성 근거는 더 넓게 제공해, 절차/기간 안내가
+    청크 경계에서 잘려 LLM이 불완전한 근거로 답하는 문제를 줄인다.
+    캐시된 chunks_df를 사용하므로 추가 I/O 비용이 없다. 실패 시 원본 청크 그대로.
+    """
+    chunk_text = str(row.get("chunk_text", ""))
+    if not PARENT_CONTEXT_ENABLED:
+        return chunk_text
+    dataset = row.get("dataset")
+    doc_id = row.get("doc_id")
+    position = row.get("position")
+    if not dataset or doc_id is None or position is None or pd.isna(position):
+        return chunk_text
+
+    cache = _datasets.get(str(dataset))
+    if cache is None or cache.chunks.empty:
+        return chunk_text
+    df = cache.chunks
+    if "doc_id" not in df.columns or "position" not in df.columns:
+        return chunk_text
+
+    try:
+        pos = int(float(position))
+        siblings = df[df["doc_id"].astype(str) == str(doc_id)]
+        if len(siblings) <= 1:
+            return chunk_text
+        positions = siblings["position"].astype(float).astype(int)
+        window = siblings[positions.isin([pos - 1, pos, pos + 1])].copy()
+        window["_pos"] = window["position"].astype(float).astype(int)
+        window.sort_values("_pos", inplace=True)
+
+        parts: List[str] = []
+        for _, sib in window.iterrows():
+            text = str(sib.get("chunk_text", "")).strip()
+            # 이웃 청크의 "[제목]" prefix는 중복이므로 제거(본문만 이어 붙임)
+            if sib["_pos"] != pos and text.startswith("[") and "]\n\n" in text:
+                text = text.split("]\n\n", 1)[1].strip()
+            if text:
+                parts.append(text)
+        return "\n".join(parts) if parts else chunk_text
+    except Exception:  # noqa: BLE001 — 확장 실패는 원본 청크로 무해하게 폴백
+        return chunk_text
+
+
+def _build_context_text(context_parts: List[str], limit: int, prefix: str = "") -> str:
+    """문서 경계를 존중하며 컨텍스트를 limit 이내로 구성합니다.
+
+    기존의 단순 슬라이싱(`text[:limit]`)은 마지막 문서를 중간에서 잘라
+    LLM에 불완전한 근거를 제공했음. 한도를 넘기는 문서는 통째로 제외하되,
+    첫 문서만은 (그것만으로 한도를 넘더라도) 포함 후 절단한다.
+    """
+    sep = "\n\n---\n\n"
+    included: List[str] = []
+    used = len(prefix)
+    for part in context_parts:
+        extra = len(part) + (len(sep) if included else 0)
+        if included and used + extra > limit:
+            break
+        included.append(part)
+        used += extra
+    return (prefix + sep.join(included))[:limit]
+
+
 async def _retrieve_frames(
     *,
     route: List[str],
@@ -685,7 +814,7 @@ async def _retrieve_frames(
 
     for dataset in route:
         try:
-            chunks_df, vectorizer, matrix = await run_in_threadpool(_ensure_dataset, dataset)
+            chunks_df, vectorizer, matrix, tfidf_chunk_ids = await run_in_threadpool(_ensure_dataset, dataset)
         except (KeyError, FileNotFoundError, ValueError) as exc:
             unavailable_datasets.append(dataset)
             _log_event(
@@ -714,6 +843,7 @@ async def _retrieve_frames(
             top_k=DEFAULT_TOP_K * 2,
             alpha=HYBRID_ALPHA,
             where_filter=final_filter,
+            tfidf_chunk_ids=tfidf_chunk_ids,
         )
         hits = await run_in_threadpool(search_func)
         hits, eliminated = _apply_date_filter(hits, dataset, date_filter)
@@ -902,8 +1032,38 @@ def _prepare_merged_results(
         )
     else:
         merged.sort_values(by=["matched_query_count", "final_score", "hybrid_score"], ascending=[False, False, False], inplace=True)
+        # 날짜 우선 정렬(recent_notice) 분기는 의도된 시간순 배치라 리랭커를 적용하지 않는다.
+        merged = _apply_cross_encoder_rerank(merged, query)
 
     return merged
+
+
+def _apply_cross_encoder_rerank(merged: pd.DataFrame, query: str) -> pd.DataFrame:
+    """상위 후보를 cross-encoder로 정밀 재정렬합니다(RERANKER_ENABLED=1일 때만).
+
+    hybrid_score는 변경하지 않으므로 폴백 임계(MIN_RETRIEVAL_SCORE) 판정에는 영향 없음.
+    recency 가중은 유지: rerank 점수와 norm_recency를 기존 비율로 재혼합한다.
+    """
+    from src.services.reranker import is_reranker_enabled, rerank_scores
+
+    if not is_reranker_enabled() or merged.empty or len(merged) < 2:
+        return merged
+
+    head_n = min(RERANKER_CANDIDATES, len(merged))
+    top = merged.head(head_n).copy()
+    scores = rerank_scores(query, top["chunk_text"].astype(str).tolist())
+    if scores is None or len(scores) != len(top):
+        return merged
+
+    top["rerank_raw"] = scores
+    lo, hi = min(scores), max(scores)
+    top["rerank_norm"] = (top["rerank_raw"] - lo) / (hi - lo) if hi > lo else 1.0
+    recency = top["norm_recency"] if "norm_recency" in top.columns else 0.0
+    top["final_score"] = (1 - RECENCY_WEIGHT) * top["rerank_norm"] + RECENCY_WEIGHT * recency
+    top.sort_values(by=["final_score", "hybrid_score"], ascending=[False, False], inplace=True)
+
+    rest = merged.iloc[head_n:]
+    return pd.concat([top, rest], ignore_index=True)
 
 
 def _get_latest_document_published_at(cache: DatasetCache | None) -> str | None:
@@ -1100,7 +1260,12 @@ def _build_notices_ingestion_status(session) -> dict:
     }
 
 
-def _ensure_dataset(key: str) -> Tuple[pd.DataFrame, object, object]:
+def _ensure_dataset(key: str) -> Tuple[pd.DataFrame, object, object, list | None]:
+    with _datasets_lock:
+        return _ensure_dataset_locked(key)
+
+
+def _ensure_dataset_locked(key: str) -> Tuple[pd.DataFrame, object, object, list | None]:
     artifacts = DATASET_ARTIFACTS.get(key)
     if artifacts is None:
         raise KeyError(f"Unsupported dataset '{key}'")
@@ -1118,8 +1283,9 @@ def _ensure_dataset(key: str) -> Tuple[pd.DataFrame, object, object]:
 
     cache = _datasets.get(key)
     if cache and cache.chunk_path == chunk_path and cache.chunk_mtime == chunk_mtime and cache.tfidf_mtime == vectorizer_mtime:
-        return cache.chunks, cache.vectorizer, cache.matrix
+        return cache.chunks, cache.vectorizer, cache.matrix, cache.tfidf_chunk_ids
 
+    tfidf_chunk_ids: list | None = None
     try:
         if chunk_path.exists() and vectorizer_path.exists():
             if chunk_path.suffix == ".csv":
@@ -1138,14 +1304,17 @@ def _ensure_dataset(key: str) -> Tuple[pd.DataFrame, object, object]:
                 )
             elif tfidf_metadata.get("is_legacy"):
                 _log_event(logging.INFO, "tfidf_legacy_artifact_loaded", dataset=key)
-            vectorizer, matrix = load_tfidf(key)
+            vectorizer, matrix, tfidf_chunk_ids = load_tfidf_with_ids(key)
         else:
             chunks_df, vectorizer, matrix = _DATASET_LOADERS[key]()
+            # 방금 학습된 TF-IDF는 chunks_df 순서와 동일
+            tfidf_chunk_ids = chunks_df["chunk_id"].astype(str).tolist() if not chunks_df.empty else None
             chunk_path = DATASET_ARTIFACTS[key].chunk_path
             chunk_mtime = chunk_path.stat().st_mtime if chunk_path.exists() else -1.0
             vectorizer_mtime = (VECTORIZER_DIR / f"{key}_tfidf.pkl").stat().st_mtime if (VECTORIZER_DIR / f"{key}_tfidf.pkl").exists() else -1.0
     except FileNotFoundError:
         chunks_df, vectorizer, matrix = _DATASET_LOADERS[key]()
+        tfidf_chunk_ids = chunks_df["chunk_id"].astype(str).tolist() if not chunks_df.empty else None
         chunk_path = DATASET_ARTIFACTS[key].chunk_path
         chunk_mtime = chunk_path.stat().st_mtime if chunk_path.exists() else -1.0
         vectorizer_path = VECTORIZER_DIR / f"{key}_tfidf.pkl"
@@ -1158,8 +1327,9 @@ def _ensure_dataset(key: str) -> Tuple[pd.DataFrame, object, object]:
         chunk_path=chunk_path,
         chunk_mtime=chunk_mtime,
         tfidf_mtime=vectorizer_mtime,
+        tfidf_chunk_ids=tfidf_chunk_ids,
     )
-    return chunks_df, vectorizer, matrix
+    return chunks_df, vectorizer, matrix, tfidf_chunk_ids
 
 
 def _add_to_dataset_cache(key: str, doc_id: str, text: str, metadata: Dict) -> None:
@@ -1190,6 +1360,8 @@ def _add_to_dataset_cache(key: str, doc_id: str, text: str, metadata: Dict) -> N
     # 신규 단어는 반영되지 않지만, 전체 리로드보다 월등히 빠름
     new_vec = cache.vectorizer.transform([text])
     cache.matrix = vstack([cache.matrix, new_vec])
+    if cache.tfidf_chunk_ids is not None:
+        cache.tfidf_chunk_ids.append(str(doc_id))
     
     logging.info(f"⚡ Incremental update for '{key}': Added 1 item. New size: {len(cache.chunks)}")
 
@@ -1234,12 +1406,62 @@ def bootstrap_artifacts() -> None:
 
 
 
+# 제출 가능한 source_type과 각 타입의 필수(비공백) 필드
+_SUBMIT_REQUIRED_FIELDS: Dict[str, List[str]] = {
+    "custom_knowledge": ["question", "answer"],
+    "event": ["title", "start_date"],
+    "announcement": ["title", "content"],
+}
+
+
+def _extract_submitter_department(source_type: str, data: dict) -> str:
+    """제출 payload에서 학과명을 일관되게 추출한다.
+
+    지식(custom_knowledge)은 `category`, 행사/공지는 `department`에 학과명이 담겨 온다
+    (프론트 DepartmentAdminPage 및 C# A9 확인). 키가 비어 있으면 다른 키로 폴백한다.
+    """
+    if source_type == "custom_knowledge":
+        candidates = [data.get("category"), data.get("department")]
+    else:
+        candidates = [data.get("department"), data.get("category")]
+    for value in candidates:
+        if value and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
 @app.post("/admin/submit")
 async def submit_pending(req: SubmitRequest):
+    # K8: source_type 화이트리스트 + data JSON/필수 필드 검증 (fail-fast)
+    source_type = (req.source_type or "").strip()
+    if source_type not in _SUBMIT_REQUIRED_FIELDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"지원하지 않는 source_type입니다: '{source_type}'",
+        )
+
+    try:
+        parsed = json.loads(req.data)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"data가 유효한 JSON이 아닙니다: {exc}")
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="data는 JSON 객체여야 합니다.")
+
+    missing = [
+        field
+        for field in _SUBMIT_REQUIRED_FIELDS[source_type]
+        if not str(parsed.get(field, "")).strip()
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"필수 항목이 비어 있습니다: {', '.join(missing)}",
+        )
+
     session = SessionLocal()
     try:
         item = PendingItem(
-            source_type=req.source_type,
+            source_type=source_type,
             data=req.data,
             status="pending"
         )
@@ -1560,185 +1782,174 @@ async def rag_admin_status():
 
 
 
+def _build_notice_from_pending(source_type: str, data: dict) -> Notice | None:
+    """제출 payload를 크롤 공지와 동일한 한글 컬럼 의미의 Notice로 변환한다.
+
+    board는 source_type별 고정값으로 통일하고, 학과명은 별도로 보존하지 않고
+    content/title에 이미 포함되도록 한다(K5). detail_url은 호출자가 doc_id 확정 후 채운다(K7).
+    """
+    department = _extract_submitter_department(source_type, data)
+
+    if source_type == "custom_knowledge":
+        content = data.get("answer") or ""
+        if department:
+            content = f"{content}\n\n주관: {department}".strip()
+        return Notice(
+            board="학과지식",
+            title=data.get("question"),
+            category="FAQ",
+            published_date=datetime.now().strftime("%Y-%m-%d"),
+            content=content,
+            is_manual=1,
+        )
+
+    if source_type == "event":
+        content_parts = []
+        if data.get("description"):
+            content_parts.append(data.get("description"))
+        date_str = f"일시: {data.get('start_date')}"
+        if data.get("end_date") and data.get("end_date") != data.get("start_date"):
+            date_str += f" ~ {data.get('end_date')}"
+        content_parts.append(date_str)
+        if data.get("location"):
+            content_parts.append(f"장소: {data.get('location')}")
+        if department:
+            content_parts.append(f"주관: {department}")
+        return Notice(
+            board="학과행사",
+            title=data.get("title"),
+            category="행사",
+            published_date=data.get("start_date"),
+            content="\n\n".join(content_parts),
+            is_manual=1,
+        )
+
+    if source_type == "announcement":
+        content = data.get("content") or ""
+        if department:
+            content = f"{content}\n\n주관: {department}".strip()
+        return Notice(
+            board="학과공지",
+            title=data.get("title"),
+            category=data.get("category") or "일반",
+            published_date=data.get("date"),
+            content=content,
+            is_manual=1,
+        )
+
+    return None
+
+
+def _notice_to_ingest_frame(notice: Notice) -> pd.DataFrame:
+    """단일 Notice를 ingest의 build_notice_chunks가 기대하는 한글 컬럼 프레임으로 만든다.
+
+    이렇게 해야 크롤 공지와 동일한 doc_id/chunk_id/prefix/clean 규칙을 그대로 탄다(K1/K6).
+    """
+    return pd.DataFrame([
+        {
+            "게시판": notice.board or "",
+            "제목": notice.title or "",
+            "카테고리": notice.category or "",
+            "게시일": notice.published_date or "",
+            "상단고정": notice.is_fixed or "",
+            "상세URL": notice.detail_url or "",
+            "본문": notice.content or "",
+            "첨부파일": notice.attachments or "[]",
+            "db_id": notice.id,
+        }
+    ])
+
+
 @app.post("/admin/approve/{item_id}")
 async def approve_pending(item_id: int):
     session = SessionLocal()
+    chroma_committed_ids: List[str] = []
+    target_collection = DATASET_ARTIFACTS["notices"].collection
     try:
         logging.info(f"👉 [Admin] Approving item ID: {item_id}")
         item = session.query(PendingItem).filter(PendingItem.id == item_id).first()
         if not item:
             logging.error(f"❌ [Admin] Item not found: {item_id}")
-            return {"status": "error", "message": "Item not found"}
+            raise HTTPException(status_code=404, detail="Item not found")
+
+        if item.status in ("approved", "approved_manually"):
+            return {"status": item.status, "message": "이미 승인된 항목입니다."}
 
         data = json.loads(item.data)
-        
-        # 공통 Notice 객체 생성 준비
-        notice = None
-        
-        if item.source_type == "custom_knowledge":
-            logging.info(f"📝 [Admin] Processing custom knowledge: {data.get('question')}")
-            
-            notice = Notice(
-                board=data.get("category", "기타"), # e.g. 학과정보
-                title=data.get("question"),
-                category="FAQ",
-                published_date=datetime.now().strftime("%Y-%m-%d"),
-                content=data.get("answer"),
-                is_manual=1
-            )
+        notice = _build_notice_from_pending(item.source_type, data)
 
-        elif item.source_type == "event":
-            logging.info(f"📅 [Admin] Processing event: {data.get('title')}")
-            
-            # 내용을 상세하게 구성
-            content_parts = []
-            if data.get("description"):
-                content_parts.append(data.get("description"))
-            
-            date_str = f"일시: {data.get('start_date')}"
-            if data.get("end_date") and data.get("end_date") != data.get("start_date"):
-                date_str += f" ~ {data.get('end_date')}"
-            content_parts.append(date_str)
-            
-            if data.get("location"):
-                content_parts.append(f"장소: {data.get('location')}")
-                
-            full_content = "\n\n".join(content_parts)
-
-            notice = Notice(
-                board=data.get("department", "학과행사"),
-                title=data.get("title"),
-                category="행사",
-                published_date=data.get("start_date"),
-                content=full_content,
-                is_manual=1
-            )
-
-        elif item.source_type == "announcement":
-            logging.info(f"📢 [Admin] Processing announcement: {data.get('title')}")
-            
-            notice = Notice(
-                board=data.get("department", "공지사항"),
-                title=data.get("title"),
-                category=data.get("category", "일반"),
-                published_date=data.get("date"),
-                content=data.get("content"),
-                is_manual=1
-            )
-        
-        if notice:
-            # 1. Save to DB (Notices table)
-            session.add(notice)
+        if notice is None:
+            item.status = "approved_manually"
             session.commit()
-            logging.info(f"✅ [Admin] Notice saved to DB. ID: {notice.id}")
+            return {"status": "approved_manually"}
 
-            # 2. Create Chunk
-            doc_id = make_doc_id(notice.title, notice.board, notice.published_date)
+        # 1. Notice 저장 (id 확보) — 색인 부작용 성공 후 commit하기 위해 flush만 먼저
+        session.add(notice)
+        session.flush()  # notice.id 확보, 아직 commit 아님
+        # K7: 수동 공지에 합성 고유 url 부여 (UNIQUE NULL/"" 충돌 방지 + url 필드 일관 채움)
+        notice.detail_url = f"manual://notice/{item.source_type}/{notice.id}"
+        session.flush()
 
-            # Check for collision
-            existing_chunk = session.query(Chunk).filter(Chunk.chunk_id == doc_id).first()
-            if existing_chunk:
-                logging.warning(f"⚠️ [Admin] Chunk ID collision for {doc_id}. Appending random UUID.")
-                doc_id = f"{doc_id}_{uuid.uuid4().hex[:8]}"
-            
-            text_content = notice.content
-            prefix_parts = []
-            if notice.board:
-                prefix_parts.append(f"게시판: {notice.board}")
-            if notice.category:
-                prefix_parts.append(f"분류: {notice.category}")
-            if notice.published_date:
-                prefix_parts.append(f"게시일: {notice.published_date}")
-            
-            if prefix_parts:
-                text_content = f"[{', '.join(prefix_parts)}]\n\n{text_content}"
+        # 2. ingest 공식 경로로 청크 생성 (크롤 공지와 동일 규칙) — K1/K6
+        chunks_df = build_notice_chunks(_notice_to_ingest_frame(notice))
+        if chunks_df.empty:
+            raise HTTPException(status_code=400, detail="청크를 생성할 수 없습니다(본문이 비어 있음).")
 
-            chunk = Chunk(
-                chunk_id=doc_id,
-                chunk_text=text_content,
-                notice_id=notice.id
-            )
-            session.add(chunk)
-            session.commit()
+        chunk_ids = chunks_df["chunk_id"].astype(str).tolist()
+        texts = chunks_df["chunk_text"].astype(str).tolist()
 
-            # 3. Upsert to Chroma (dongguk_notices)
-            target_collection = "dongguk_notices"
-            embedding = encode_texts([text_content])
-            metadata = {
-                "source": "notices",
-                "title": notice.title,
-                "topics": notice.board,
-                "published_at": notice.published_date,
-                "category": notice.category
-            }
-            metadata = {k: (v if v is not None else "") for k, v in metadata.items()}
-            
-            upsert_items(
-                name=target_collection,
-                ids=[doc_id],
-                documents=[text_content],
-                metadatas=[metadata],
-                embeddings=embedding
-            )
-            logging.info(f"✅ [Admin] Upserted to ChromaDB (Notice)")
+        # 3. 색인 부작용을 DB commit 전에 먼저 수행 (실패 시 롤백 가능) — K3
+        embeddings = encode_texts(texts)
+        metadatas = chunks_df.drop(columns=["chunk_text"]).to_dict(orient="records")
+        metadatas = [{k: (v if v is not None else "") for k, v in m.items()} for m in metadatas]
+        upsert_items(
+            name=target_collection,
+            ids=chunk_ids,
+            documents=texts,
+            metadatas=metadatas,
+            embeddings=embeddings,
+        )
+        chroma_committed_ids = chunk_ids
+        logging.info(f"✅ [Admin] Upserted {len(chunk_ids)} chunk(s) to ChromaDB")
 
-            # 3.5. Append to CSV (Persistent Storage)
-            try:
-                artifacts = DATASET_ARTIFACTS["notices"]
-                csv_path = artifacts.csv_path
-                
-                # notices.csv schema: chunk_id,doc_id,chunk_text,position,token_len,title,topics,published_at,url,attachments,source,notice_id,rule_id,schedule_id,course_id,staff_id
-                new_row = {
-                    "chunk_id": doc_id,
-                    "doc_id": doc_id,
-                    "chunk_text": text_content,
-                    "position": 0,
-                    "token_len": len(text_content), 
-                    "title": notice.title,
-                    "topics": notice.board,
-                    "published_at": notice.published_date,
-                    "url": "",
-                    "attachments": "[]",
-                    "source": "notices",
-                    "notice_id": notice.id,
-                    "rule_id": "",
-                    "schedule_id": "",
-                    "course_id": "",
-                    "staff_id": ""
-                }
-                
-                if csv_path.exists():
-                    new_df = pd.DataFrame([new_row])
-                    new_df.to_csv(csv_path, mode='a', header=False, index=False, encoding='utf-8-sig')
-                    logging.info(f"✅ [Admin] Appended to notices.csv")
-                else:
-                    logging.warning(f"⚠️ [Admin] notices.csv not found. Skipping CSV append.")
+        # 4. DB Chunk 적재 (동일 chunk_id 사용)
+        for cid, text in zip(chunk_ids, texts):
+            session.add(Chunk(chunk_id=cid, chunk_text=text, notice_id=notice.id))
 
-            except Exception as e:
-                logging.error(f"❌ [Admin] Failed to append to CSV: {e}")
+        # 5. 모든 색인 성공 → 한 번에 commit (Notice + Chunk + status)
+        item.status = "approved"
+        session.commit()
+        logging.info(f"✅ [Admin] Notice {notice.id} approved & committed.")
 
-            # 4. Trigger reload
-            try:
+        # 6. 캐시 리로드 (best-effort, 실패해도 승인은 유효 — DB/Chroma엔 이미 반영됨)
+        try:
+            with _datasets_lock:
                 if "notices" in _datasets:
                     del _datasets["notices"]
-                _ensure_dataset("notices")
-                logging.info(f"✅ [Admin] Reloaded notices dataset.")
-            except Exception as e:
-                logging.error(f"❌ [Admin] Failed to reload notices: {e}")
+                _ensure_dataset_locked("notices")
+        except Exception as e:
+            logging.error(f"❌ [Admin] Failed to reload notices cache: {e}")
 
-            item.status = "approved"
-            session.commit()
-            return {"status": "approved", "chunk_id": doc_id}
+        return {"status": "approved", "chunk_ids": chunk_ids}
 
-        else:
-             item.status = "approved_manually" 
-             session.commit()
-             return {"status": "approved_manually"}
-
+    except HTTPException:
+        session.rollback()
+        # 이미 Chroma에 넣었다면 되돌린다 (부분 적용 방지) — K3
+        if chroma_committed_ids:
+            try:
+                delete_items(target_collection, chroma_committed_ids)
+            except Exception:
+                logging.error("⚠️ [Admin] Failed to rollback Chroma upsert after error.", exc_info=True)
+        raise
     except Exception as e:
         session.rollback()
+        if chroma_committed_ids:
+            try:
+                delete_items(target_collection, chroma_committed_ids)
+            except Exception:
+                logging.error("⚠️ [Admin] Failed to rollback Chroma upsert after error.", exc_info=True)
         logging.error(f"🔥 [Admin] Critical Error in approve_pending: {e}", exc_info=True)
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
 
@@ -1746,12 +1957,65 @@ async def approve_pending(item_id: int):
 @app.post("/admin/reject/{item_id}")
 async def reject_pending(item_id: int):
     session = SessionLocal()
+    target_collection = DATASET_ARTIFACTS["notices"].collection
     try:
         item = session.query(PendingItem).filter(PendingItem.id == item_id).first()
-        if item:
-            item.status = "rejected"
-            session.commit()
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+
+        was_approved = item.status == "approved"
+        reload_needed = False
+
+        # K4: 이미 승인·색인된 항목을 반려하면 색인을 되돌린다.
+        if was_approved:
+            data = json.loads(item.data)
+            notice_obj = _build_notice_from_pending(item.source_type, data)
+            # 승인 시 생성된 Notice를 title+source 기준으로 찾는다(수동 공지만 대상).
+            removed_chunk_ids: List[str] = []
+            if notice_obj is not None and notice_obj.title:
+                matched_notices = (
+                    session.query(Notice)
+                    .filter(
+                        Notice.is_manual == 1,
+                        Notice.title == notice_obj.title,
+                        Notice.board == notice_obj.board,
+                    )
+                    .all()
+                )
+                for n in matched_notices:
+                    chunks = session.query(Chunk).filter(Chunk.notice_id == n.id).all()
+                    removed_chunk_ids.extend([c.chunk_id for c in chunks if c.chunk_id])
+                    for c in chunks:
+                        session.delete(c)
+                    session.delete(n)
+
+            if removed_chunk_ids:
+                try:
+                    delete_items(target_collection, removed_chunk_ids)
+                    reload_needed = True
+                except Exception:
+                    logging.error("⚠️ [Admin] Failed to delete chunks from Chroma on reject.", exc_info=True)
+
+        item.status = "rejected"
+        session.commit()
+
+        if reload_needed:
+            try:
+                with _datasets_lock:
+                    if "notices" in _datasets:
+                        del _datasets["notices"]
+                    _ensure_dataset_locked("notices")
+            except Exception as e:
+                logging.error(f"❌ [Admin] Failed to reload notices cache on reject: {e}")
+
         return {"status": "rejected"}
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as e:
+        session.rollback()
+        logging.error(f"🔥 [Admin] Error in reject_pending: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
 
@@ -1768,7 +2032,10 @@ async def ask_stream(req: AskRequest, request: Request):
     async def stream_generator():
         analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
         if USE_QUERY_ANALYSIS:
-            analysis_result = await analyze_query(raw_query)
+            # 후속 질문("그럼 신청 기간은?")의 대명사/생략을 해소하기 위해
+            # 최근 대화 이력을 함께 전달해 독립형 질문으로 재작성하게 한다.
+            history_text = await run_in_threadpool(get_recent_history_text, session_id)
+            analysis_result = await analyze_query(raw_query, history_text)
             analysis_meta = _analysis_to_meta(analysis_result, failed=analysis_result is None)
 
         # 1. 일반 대화 처리 (검색 불필요한 경우)
@@ -1809,11 +2076,11 @@ async def ask_stream(req: AskRequest, request: Request):
         # 2. RAG 검색 프로세스
         query_for_retrieval = raw_query
         expanded_query = expand_query(query_for_retrieval)
-        retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta)
+        retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta, req.major)
         if raw_query not in retrieval_queries:
             retrieval_queries.insert(0, raw_query)
         semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
-        
+
         user_major = req.major
         final_where_filter = {}
         # 백엔드는 학과 미지정 시 null을 보낸다("Unknown"/"Default"는 보내지 않지만 방어적으로 함께 제외).
@@ -1920,10 +2187,11 @@ async def ask_stream(req: AskRequest, request: Request):
             if row.get('title'): part += f"제목: {row.get('title')}\n"
             if row.get('published_at'): part += f"게시일: {row.get('published_at')}\n"
             if row.get('url'): part += f"URL: {row.get('url')}\n"
-            part += f"내용:\n{row['chunk_text']}\n"
+            part += f"내용:\n{_expand_chunk_with_neighbors(row)}\n"
             
+            # attachments는 결측 시 NaN(float)일 수 있으므로 문자열인 경우에만 파싱한다.
             attachments_str = row.get('attachments')
-            if attachments_str and attachments_str.strip():
+            if isinstance(attachments_str, str) and attachments_str.strip():
                 try:
                     attachments = json.loads(attachments_str)
                     if isinstance(attachments, list):
@@ -1933,10 +2201,11 @@ async def ask_stream(req: AskRequest, request: Request):
                     _log_event(logging.WARNING, "attachment_parse_failed", error=str(exc))
             context_parts.append(part)
 
-        context_text = "\n\n---\n\n".join(context_parts)
         guide_prefix = _build_guide_context_prefix(merged, route, entry_year)
-        if guide_prefix: context_text = guide_prefix + context_text
-        context_text = context_text[:MAX_CONTEXT_LENGTH]
+        # 로그인 사용자 소속 학과를 컨텍스트 상단에 명시(개인 맞춤형) + 학번 가이드 프리픽스
+        context_prefix = _user_profile_prefix(req.major) + guide_prefix
+        # 문서 경계를 존중하며 MAX_CONTEXT_LENGTH 이내로 구성(마지막 문서 중간 절단 방지)
+        context_text = _build_context_text(context_parts, MAX_CONTEXT_LENGTH, prefix=context_prefix)
         current_date = _get_current_kst_string()
 
         # 소스 데이터 정리
@@ -2014,7 +2283,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
 
     analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
     if USE_QUERY_ANALYSIS:
-        analysis_result = await analyze_query(raw_query)
+        # 후속 질문의 대명사/생략 해소를 위해 최근 대화 이력을 함께 전달(스트리밍 경로와 동일)
+        history_text = await run_in_threadpool(get_recent_history_text, session_id)
+        analysis_result = await analyze_query(raw_query, history_text)
         analysis_meta = _analysis_to_meta(analysis_result, failed=analysis_result is None)
 
     if (
@@ -2070,7 +2341,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
 
     query_for_retrieval = raw_query
     expanded_query = expand_query(query_for_retrieval)
-    retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta)
+    retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta, req.major)
     if raw_query not in retrieval_queries:
         retrieval_queries.insert(0, raw_query)
     semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
@@ -2280,17 +2551,14 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             part += f"게시일: {row.get('published_at')}\n"
         if row.get('url'): # URL 정보가 있는 경우
             part += f"URL: {row.get('url')}\n"
-        part += f"내용:\n{row['chunk_text']}\n"
+        part += f"내용:\n{_expand_chunk_with_neighbors(row)}\n"
         
         # --- NEW ATTACHMENT PROCESSING ---
+        # attachments는 결측 시 NaN(float)일 수 있으므로 문자열인 경우에만 파싱한다.
         attachments_str = row.get('attachments')
-        if attachments_str:
+        if isinstance(attachments_str, str) and attachments_str.strip():
             try:
-                # attachments_str이 비어있지 않은 경우에만 json.loads 시도
-                if attachments_str.strip(): # 비어있는 문자열 체크
-                    attachments = json.loads(attachments_str)
-                else:
-                    attachments = [] # 비어있는 경우 빈 리스트로 처리
+                attachments = json.loads(attachments_str)
 
                 if isinstance(attachments, list):
                     pdf_links = []
@@ -2309,11 +2577,13 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
 
         context_parts.append(part)
     
-    context_text = "\n\n---\n\n".join(context_parts) if context_parts else "검색된 관련 문서가 없습니다. 일반적인 대화로 응답해주세요."
-    guide_context_prefix = _build_guide_context_prefix(merged, route, entry_year)
-    if guide_context_prefix:
-        context_text = guide_context_prefix + context_text
-    context_text = context_text[:MAX_CONTEXT_LENGTH] # 최대 길이 제한 유지 
+    # 로그인 사용자 소속 학과를 컨텍스트 상단에 명시(개인 맞춤형) + 학번 가이드 프리픽스
+    guide_context_prefix = _user_profile_prefix(req.major) + _build_guide_context_prefix(merged, route, entry_year)
+    if context_parts:
+        # 문서 경계를 존중하며 MAX_CONTEXT_LENGTH 이내로 구성(마지막 문서 중간 절단 방지)
+        context_text = _build_context_text(context_parts, MAX_CONTEXT_LENGTH, prefix=guide_context_prefix)
+    else:
+        context_text = (guide_context_prefix + "검색된 관련 문서가 없습니다. 일반적인 대화로 응답해주세요.")[:MAX_CONTEXT_LENGTH]
     # LLM에게 현재 날짜를 전달하여 "오늘", "이번 학기" 등의 표현을 해석하도록 돕습니다.
     current_date = _get_current_kst_string()
 
@@ -2425,9 +2695,11 @@ async def reindex_dataset(target: str):
 
         # Clear cache to force reload
         if target == "all":
-            _datasets.clear()
+            with _datasets_lock:
+                _datasets.clear()
         elif target in _datasets:
-            del _datasets[target]
+            with _datasets_lock:
+                _datasets.pop(target, None)
 
         return {
             "status": "ok",

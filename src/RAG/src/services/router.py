@@ -10,7 +10,7 @@ from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field, ValidationError
 from langchain_openai import ChatOpenAI
 
-from src.config import LLM_ROUTER_DESCRIPTIONS, OPENAI_MODEL
+from src.config import LLM_ROUTER_DESCRIPTIONS, OPENAI_MODEL, OPENAI_CHAT_TIMEOUT_SECONDS
 
 # LLM이 출력할 라우팅 결정의 스키마를 정의합니다.
 # 여러 데이터셋과 관련될 수 있으므로 문자열 리스트를 사용합니다.
@@ -65,7 +65,13 @@ prompt = PromptTemplate(
 
 # 라우팅을 수행할 LLM 체인을 구성합니다.
 # 파싱은 별도로 수행해 실패 시 LLM 원본 출력을 로깅할 수 있게 한다(디버깅 용이).
-llm = ChatOpenAI(model=OPENAI_MODEL, temperature=0, model_kwargs={"response_format": {"type": "json_object"}})
+llm = ChatOpenAI(
+    model=OPENAI_MODEL,
+    temperature=0,
+    timeout=OPENAI_CHAT_TIMEOUT_SECONDS,
+    max_retries=1,
+    model_kwargs={"response_format": {"type": "json_object"}},
+)
 router_chain = prompt | llm
 
 def _format_destinations() -> str:

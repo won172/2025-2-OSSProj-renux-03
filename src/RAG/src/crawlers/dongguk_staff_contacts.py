@@ -1,153 +1,137 @@
-"""동국대 직원 연락처를 수집하는 일회성 Selenium 크롤러입니다."""
+"""동국대 직원 연락처를 수집하는 크롤러입니다.
+
+기존에는 Selenium으로 jstree를 펼쳐 테이블을 긁었으나, 페이지가 사용하는
+공개 AJAX API(`/ajax/staff/dept/data`, `/ajax/staff/data/list`)를 직접 호출하는
+방식으로 재작성했다. 브라우저/DOM 재렌더링 의존이 사라져 사이트 레이아웃
+변경에 견고하고, 컬럼도 의미 있는 이름(성명/직위/담당업무/전화번호)으로 저장한다.
+"""
 from __future__ import annotations
 
 import time
-import warnings
 from pathlib import Path
+from typing import Any, Dict, List
 
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
-from tqdm import tqdm
+import requests
 
-warnings.filterwarnings("ignore")
-
-TARGET_URL = "https://www.dongguk.edu/staff/list"
-OUTPUT_PATH = Path("./data/dongguk_staff_contacts.csv")
-
-
-def build_driver() -> webdriver.Chrome:
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    return webdriver.Chrome(options=chrome_options)
+BASE_URL = "https://www.dongguk.edu"
+DEPT_TREE_URL = f"{BASE_URL}/ajax/staff/dept/data"
+STAFF_LIST_URL = f"{BASE_URL}/ajax/staff/data/list"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; DonggukStaffCrawler/2.0)",
+    "X-Requested-With": "XMLHttpRequest",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+}
+REQUEST_DELAY = 0.15
+OUTPUT_PATH = Path(__file__).resolve().parents[2] / "data" / "dongguk_staff_contacts.csv"
 
 
-def expand_all_nodes(driver) -> None:
-    """모든 트리를 재귀적으로(반복적으로) 펼칩니다."""
-    print("🌳 트리 메뉴 펼치기 시작...")
-    max_depth = 20 # 무한 루프 방지
-    for _ in range(max_depth):
-        # 닫혀있는 노드의 '펼치기 아이콘' 찾기 (li.jstree-closed 직계 자식 i.jstree-ocl)
-        closed_icons = driver.find_elements(By.CSS_SELECTOR, "li.jstree-closed > i.jstree-ocl")
-        
-        if not closed_icons:
-            print("✨ 모든 트리가 펼쳐졌습니다.")
-            break
-        
-        print(f"📂 {len(closed_icons)}개의 닫힌 폴더를 펼칩니다...")
-        for icon in closed_icons:
-            try:
-                # 화면에 안 보일 수 있으므로 JS로 클릭
-                driver.execute_script("arguments[0].click();", icon)
-                time.sleep(0.05) 
-            except Exception:
-                pass
-        
-        time.sleep(1.0) # DOM 업데이트 대기
+def fetch_dept_tree(timeout: float = 30.0) -> List[Dict[str, Any]]:
+    """부서 트리(jstree 데이터)를 가져옵니다. 각 노드: id/parent/text."""
+    response = requests.post(DEPT_TREE_URL, headers=HEADERS, timeout=timeout)
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, list) or not data:
+        raise RuntimeError("부서 트리 응답 형식이 예상과 다릅니다.")
+    return data
 
 
-def crawl_staff_contacts() -> pd.DataFrame:
-    driver = build_driver()
-    driver.get(TARGET_URL)
-    wait = WebDriverWait(driver, 20)
+def fetch_staff_for_dept(dept_seq: str, timeout: float = 30.0) -> List[Dict[str, Any]]:
+    """특정 부서의 교직원 목록을 가져옵니다."""
+    response = requests.post(
+        STAFF_LIST_URL, headers=HEADERS, data={"dept_seq": dept_seq}, timeout=timeout
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data if isinstance(data, list) else []
 
-    try:
-        time.sleep(3.0)
-        # 트리 영역 대기
-        wait.until(EC.presence_of_element_located((By.ID, "tree")))
-    except Exception as exc:
-        driver.quit()
-        raise RuntimeError("부서 트리(#tree)를 찾을 수 없습니다.") from exc
 
-    # 1. 트리 모두 펼치기
-    expand_all_nodes(driver)
+def _build_dept_paths(tree: List[Dict[str, Any]]) -> Dict[str, str]:
+    """노드 id → '상위 > 하위' 전체 경로 문자열 매핑을 만듭니다."""
+    by_id = {str(node.get("id")): node for node in tree if node.get("id")}
+    paths: Dict[str, str] = {}
 
-    data: list[list[str]] = []
-    
-    # 2. 모든 부서 링크 수집
-    # 트리가 다 펼쳐졌으므로 모든 앵커 태그를 가져옴
-    dept_links = driver.find_elements(By.CSS_SELECTOR, "#tree a.jstree-anchor")
-    print(f"총 {len(dept_links)}개의 부서 링크를 찾았습니다.")
+    def path_of(node_id: str) -> str:
+        if node_id in paths:
+            return paths[node_id]
+        node = by_id.get(node_id)
+        if node is None:
+            return ""
+        text = (node.get("text") or "").strip()
+        parent = str(node.get("parent") or "")
+        if parent in ("", "#", "Top") or parent not in by_id:
+            paths[node_id] = text
+        else:
+            parent_path = path_of(parent)
+            paths[node_id] = f"{parent_path} > {text}" if parent_path else text
+        return paths[node_id]
 
-    # 3. 순회하며 데이터 수집
-    for index in tqdm(range(len(dept_links)), desc="부서별 데이터 수집"):
+    for node_id in by_id:
+        path_of(node_id)
+    return paths
+
+
+def crawl_staff_contacts(delay: float = REQUEST_DELAY) -> pd.DataFrame:
+    tree = fetch_dept_tree()
+    paths = _build_dept_paths(tree)
+
+    dept_nodes = [
+        node for node in tree
+        if node.get("id") and str(node.get("id")) != "Top" and (node.get("text") or "").strip()
+    ]
+    print(f"🌳 부서 {len(dept_nodes)}개 발견. 교직원 수집 시작...")
+
+    records: List[Dict[str, str]] = []
+    failed = 0
+    for node in dept_nodes:
+        dept_seq = str(node["id"])
+        dept_name = (node.get("text") or "").strip()
         try:
-            # DOM이 변경되었을 수 있으므로 다시 찾아서 인덱스로 접근 (안전한 방법)
-            current_links = driver.find_elements(By.CSS_SELECTOR, "#tree a.jstree-anchor")
-            if index >= len(current_links):
-                break
-            
-            link = current_links[index]
-            dept_name = link.text.strip()
-            
-            # 클릭하여 테이블 로드
-            driver.execute_script("arguments[0].click();", link)
-            time.sleep(0.8) # 데이터 로딩 대기
+            rows = fetch_staff_for_dept(dept_seq)
+        except Exception as exc:  # noqa: BLE001 — 한 부서 실패가 전체 수집을 막지 않도록
+            failed += 1
+            print(f"⚠️ 부서 '{dept_name}'({dept_seq}) 수집 실패: {exc}")
+            continue
 
-            # 테이블 데이터 수집
-            rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
-            
-            if not rows:
+        for row in rows:
+            name = (row.get("staff_name") or "").strip()
+            position = (row.get("staff_pos") or "").strip()
+            charge = (row.get("charge") or "").strip()
+            telephone = (row.get("telephone") or "").strip()
+            if not any((name, position, charge, telephone)):
                 continue
+            records.append(
+                {
+                    "조직(트리)": (row.get("dept_name") or dept_name).strip(),
+                    "부서경로": paths.get(dept_seq, dept_name),
+                    "성명": name,
+                    "직위": position,
+                    "담당업무": charge,
+                    "전화번호": telephone,
+                }
+            )
 
-            for row in rows:
-                # "데이터가 없습니다" 같은 안내 메시지 제외
-                if "데이터가 없습니다" in row.text:
-                    continue
+        if delay:
+            time.sleep(delay)
 
-                cols = [cell.text.strip() for cell in row.find_elements(By.TAG_NAME, "td")]
-                
-                # 유효한 데이터 행인지 확인 (최소 2개 이상 컬럼 등)
-                if len(cols) >= 2:
-                    # 부서명(트리에서 클릭한 이름)을 첫 번째 컬럼으로 추가하여 저장
-                    # cols가 [이름, 담당업무, 전화번호, ...] 형태라고 가정 시
-                    # 만약 테이블 안에 부서명이 없다면 dept_name을 활용
-                    
-                    # 여기서는 단순하게 [트리부서명] + [테이블컬럼들...] 로 저장
-                    data.append([dept_name] + cols)
+    if failed:
+        print(f"⚠️ 부서 단위 수집 실패 {failed}건")
 
-        except Exception as e:
-            # 특정 부서 수집 실패해도 계속 진행
-            # print(f"⚠️ '{dept_name}' 수집 중 오류: {e}")
-            pass
-
-    driver.quit()
-    print("✅ 크롤링 완료 및 브라우저 종료.")
-
-    # 데이터프레임 생성
-    # 컬럼명은 실제 데이터 구조에 따라 조정 필요. 동적으로 생성.
-    if data:
-        max_cols = max(len(row) for row in data)
-        columns = ["조직(트리)"] + [f"Data_{i}" for i in range(max_cols - 1)]
-        # 일반적인 예상 컬럼: 조직, 직위, 성명, 담당업무, 전화번호, 이메일 등
-        # 필요시 columns = ["조직", "직위", "성명", "담당업무", "전화번호", "이메일"] 등으로 고정 가능
-        
-        df = pd.DataFrame(data, columns=columns)
+    df = pd.DataFrame(records)
+    if not df.empty:
         df.drop_duplicates(inplace=True)
-    else:
-        df = pd.DataFrame()
-
+    print(f"✅ 교직원 {len(df)}건 수집 완료.")
     return df
 
 
 def main() -> None:
     df = crawl_staff_contacts()
-
-    # Data_1 열이 비어있는 행 제거
-    if "Data_1" in df.columns:
-        # None/NaN 제거
-        df = df[df["Data_1"].notna()]
-        # 빈 문자열 제거
-        df = df[df["Data_1"] != ""]
-
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
-    print(f"총 {len(df)}건의 데이터 저장 완료! ({OUTPUT_PATH.resolve()})")
+    print(f"총 {len(df)}건의 데이터 저장 완료! ({OUTPUT_PATH})")
+
+
+__all__ = ["crawl_staff_contacts", "fetch_dept_tree", "fetch_staff_for_dept"]
 
 
 if __name__ == "__main__":

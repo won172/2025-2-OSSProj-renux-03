@@ -304,7 +304,7 @@ def build_table_records(df: pd.DataFrame, source: CurriculumSource, section_titl
 
     renamed = {col: canonical_field_name(col) for col in df.columns}
     working = df.rename(columns=renamed).copy()
-    working = working.applymap(normalize_text)
+    working = working.map(normalize_text)  # pandas 3.0: applymap 제거됨 → DataFrame.map
     working = working.loc[:, ~(working.eq("").all())]
     if working.empty:
         return []

@@ -234,6 +234,11 @@ namespace RenuxServer.Migrations
                         {
                             Id = new Guid("b4114fd1-c9f0-4171-821f-b53a15faba9b"),
                             Rolename = "일반학생"
+                        },
+                        new
+                        {
+                            Id = new Guid("7a3f2c44-9d1e-4b6a-8f25-6c0e9b51d7a2"),
+                            Rolename = "총학생회"
                         });
                 });
 

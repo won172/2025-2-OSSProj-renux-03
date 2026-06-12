@@ -117,15 +117,22 @@ def main() -> None:
         rel_dir, filename = summarise_relative_path(path, RULE_ROOT)
 
         cleaned = clean_text(text) if text else ""
-        records.append(
-            {
-                "relative_dir": rel_dir,
-                "filename": filename,
-                "absolute_path": str(path.resolve()),
-                "method": method,
-                "text": cleaned,
-            }
-        )
+
+        # 추출 실패(빈 텍스트) 레코드는 CSV에 포함하지 않는다 —
+        # 빈 청크가 Chroma에 upsert되어 검색 품질을 해치는 것을 방지.
+        if not cleaned:
+            failures.append("empty_text_skipped")
+            print(f"⚠️ 텍스트 추출 실패로 건너뜀: {rel_dir}/{filename}")
+        else:
+            records.append(
+                {
+                    "relative_dir": rel_dir,
+                    "filename": filename,
+                    "absolute_path": str(path.resolve()),
+                    "method": method,
+                    "text": cleaned,
+                }
+            )
 
         if failures:
             failure_details.append(

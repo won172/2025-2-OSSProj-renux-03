@@ -11,11 +11,11 @@ namespace RenuxServer.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "fallback_reason",
-                table: "chat_messages",
-                type: "text",
-                nullable: true);
+            // 과거 Program.cs의 raw ALTER로 컬럼이 먼저 생긴 DB가 있을 수 있어 IF NOT EXISTS로 멱등 처리
+            migrationBuilder.Sql("""
+                ALTER TABLE chat_messages
+                ADD COLUMN IF NOT EXISTS fallback_reason text;
+                """);
         }
 
         /// <inheritdoc />

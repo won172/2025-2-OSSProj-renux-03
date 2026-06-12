@@ -47,7 +47,8 @@ static public class AuthenticationApis
 
     static public void AddAuthApis(this WebApplication application)
     {
-        var app = application.MapGroup("/auth");
+        // 무차별 대입/열거 방어: /auth 전체에 IP 단위 레이트 리밋 적용 (Program.cs "auth" 정책)
+        var app = application.MapGroup("/auth").RequireRateLimiting("auth");
 
         // 유저 이름 조회
         app.MapGet("/name", async (HttpContext context, ServerDbContext db) =>
@@ -59,11 +60,12 @@ static public class AuthenticationApis
                 return Results.Unauthorized();
             }
 
-            var user = await db.Users.Include(u => u.Major).FirstOrDefaultAsync(u => u.Id == userId);
+            var user = await db.Users.Include(u => u.Major).Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == userId);
             if (user == null) return Results.Unauthorized();
 
             string name = user.Username;
-            string roleName = context.User.FindFirstValue("Role")!;
+            // 역할은 JWT 클레임이 아닌 DB에서 읽는다 — 토큰 만료 전이라도 역할 변경(강등 등)이 즉시 반영되도록.
+            string roleName = user.Role?.Rolename ?? context.User.FindFirstValue("Role") ?? "Unknown";
             string majorName = user.Major?.Majorname ?? "Unknown"; // Safe navigation
 
             return Results.Ok(new { Name = name, RoleName = roleName, MajorName = majorName });
@@ -129,6 +131,12 @@ static public class AuthenticationApis
                 return Results.Unauthorized();
             }
 
+            // Role row가 없는 사용자(데이터 손상)는 NRE 대신 명시적 오류 처리
+            if (user.Role == null)
+            {
+                return Results.Problem("사용자 역할 정보가 없습니다. 관리자에게 문의하세요.", statusCode: 500);
+            }
+
             var jwt = config.GetSection("Jwt");
 
             SigningCredentials credential = new(new SymmetricSecurityKey(Convert.FromBase64String(jwt["Key"]!)),
@@ -138,7 +146,7 @@ static public class AuthenticationApis
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
                 new Claim(JwtRegisteredClaimNames.Name, user.Username),
-                new Claim("Role", user.Role!.Rolename),
+                new Claim("Role", user.Role.Rolename),
                 new Claim("Major", user.Major?.Majorname ?? "Unknown")
             };
 
@@ -158,9 +166,19 @@ static public class AuthenticationApis
         });
 
         // 로그아웃
-        app.MapGet("/signout", (HttpContext context) =>
+        // POST: GET 상태 변경은 <img> 등으로 강제 로그아웃되는 CSRF 벡터가 됨.
+        // 쿠키 삭제는 발급 시와 동일한 Path/SameSite/Secure 옵션을 전달해야 모든 브라우저에서 확실히 지워진다.
+        app.MapPost("/signout", (HttpContext context, IConfiguration config) =>
         {
-            context.Response.Cookies.Delete("renux-server-token");
+            context.Response.Cookies.Delete("renux-server-token", BuildAuthCookieOptions(config));
+
+            return Results.Ok(new { Message = "Ok" });
+        }).RequireAuthorization();
+
+        // 구버전 프론트 호환용 GET (점진 제거 예정)
+        app.MapGet("/signout", (HttpContext context, IConfiguration config) =>
+        {
+            context.Response.Cookies.Delete("renux-server-token", BuildAuthCookieOptions(config));
 
             return Results.Ok(new { Message = "Ok" });
         }).RequireAuthorization();

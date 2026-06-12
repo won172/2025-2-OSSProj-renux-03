@@ -1,9 +1,10 @@
 """노트북에서 가져온 밀집 임베딩+TF-IDF 하이브리드 검색 유틸리티입니다."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Iterable, Tuple, Dict # Dict 추가
+from typing import Iterable, List, Optional, Tuple, Dict # Dict 추가
 
 import joblib
 import numpy as np
@@ -13,7 +14,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.config import DEFAULT_TOP_K, HYBRID_ALPHA, VECTORIZER_DIR
-from src.models.embedding import encode_texts
+from src.models.embedding import encode_queries
 from src.vectorstore.chroma_client import get_collection
 
 
@@ -21,17 +22,31 @@ def _vectorizer_path(identifier: str) -> Path:
     return VECTORIZER_DIR / f"{identifier}_tfidf.pkl"
 
 
-def train_tfidf(identifier: str, corpus: Iterable[str]) -> Tuple[TfidfVectorizer, np.ndarray]:
-    """주어진 말뭉치에 TF-IDF 벡터라이저를 학습시키고 저장합니다."""
+def train_tfidf(
+    identifier: str,
+    corpus: Iterable[str],
+    chunk_ids: Iterable[str] | None = None,
+) -> Tuple[TfidfVectorizer, np.ndarray]:
+    """주어진 말뭉치에 TF-IDF 벡터라이저를 학습시키고 저장합니다.
+
+    chunk_ids를 함께 주면 행→chunk_id 매핑이 아티팩트에 저장되어,
+    검색 시 chunks_df 행 순서에 의존하지 않고 점수를 매핑할 수 있습니다.
+    """
     texts = list(corpus)
     if not texts:
         raise ValueError("Corpus is empty, cannot train TF-IDF vectorizer.")
+    ids = [str(cid) for cid in chunk_ids] if chunk_ids is not None else None
+    if ids is not None and len(ids) != len(texts):
+        raise ValueError(
+            f"chunk_ids length ({len(ids)}) does not match corpus length ({len(texts)})."
+        )
     vectorizer = TfidfVectorizer(max_features=10000)
     matrix = vectorizer.fit_transform(texts)
     joblib.dump(
         {
             "vectorizer": vectorizer,
             "matrix": matrix,
+            "chunk_ids": ids,
             "metadata": {
                 "dataset": identifier,
                 "document_count": len(texts),
@@ -53,6 +68,7 @@ def _load_tfidf_artifact(identifier: str) -> dict:
         return {
             "vectorizer": artifact["vectorizer"],
             "matrix": artifact["matrix"],
+            "chunk_ids": artifact.get("chunk_ids"),
             "metadata": {
                 "dataset": identifier,
                 "document_count": None,
@@ -71,11 +87,49 @@ def load_tfidf(identifier: str) -> Tuple[TfidfVectorizer, np.ndarray]:
     return data["vectorizer"], data["matrix"]
 
 
+def load_tfidf_with_ids(identifier: str) -> Tuple[TfidfVectorizer, np.ndarray, Optional[List[str]]]:
+    """TF-IDF 벡터라이저/행렬과 함께 행→chunk_id 매핑을 불러옵니다(구버전 아티팩트면 None)."""
+    data = _load_tfidf_artifact(identifier)
+    return data["vectorizer"], data["matrix"], data.get("chunk_ids")
+
+
 def read_tfidf_metadata(identifier: str) -> Dict:
     """TF-IDF 아티팩트 메타데이터를 읽습니다. legacy 포맷이면 legacy 플래그를 반환합니다."""
     data = _load_tfidf_artifact(identifier)
     metadata = data.get("metadata")
     return metadata if isinstance(metadata, dict) else {}
+
+
+def _matches_where(row: pd.Series, where_filter: Dict) -> bool:
+    """Chroma 스타일 where 필터({"key": {"$eq": v}} / {"$and": [...]})를 DataFrame 행에 평가합니다."""
+    for key, condition in where_filter.items():
+        if key == "$and":
+            if not all(_matches_where(row, sub) for sub in condition):
+                return False
+            continue
+        if key == "$or":
+            if not any(_matches_where(row, sub) for sub in condition):
+                return False
+            continue
+        value = row.get(key) if key in row.index else None
+        if isinstance(condition, dict):
+            for op, expected in condition.items():
+                if op == "$eq":
+                    if str(value) != str(expected):
+                        return False
+                elif op == "$ne":
+                    if str(value) == str(expected):
+                        return False
+                elif op == "$in":
+                    if str(value) not in {str(e) for e in expected}:
+                        return False
+                else:
+                    # 지원하지 않는 연산자는 보수적으로 불일치 처리
+                    return False
+        else:
+            if str(value) != str(condition):
+                return False
+    return True
 
 
 def hybrid_search(
@@ -87,12 +141,16 @@ def hybrid_search(
     top_k: int = DEFAULT_TOP_K,
     alpha: float = HYBRID_ALPHA,
     where_filter: Dict | None = None,
+    tfidf_chunk_ids: List[str] | None = None,
 ) -> pd.DataFrame:
     """
     최적화된 하이브리드 검색:
     1. Vector Search로 상위 N개 검색
     2. TF-IDF Search로 상위 N개 검색
     3. 결과 결합 및 재정렬 (Rerank)
+
+    tfidf_chunk_ids: TF-IDF 행렬의 행→chunk_id 매핑(아티팩트에 저장된 것).
+    주어지면 chunks_df 행 순서에 의존하지 않고 sparse 점수를 매핑합니다.
     """
     if chunks_df.empty:
         return chunks_df.copy()
@@ -102,7 +160,7 @@ def hybrid_search(
     
     # 1. Vector Search (Dense)
     collection = get_collection(collection_name)
-    query_embedding = encode_texts([query])
+    query_embedding = encode_queries([query])
     
     vec_results = collection.query(
         query_embeddings=query_embedding,
@@ -112,62 +170,71 @@ def hybrid_search(
     
     vec_ids = (vec_results.get("ids") or [[]])[0]
     vec_dists = (vec_results.get("distances") or [[]])[0]
-    
-    # 거리(Distance)를 유사도(Similarity)로 변환 (Cosine Distance 가정: 1 - distance)
-    vec_scores = {cid: (1 - dist) for cid, dist in zip(vec_ids, vec_dists)}
+
+    # 거리(Distance)를 유사도(Similarity)로 변환 — 컬렉션의 실제 메트릭에 맞게 처리.
+    # cosine/ip: dist = 1 - sim → sim = 1 - dist
+    # l2(Chroma는 squared L2 반환): 정규화 임베딩이면 dist = 2 - 2cos → sim = 1 - dist/2
+    space = (getattr(collection, "metadata", None) or {}).get("hnsw:space", "l2")
+    if space in ("cosine", "ip"):
+        _to_sim = lambda d: 1.0 - d
+    else:
+        _to_sim = lambda d: 1.0 - d / 2.0
+    vec_scores = {cid: max(0.0, _to_sim(dist)) for cid, dist in zip(vec_ids, vec_dists)}
 
     # 2. Sparse Search (TF-IDF)
-    # 전체 chunks_df 순서와 tfidf_matrix 순서가 같다고 가정
-    query_vec = tfidf_vectorizer.transform([query])
-    sparse_sims = cosine_similarity(query_vec, tfidf_matrix).ravel()
-    
-    # TF-IDF 점수 상위 limit개 추출
-    # where_filter가 있다면 TF-IDF에도 적용해야 정확하지만, 
-    # TF-IDF 구조상 필터링이 어려우므로 일단 전체에서 검색 후 나중에 필터링된 ID와 교차 검증
-    sparse_indices = np.argsort(sparse_sims)[::-1][:limit]
-    
-    sparse_scores = {}
-    for idx in sparse_indices:
-        if idx >= len(chunks_df): # 인덱스 범위 체크 (TF-IDF와 DataFrame 불일치 방지)
-            continue
-            
-        if sparse_sims[idx] > 0:
-            cid = str(chunks_df.iloc[idx]["chunk_id"])
-            sparse_scores[cid] = sparse_sims[idx]
+    # 행→chunk_id 매핑: 아티팩트의 chunk_ids가 있으면 그것을 사용(행 순서 결합 제거),
+    # 없으면(구버전 아티팩트) 행 수가 chunks_df와 일치할 때만 행 순서로 매핑.
+    matrix_rows = tfidf_matrix.shape[0]
+    row_ids: List[str] | None = None
+    if tfidf_chunk_ids is not None and len(tfidf_chunk_ids) == matrix_rows:
+        row_ids = [str(cid) for cid in tfidf_chunk_ids]
+    elif matrix_rows == len(chunks_df):
+        row_ids = chunks_df["chunk_id"].astype(str).tolist()
+    else:
+        logging.warning(
+            "TF-IDF matrix rows (%d) do not match chunks_df rows (%d) for collection '%s' "
+            "and no chunk_ids mapping is available — skipping sparse scoring (vector-only).",
+            matrix_rows,
+            len(chunks_df),
+            collection_name,
+        )
+
+    sparse_scores: Dict[str, float] = {}
+    if row_ids is not None:
+        query_vec = tfidf_vectorizer.transform([query])
+        sparse_sims = cosine_similarity(query_vec, tfidf_matrix).ravel()
+        sparse_indices = np.argsort(sparse_sims)[::-1][:limit]
+        for idx in sparse_indices:
+            if sparse_sims[idx] > 0:
+                sparse_scores[str(row_ids[idx])] = sparse_sims[idx]
+        if not sparse_scores:
+            # OOV 쿼리 등으로 sparse 기여가 0이면 무음으로 vector-only가 되므로 흔적을 남긴다
+            logging.info(
+                "TF-IDF returned no positive scores for query %r on '%s' (vector-only search).",
+                query, collection_name,
+            )
 
     # 3. Merge & Fusion
-    # 후보군: Vector 검색 결과 OR TF-IDF 검색 결과
-    all_candidates = set(vec_scores.keys()) | set(sparse_scores.keys())
-    
-    # where_filter가 있는 경우, TF-IDF 결과 중 필터 조건에 맞지 않는 문서는 제외되어야 함
-    # 하지만 현재 구조상 chunks_df 전체를 가지고 있으므로, 
-    # chunks_df에서 필터링을 먼저 수행하는 것이 맞으나 성능상 비효율적일 수 있음.
-    # 여기서는 Vector Search가 필터를 적용했으므로, Vector 결과에 없는 ID가 TF-IDF에서 나왔다면
-    # 그 문서가 필터 조건을 만족하는지 확인해야 함.
-    # 간단한 해결책: Vector Search 결과가 하나라도 있으면(필터 적용됨), 
-    # TF-IDF 결과도 그 필터를 통과한 것만 남겨야 함.
-    # 하지만 메타데이터 필터링을 DataFrame에서 다시 하기는 번거로움.
-    # 타협안: Vector Search의 'where' 필터가 강력하다면(날짜 등), Vector Search 결과에 의존하는 비중을 높이거나
-    # TF-IDF는 필터를 무시하고 검색되므로, 필터가 필수적인 경우(날짜 지난 공지 등) 잘못된 문서가 섞일 수 있음.
-    # -> 정확성을 위해: where_filter가 있으면 TF-IDF 점수는 Vector Search 결과에 포함된 문서에 대해서만 가산하는 방식(Intersection)을 고려할 수 있으나,
-    # 그러면 키워드 검색의 장점(벡터가 놓친 문서 찾기)이 사라짐.
-    # -> 최적화된 방법: chunks_df 자체를 미리 필터링하고 TF-IDF를 수행해야 하지만 matrix 인덱스가 꼬임.
-    # 결론: 현재 구조에서는 Vector Search(필터 적용됨) 결과에 가중치를 두고, 
-    # TF-IDF 결과는 필터링되지 않았음을 인지해야 함. 
-    # 단, Vector Search 결과가 없으면 TF-IDF 결과만 남게 되는데 이때 필터 위반 문서가 나올 수 있음.
-    # 이를 방지하기 위해, where_filter가 존재하면 Vector Search 결과 집합(vec_scores.keys())에 포함된 문서만 후보로 삼는 것이 안전함 (Intersection).
-    # 하지만 이는 Hybrid Search의 의미를 퇴색시킴.
-    # 따라서, 성능을 위해 'where_filter'가 제공되면 Vector Search 결과만 사용하거나,
-    # TF-IDF는 보조적인 수단으로만 사용하도록 구현.
-    
-    final_candidates = []
-    
+    # 후보군: Vector 검색 결과 OR TF-IDF 검색 결과.
+    # where_filter가 있으면 벡터 검색은 Chroma에서 이미 필터링됨.
+    # TF-IDF-only 히트는 chunks_df 메타데이터로 필터를 직접 검증해 통과한 것만 후보로 살린다
+    # (이전에는 벡터 결과와의 intersection만 허용해 키워드-only 히트가 전부 버려졌음).
     if where_filter:
-        # 필터가 있으면 Vector Search 결과에 나온 문서들만 후보로 인정 (안전한 필터링 보장)
-        # TF-IDF 점수는 이 문서들에 대해서만 더해짐 (Re-ranking 역할)
+        sparse_only = set(sparse_scores.keys()) - set(vec_scores.keys())
         candidate_ids = set(vec_scores.keys())
+        if sparse_only:
+            id_to_pos = {
+                str(cid): pos
+                for pos, cid in enumerate(chunks_df["chunk_id"].astype(str).tolist())
+            }
+            for cid in sparse_only:
+                pos = id_to_pos.get(cid)
+                if pos is None:
+                    continue
+                if _matches_where(chunks_df.iloc[pos], where_filter):
+                    candidate_ids.add(cid)
     else:
-        candidate_ids = all_candidates
+        candidate_ids = set(vec_scores.keys()) | set(sparse_scores.keys())
 
     hybrid_results = []
     for cid in candidate_ids:
@@ -194,8 +261,12 @@ def hybrid_search(
     }
     
     # 원본 DataFrame에서 해당 ID를 가진 행 추출 및 순서 유지
-    # set_index를 사용하여 빠르게 조회
-    df_indexed = chunks_df.set_index("chunk_id")
+    # set_index를 사용하여 빠르게 조회 (중복 chunk_id는 첫 행만 유지해 .loc 다중행 매칭 방지)
+    df_indexed = (
+        chunks_df.assign(chunk_id=chunks_df["chunk_id"].astype(str))
+        .drop_duplicates(subset="chunk_id", keep="first")
+        .set_index("chunk_id")
+    )
     
     # top_ids가 chunks_df에 없는 경우(삭제된 문서 등) 방지
     valid_ids = [cid for cid in top_ids if cid in df_indexed.index]
@@ -222,15 +293,23 @@ def hybrid_search_with_meta(
     top_k: int = DEFAULT_TOP_K,
     alpha: float = HYBRID_ALPHA,
     where_filter: Dict | None = None, # where_filter 추가
+    tfidf_chunk_ids: List[str] | None = None,
 ) -> pd.DataFrame:
     """노트북과 같은 형식으로 메타데이터 열을 청크 텍스트와 함께 반환합니다."""
-    hits = hybrid_search(collection_name, chunks_df, tfidf_vectorizer, tfidf_matrix, query, top_k, alpha, where_filter) # where_filter 전달
+    hits = hybrid_search(collection_name, chunks_df, tfidf_vectorizer, tfidf_matrix, query, top_k, alpha, where_filter, tfidf_chunk_ids) # where_filter 전달
     out = hits.copy()
     out["title"] = out["chunk_text"].apply(_extract_title)
     for column in ("topics", "category", "published_at", "url", "source", "notice_id"):
         if column not in out.columns:
             out[column] = ""
-    desired = ["chunk_id", "title", "chunk_text", "hybrid_score", "vector_score", "sparse_score", "topics", "category", "published_at", "url", "source", "notice_id"]
+    # major/entry_year/source_type/attachments는 후속 학과 필터·entry_year 가산점·첨부 링크
+    # 로직이 사용하므로 존재하면 반드시 함께 반환한다(누락 시 해당 기능이 조용히 비활성).
+    desired = [
+        "chunk_id", "title", "chunk_text", "hybrid_score", "vector_score", "sparse_score",
+        "topics", "category", "published_at", "url", "source", "notice_id",
+        "major", "entry_year", "source_type", "attachments",
+        "doc_id", "position",  # parent-document 확장(이웃 청크 결합)에 사용
+    ]
     existing = [col for col in desired if col in out.columns]
     return out[existing]
 
@@ -247,6 +326,7 @@ def _extract_title(text: str) -> str:
 __all__ = [
     "train_tfidf",
     "load_tfidf",
+    "load_tfidf_with_ids",
     "read_tfidf_metadata",
     "hybrid_search",
     "hybrid_search_with_meta",

@@ -21,9 +21,29 @@ for _path in (DATA_DIR, ARTIFACT_DIR, CHROMA_DIR, MODEL_DIR, VECTORIZER_DIR, CHU
     _path.mkdir(parents=True, exist_ok=True)
 
 # 임베딩 관련 설정.
+# 기본 KURE-v1(무료, MIT)은 한국어 검색 벤치마크 최상위. 더 가벼운 무료 대안으로
+# 교체할 때는 EMBED_MODEL과 함께 프리픽스 설정이 필요할 수 있다:
+#   intfloat/multilingual-e5-small (118M, 5배 가벼움):
+#     EMBED_QUERY_PREFIX="query: "  EMBED_PASSAGE_PREFIX="passage: "
+#   Alibaba-NLP/gte-multilingual-base (305M): 프리픽스 불필요
+# ⚠️ 모델 교체 시 반드시 scripts/build_indices.py로 전체 재인덱싱 필요(벡터 호환 안 됨).
 EMBED_MODEL_NAME = os.getenv("EMBED_MODEL", "nlpai-lab/KURE-v1")
 EMBED_DEVICE = os.getenv("EMBED_DEVICE", "cpu")
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "8"))
+# E5 계열처럼 질의/문서에 서로 다른 프리픽스를 요구하는 모델 지원(KURE/BGE-M3는 빈 값).
+EMBED_QUERY_PREFIX = os.getenv("EMBED_QUERY_PREFIX", "")
+EMBED_PASSAGE_PREFIX = os.getenv("EMBED_PASSAGE_PREFIX", "")
+
+# Cross-encoder 리랭커 (정확도 향상 — 하이브리드 top-N 후보를 질의-문서 쌍으로 정밀 재정렬).
+# 모델(~2GB) 다운로드와 CPU 추론 지연(쿼리당 1~5초)이 있어 기본 비활성.
+# 켜려면: RERANKER_ENABLED=1 (모델은 무료, 최초 1회 자동 다운로드)
+RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "0") == "1"
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANKER_CANDIDATES = int(os.getenv("RERANKER_CANDIDATES", "20"))  # 재정렬할 상위 후보 수
+
+# Parent-document 확장: 검색은 작은 청크로 하되, 생성 컨텍스트에는 같은 문서의
+# 이웃 청크(앞뒤 1개)를 함께 제공해 잘린 근거를 보완한다(추가 비용 없음, 기본 활성).
+PARENT_CONTEXT_ENABLED = os.getenv("PARENT_CONTEXT_ENABLED", "1") == "1"
 
 # 청크 분할과 검색 기본값.
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "300")) # 청크 크기 기본값
@@ -75,6 +95,14 @@ OLLAMA_REQUEST_RETRIES = int(os.getenv("OLLAMA_REQUEST_RETRIES", "2"))
 USE_QUERY_ANALYSIS = os.getenv("RAG_USE_QUERY_ANALYSIS", "1") == "1"
 QUERY_ANALYSIS_MAX_QUERIES = int(os.getenv("QUERY_ANALYSIS_MAX_QUERIES", "1"))
 
+# 질의 분해(멀티 데이터셋 검색) 설정.
+# 졸업/수강 계획처럼 한 질문이 요건(rules)+과목(courses)+일정(schedule)+연락처(staff) 등
+# 여러 데이터셋을 동시에 필요로 할 때, 질의분석기가 질문을 측면별 서브쿼리로 분해하고
+# 필요한 데이터셋 합집합을 라우트에 더해 융합 답변을 만들도록 한다. 단순 질문은 영향받지 않는다.
+RAG_DECOMPOSE_ENABLED = os.getenv("RAG_DECOMPOSE_ENABLED", "1") == "1"
+# 복합 질문에서 사용할 분해 서브쿼리 최대 개수(라우트 데이터셋 수와 곱해져 검색 횟수가 되므로 과도하지 않게).
+RAG_MAX_SUBQUERIES = int(os.getenv("RAG_MAX_SUBQUERIES", "4"))
+
 # 대화 기록 관련 설정 (인메모리).
 MAX_HISTORY_STORE_SIZE = int(os.getenv("MAX_HISTORY_STORE_SIZE", "1000"))
 
@@ -113,6 +141,12 @@ __all__ = [
     "EMBED_MODEL_NAME",
     "EMBED_DEVICE",
     "EMBED_BATCH_SIZE",
+    "EMBED_QUERY_PREFIX",
+    "EMBED_PASSAGE_PREFIX",
+    "RERANKER_ENABLED",
+    "RERANKER_MODEL",
+    "RERANKER_CANDIDATES",
+    "PARENT_CONTEXT_ENABLED",
     "CHUNK_SIZE",
     "CHUNK_OVERLAP",
     "HYBRID_ALPHA",
@@ -136,6 +170,8 @@ __all__ = [
     "OLLAMA_TIMEOUT_SECONDS",
     "USE_QUERY_ANALYSIS",
     "QUERY_ANALYSIS_MAX_QUERIES",
+    "RAG_DECOMPOSE_ENABLED",
+    "RAG_MAX_SUBQUERIES",
     "MAX_HISTORY_STORE_SIZE",
     "REDIS_URL",
     "REDIS_HISTORY_TTL_SECONDS",

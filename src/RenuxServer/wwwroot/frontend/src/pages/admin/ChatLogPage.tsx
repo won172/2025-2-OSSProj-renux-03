@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
 import type { RagChatLog } from '../../types/admin'
@@ -20,6 +20,7 @@ const ChatLogPage = () => {
   const [logs, setLogs] = useState<RagChatLog[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   // 200건 일괄 렌더링 방지: 검색 필터 + 점진 표시
   const [searchTerm, setSearchTerm] = useState('')
   const [visibleCount, setVisibleCount] = useState(25)
@@ -35,27 +36,35 @@ const ChatLogPage = () => {
   }, [logs, searchTerm])
   const visibleLogs = filteredLogs.slice(0, visibleCount)
 
-  useEffect(() => {
-    const fetchLogs = async () => {
-      setLoading(true)
-      try {
-        const data = await apiFetch<RagChatLog[]>('/admin/rag-logs-list?limit=200')
-        if (data && Array.isArray(data)) {
-          setLogs(data)
-        } else {
-          console.error('Invalid data received:', data)
-          setLogs([])
-          setError('서버에서 올바르지 않은 데이터를 반환했습니다.')
-        }
-      } catch (e) {
-        console.error('Failed to fetch logs:', e)
-        setError('질문 로그를 불러오는데 실패했습니다.')
-      } finally {
-        setLoading(false)
+  const fetchLogs = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await apiFetch<RagChatLog[]>('/admin/rag-logs-list?limit=200')
+      if (data && Array.isArray(data)) {
+        setLogs(data)
+      } else {
+        console.error('Invalid data received:', data)
+        setLogs([])
+        setError('서버에서 올바르지 않은 데이터를 반환했습니다.')
       }
+    } catch (e) {
+      console.error('Failed to fetch logs:', e)
+      setError('질문 로그를 불러오는데 실패했습니다.')
+    } finally {
+      setLoading(false)
     }
-    fetchLogs()
   }, [])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await fetchLogs()
+    setRefreshing(false)
+  }
+
+  useEffect(() => {
+    fetchLogs()
+  }, [fetchLogs])
 
   return (
     <div className="admin-page-wrapper">
@@ -63,18 +72,24 @@ const ChatLogPage = () => {
         <header className="admin-header glass-panel compact">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <button 
-                  className="ghost-btn" 
-                  onClick={() => navigate('/admin/university')}
-                  style={{ padding: '8px 12px', fontSize: '0.9rem' }}
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => navigate('/admin/university')}
+                style={{ padding: '8px 12px', fontSize: '0.9rem' }}
               >
                 ← 뒤로가기
               </button>
               <h1 className="admin-title compact" style={{ margin: 0 }}>전체 질문 로그</h1>
             </div>
-            <button className="hero-btn hero-btn--primary" onClick={() => navigate('/')}>
-              홈으로
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" className="ghost-btn" onClick={handleRefresh} disabled={refreshing || loading}>
+                {refreshing ? '새로고침 중...' : '새로고침'}
+              </button>
+              <button type="button" className="hero-btn hero-btn--primary" onClick={() => navigate('/')}>
+                홈으로
+              </button>
+            </div>
           </div>
         </header>
 

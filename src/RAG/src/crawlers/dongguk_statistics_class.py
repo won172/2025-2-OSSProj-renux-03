@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import warnings
+from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
@@ -12,6 +13,8 @@ from bs4 import BeautifulSoup, FeatureNotFound, Tag
 warnings.filterwarnings("ignore")
 
 TARGET_URL = "https://stat.dongguk.edu/page/176"
+# 실행 위치와 무관하게 ingest가 읽는 src/RAG/data/에 저장되도록 모듈 기준 절대경로 사용
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; DonggukStatisticsCrawler/0.1)",
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -155,7 +158,7 @@ def normalize_course_description(df: pd.DataFrame) -> pd.DataFrame:
 
     working = df.copy()
     working.columns = [str(col).strip() for col in working.columns]
-    working = working.applymap(lambda value: re.sub(r"\s+", " ", str(value)).strip() if pd.notna(value) else "")
+    working = working.map(lambda value: re.sub(r"\s+", " ", str(value)).strip() if pd.notna(value) else "")
     working = working.loc[:, ~(working.eq("").all())]
 
     if not working.empty:
@@ -164,7 +167,7 @@ def normalize_course_description(df: pd.DataFrame) -> pd.DataFrame:
         if any(any(keyword in token for keyword in keywords_flat) for token in first_row_tokens):
             working.columns = [str(value).strip() for value in working.iloc[0].tolist()]
             working = working.iloc[1:].reset_index(drop=True)
-            working = working.applymap(lambda value: re.sub(r"\s+", " ", str(value)).strip() if pd.notna(value) else "")
+            working = working.map(lambda value: re.sub(r"\s+", " ", str(value)).strip() if pd.notna(value) else "")
 
     length = len(working)
     columns_data = {target: ["" for _ in range(length)] for target in COURSE_DESCRIPTION_TARGET_COLUMNS}
@@ -252,7 +255,7 @@ def main() -> None:
     section_frames = {}
     for section, group in course_df.groupby("section", dropna=False):
         section_df = group.drop(columns=["section"]).reset_index(drop=True)
-        section_df = section_df.applymap(lambda value: re.sub(r"\s+", " ", str(value)).strip() if pd.notna(value) else "")
+        section_df = section_df.map(lambda value: re.sub(r"\s+", " ", str(value)).strip() if pd.notna(value) else "")
         section_df = section_df.loc[:, ~(section_df.eq("").all())]
         section_frames[str(section)] = section_df
 
@@ -261,8 +264,9 @@ def main() -> None:
     major_course_overview_df = assigned_frames.get("major_course_overview_df", pd.DataFrame())
     course_description_df = assigned_frames.get("course_description_df", pd.DataFrame())
 
-    major_course_overview_df.to_csv("./data/dongguk_statistics_major_course.csv", index=False, encoding="utf-8-sig")
-    course_description_df.to_csv("./data/dongguk_statistics_course_descriptions.csv", index=False, encoding="utf-8-sig")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    major_course_overview_df.to_csv(DATA_DIR / "dongguk_statistics_major_course.csv", index=False, encoding="utf-8-sig")
+    course_description_df.to_csv(DATA_DIR / "dongguk_statistics_course_descriptions.csv", index=False, encoding="utf-8-sig")
     print("저장 완료: statistics major/course description CSV")
 
 
