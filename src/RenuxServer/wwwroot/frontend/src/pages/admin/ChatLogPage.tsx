@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
 import type { RagChatLog } from '../../types/admin'
@@ -20,6 +20,20 @@ const ChatLogPage = () => {
   const [logs, setLogs] = useState<RagChatLog[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // 200건 일괄 렌더링 방지: 검색 필터 + 점진 표시
+  const [searchTerm, setSearchTerm] = useState('')
+  const [visibleCount, setVisibleCount] = useState(25)
+
+  const filteredLogs = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
+    if (!term) return logs
+    return logs.filter(
+      (log) =>
+        (log.question ?? '').toLowerCase().includes(term) ||
+        (log.answer ?? '').toLowerCase().includes(term),
+    )
+  }, [logs, searchTerm])
+  const visibleLogs = filteredLogs.slice(0, visibleCount)
 
   useEffect(() => {
     const fetchLogs = async () => {
@@ -65,12 +79,23 @@ const ChatLogPage = () => {
         </header>
 
         <section className="admin-content glass-panel" style={{ marginTop: '20px', padding: '20px', maxHeight: 'calc(100vh - 150px)', overflowY: 'auto' }}>
+          <input
+            type="search"
+            className="admin-input"
+            placeholder="질문/답변 내용 검색"
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value)
+              setVisibleCount(25)
+            }}
+            style={{ marginBottom: '16px', width: '100%', maxWidth: '420px' }}
+          />
           {loading ? (
             <div className="admin-table__empty">로딩 중...</div>
           ) : error ? (
             <div className="admin-alert admin-alert--danger">{error}</div>
-          ) : logs.length === 0 ? (
-            <div className="admin-table__empty">기록된 질문 로그가 없습니다.</div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="admin-table__empty">{searchTerm ? '검색 결과가 없습니다.' : '기록된 질문 로그가 없습니다.'}</div>
           ) : (
             <div className="admin-table">
               <div className="admin-table__head" style={{ gridTemplateColumns: '0.7fr 1fr 3fr 0.5fr' }}>
@@ -80,7 +105,7 @@ const ChatLogPage = () => {
                 <span style={{ textAlign: 'center' }}>참조</span>
               </div>
               <ul className="admin-table__body">
-                {logs.map((log) => (
+                {visibleLogs.map((log) => (
                   <li key={log.id} className="admin-table__row" style={{ gridTemplateColumns: '0.7fr 1fr 3fr 0.5fr', alignItems: 'start', padding: '16px 12px' }}>
                     <span style={{ opacity: 0.8, fontSize: '0.9rem' }}>{formatDateTime(log.created_at)}</span>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -103,6 +128,13 @@ const ChatLogPage = () => {
                   </li>
                 ))}
               </ul>
+              {visibleCount < filteredLogs.length && (
+                <div style={{ textAlign: 'center', padding: '16px' }}>
+                  <button className="ghost-btn" type="button" onClick={() => setVisibleCount((c) => c + 25)}>
+                    더 보기 ({visibleCount}/{filteredLogs.length})
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </section>

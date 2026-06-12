@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
 import type { UserRole } from '../../types/auth'
 
@@ -66,7 +66,18 @@ const RequireRole = ({ allow, children }: RequireRoleProps) => {
   }
 
   if (!role || !allow.includes(role)) {
-    return <Navigate to="/" replace />
+    // 무언 리다이렉트 대신 이유를 안내 — 사용자가 왜 이동했는지 알 수 있도록
+    return (
+      <div className="app-shell" style={{ padding: '2rem', textAlign: 'center' }}>
+        <h2 style={{ marginBottom: '0.5rem' }}>접근 권한이 없습니다</h2>
+        <p style={{ marginBottom: '1.5rem', color: '#666' }}>
+          이 페이지는 관리자 계정으로 로그인해야 이용할 수 있습니다.
+        </p>
+        <Link to="/" className="buddy-secondary-btn" style={{ textDecoration: 'none' }}>
+          홈으로 돌아가기
+        </Link>
+      </div>
+    )
   }
 
   return <>{children}</>

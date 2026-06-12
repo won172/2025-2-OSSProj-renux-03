@@ -1,9 +1,10 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import rehypeExternalLinks from 'rehype-external-links'
 import remarkGfm from 'remark-gfm'
 import { apiFetch } from '../../api/client'
+import { useChatStream } from '../../hooks/useChatStream'
 import donggukLogo from '../../assets/images/dongguk-logo.png'
 import dongddokiLogo from '../../assets/images/dongddoki-logo.png'
 import SourceCards, { type ChatSource } from '../../components/chat/SourceCards'
@@ -72,6 +73,7 @@ const HomePage = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const skipLoadOnSelectRef = useRef(false)
   const isLoadingMoreRef = useRef(false)
+  const { streamMessage } = useChatStream()
 
   // Mobile sidebar state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -239,11 +241,14 @@ const HomePage = () => {
 
   const handleLogout = async () => {
     try {
-      await apiFetch('/auth/signout', { method: 'GET' })
-	window.location.reload()
+      await apiFetch('/auth/signout', { method: 'POST' })
+      // 이전 세션의 역할이 다음 사용자에게 노출되지 않도록 캐시 제거
+      window.localStorage.removeItem('renux-user-role')
+      window.location.reload()
     } catch (error) {
       console.error('Failed to logout', error)
-      alert('로그아웃에 실패했습니다. 다시 시도해주세요.')
+      // alert() 대신 인라인 표시 — 다른 에러 처리 패턴과 통일
+      setChatError('로그아웃에 실패했습니다. 다시 시도해주세요.')
     }
   }
 
@@ -337,7 +342,7 @@ const HomePage = () => {
     loadMessages(selectedChatId)
   }, [selectedChatId])
 
-  const handleChatSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleChatSubmit = async (event: FormEvent<HTMLFormElement> | KeyboardEvent<HTMLTextAreaElement>) => {
     event.preventDefault()
     
     const trimmed = chatInput.trim()
@@ -366,7 +371,9 @@ const HomePage = () => {
         })
 
         if (!isAuthenticated) {
-          // saveGuestChat(chatRoom)
+          // 게스트도 새로고침 후 사이드바에서 채팅방을 다시 찾을 수 있도록 저장
+          // (수동 생성 경로 handleCreateChat과 동일한 동작으로 통일)
+          saveGuestChat(chatRoom)
         }
 
         currentChatId = chatRoom.id
@@ -407,34 +414,62 @@ const HomePage = () => {
       createdTime: new Date().toISOString(),
     }
 
-    // 기존 메시지 목록 뒤에 내 메시지 추가
-    setChatMessages((prev) => [...prev, newMsg])
+    // 스트리밍 토큰을 채워 넣을 빈 봇 말풍선을 미리 추가(내용이 비면 타이핑 인디케이터로 렌더)
+    const botMessageId = typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `bot-${Date.now()}`
+    const botPlaceholder: ChatPageMessage = {
+      id: botMessageId,
+      chatId: currentChatId,
+      isAsk: false,
+      content: '',
+      createdTime: new Date().toISOString(),
+      sources: [],
+    }
+
+    // 내 메시지 + 빈 봇 말풍선을 함께 추가
+    setChatMessages((prev) => [...prev, newMsg, botPlaceholder])
     setChatInput('')
     setChatSending(true)
     setChatError(null)
-    
+
     setTimeout(scrollToBottom, 0)
 
     try {
-      const reply = await apiFetch<ChatPageMessage>('/chat/msg', {
-        method: 'POST',
-        json: {
-          id: newMsg.id,
-          chatId: newMsg.chatId,
-          isAsk: newMsg.isAsk,
-          content: newMsg.content,
-          createdTime: newMsg.createdTime,
+      const { receivedAny } = await streamMessage(
+        { id: newMsg.id, chatId: currentChatId, content: trimmed, createdTime: newMsg.createdTime },
+        {
+          onText: (accumulated) => {
+            setChatMessages((prev) =>
+              prev.map((msg) => (msg.id === botMessageId ? { ...msg, content: accumulated } : msg)),
+            )
+            setTimeout(scrollToBottom, 0)
+          },
+          onMetadata: (meta) =>
+            setChatMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId
+                  ? { ...msg, sources: meta.sources, isFallback: meta.isFallback, fallbackReason: meta.fallbackReason }
+                  : msg,
+              ),
+            ),
         },
-      })
-      
-      if (reply) {
-        setChatMessages((prev) => [...prev, reply])
-        setTimeout(scrollToBottom, 100)
+      )
+
+      // 토큰을 하나도 받지 못하면 빈 말풍선 대신 안내 문구로 대체
+      if (!receivedAny) {
+        setChatMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === botMessageId
+              ? { ...msg, content: '응답을 받지 못했습니다. 잠시 후 다시 시도해주세요.', isFallback: true }
+              : msg,
+          ),
+        )
       }
+      setTimeout(scrollToBottom, 100)
     } catch (err) {
       console.error('Failed to send message', err)
       setChatError('메시지를 전송하지 못했습니다.')
-      setChatMessages((prev) => prev.filter((msg) => msg.id !== newMsg.id))
+      // 실패 시 내 메시지와 빈 봇 말풍선을 모두 제거하고 입력값 복원
+      setChatMessages((prev) => prev.filter((msg) => msg.id !== newMsg.id && msg.id !== botMessageId))
       setChatInput(trimmed)
     } finally {
       setChatSending(false)
@@ -635,7 +670,8 @@ const HomePage = () => {
               className="home-chat__thread-wrapper"
               onScroll={(e) => {
                 const target = e.currentTarget
-                if (target.scrollTop === 0 && hasMoreMessages && !isLoadingMore) {
+                // 정확히 0이 아닌 근접 임계값 — 관성 스크롤로 0을 스치지 못해도 로드되도록
+                if (target.scrollTop <= 16 && hasMoreMessages && !isLoadingMore) {
                   loadMoreMessages()
                 }
               }}
@@ -670,51 +706,53 @@ const HomePage = () => {
 
                   {chatMessages.map((message) => {
                     const messageTime = formatMessageTime(message.createdTime)
+                    // 스트리밍 대기 중인 빈 봇 말풍선은 타이핑 인디케이터로 렌더
+                    const isStreamingPlaceholder = !message.isAsk && !message.content
                     return (
                       <li
                         key={message.id}
                         className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'} ${!message.isAsk && message.isFallback ? 'chat-bubble--fallback' : ''}`}
                       >
-                        {!message.isAsk && message.isFallback && <span className="chat-fallback-badge">{getFallbackLabel(message.fallbackReason)}</span>}
-                        <ReactMarkdown
-                          className="chat-bubble__text"
-                          remarkPlugins={[remarkGfm]}
-                          rehypePlugins={[[rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }]]}
-                          components={{
-                            a: ({ node, ...props }) => (
-                              <a
-                                {...props}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ color: '#0d6efd', textDecoration: 'underline', pointerEvents: 'auto', cursor: 'pointer' }}
-                            onClick={(e) => e.stopPropagation()}
+                        {isStreamingPlaceholder ? (
+                          <div className="typing-indicator">
+                            <div className="typing-dot"></div>
+                            <div className="typing-dot"></div>
+                            <div className="typing-dot"></div>
+                          </div>
+                        ) : (
+                          <>
+                            {!message.isAsk && message.isFallback && <span className="chat-fallback-badge">{getFallbackLabel(message.fallbackReason)}</span>}
+                            <ReactMarkdown
+                              className="chat-bubble__text"
+                              remarkPlugins={[remarkGfm]}
+                              rehypePlugins={[[rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }]]}
+                              components={{
+                                a: ({ node, ...props }) => (
+                                  <a
+                                    {...props}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ color: '#0d6efd', textDecoration: 'underline', pointerEvents: 'auto', cursor: 'pointer' }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                ),
+                              }}
+                            >
+                              {message.content}
+                            </ReactMarkdown>
+                            {!message.isAsk && (
+                              <SourceCards
+                                sources={message.sources}
+                                showScores={showRagScores}
+                                isFallback={message.isFallback}
                               />
-                            ),
-                          }}
-                        >
-                          {message.content}
-                        </ReactMarkdown>
-                        {!message.isAsk && (
-                          <SourceCards
-                            sources={message.sources}
-                            showScores={showRagScores}
-                            isFallback={message.isFallback}
-                          />
+                            )}
+                            {messageTime && <time className="chat-bubble__time">{messageTime}</time>}
+                          </>
                         )}
-                        {messageTime && <time className="chat-bubble__time">{messageTime}</time>}
                       </li>
                     )
                   })}
-
-                  {chatSending && (
-                    <li className="chat-bubble chat-bubble--bot">
-                      <div className="typing-indicator">
-                        <div className="typing-dot"></div>
-                        <div className="typing-dot"></div>
-                        <div className="typing-dot"></div>
-                      </div>
-                    </li>
-                  )}
                   <div ref={messagesEndRef} />
                 </ul>
               )}
@@ -728,9 +766,10 @@ const HomePage = () => {
                   value={chatInput}
                   onChange={(event) => setChatInput(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
+                    // isComposing: 한글 조합 중 Enter가 글자 확정+전송으로 이중 동작하는 것 방지
+                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                       event.preventDefault()
-                      handleChatSubmit(event as any)
+                      handleChatSubmit(event)
                     }
                   }}
                   rows={3}
@@ -741,7 +780,7 @@ const HomePage = () => {
                   type="submit"
                   disabled={chatSending || (departmentsLoading && !selectedChatId)}
                 >
-                  {chatSending ? '전송' : '보내기'}
+                  {chatSending ? '전송 중...' : '보내기'}
                 </button>
               </div>
               {chatError && <span className="home-chat__error">{chatError}</span>}

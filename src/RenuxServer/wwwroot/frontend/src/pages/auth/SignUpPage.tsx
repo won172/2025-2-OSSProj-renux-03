@@ -122,8 +122,8 @@ const SignUpPage = () => {
           majorId: selectedMajor.id ?? selectedMajor.majorId,
         },
       })
-      window.alert('회원가입이 성공적으로 완료되었습니다!')
-      navigate('/auth/in')
+      // alert() 대신 로그인 페이지로 이동하며 성공 상태를 전달 (블로킹 다이얼로그 제거)
+      navigate('/auth/in', { state: { signupSuccess: true } })
     } catch (submitError) {
       console.error('회원가입 실패:', submitError)
       if (submitError && typeof submitError === 'object' && 'status' in submitError) {
