@@ -20,6 +20,10 @@ src/RenuxServer/wwwroot/frontend/.env*
 *.db
 *.sqlite
 *.sqlite3
+
+# DB dumps (PII 위험 — 저장소에 커밋 금지)
+*.sql
+!src/RenuxServer/Migrations/**/*.sql
 src/RAG/rag_data.db
 src/RAG/rag_database.db
 src/RAG/src/rag_database.db
@@ -32,3 +36,21 @@ src/RAG/artifacts/vectorizers/
 src/RAG/artifacts/vectorizers_backup_*/
 src/RAG/artifacts/models/
 src/RAG/artifacts/db_chroma/
+
+# RAG 평가 결과(생성물)
+src/RAG/tests/evaluation_results_*.csv
+
+# 작업용 문서(소스 아님 — 저장소에 올리지 않음)
+/CODE_REVIEW.md
+/FEATURE_MAP.md
+/UI_REVIEW.md
+/ADMIN_REVIEW.md
+/KNOWLEDGE_FLOW_REVIEW.md
+/CLAUDE.md
+
+# 어시스턴트/로컬 작업 디렉터리
+/.claude/
+
+# 인스타 홍보용 이미지 + 이미지 생성 코드/폰트 (소스 아님)
+/insta/
+/canvas-design/
