@@ -48,7 +48,60 @@ def make_soup(markup: str) -> BeautifulSoup:
 
 
 def parse_schedule(html: str) -> pd.DataFrame:
+    """학사일정 페이지를 파싱합니다.
+
+    1순위: 페이지의 `<table>`(caption "20XX학년도 교내일정") 구조 기반 파싱.
+    2순위(폴백): 과거 방식인 텍스트 흐름 파싱 — 사이트가 테이블을 없애도 동작 유지.
+    """
     soup = make_soup(html)
+
+    table_df = _parse_schedule_table(soup)
+    if table_df is not None and not table_df.empty:
+        return table_df
+
+    return _parse_schedule_from_text(soup)
+
+
+def _parse_schedule_table(soup: BeautifulSoup) -> Optional[pd.DataFrame]:
+    """구조화된 일정 테이블을 파싱합니다. 테이블이 없거나 형식이 다르면 None."""
+    for table in soup.find_all("table"):
+        caption = table.find("caption")
+        caption_text = caption.get_text(" ", strip=True) if caption else ""
+        year_match = YEAR_TITLE_PATTERN.search(caption_text)
+        academic_year = year_match.group(1) if year_match else ""
+
+        records: List[dict[str, str]] = []
+        for row in table.find_all("tr"):
+            cells = [c.get_text(" ", strip=True) for c in row.find_all(["th", "td"])]
+            if not cells:
+                continue
+            # 날짜가 들어있는 셀과 내용 셀을 위치가 아닌 패턴으로 찾는다(컬럼 추가/삭제에 견고).
+            date_cell = next((c for c in cells if DATE_PATTERN.search(c)), None)
+            if date_cell is None:
+                continue
+            content_cell = cells[-1] if cells[-1] != date_cell else (cells[-2] if len(cells) >= 2 else "")
+            content, department = extract_department(content_cell)
+            content = clean_event_content(content)
+            if not content:
+                continue
+            start, end = split_period(date_cell)
+            records.append(
+                {
+                    "학년도": academic_year,
+                    "구분": "학사일정",
+                    "내용": content,
+                    "주관부서": department,
+                    "start": start,
+                    "end": end,
+                }
+            )
+
+        if records:
+            return pd.DataFrame(records)
+    return None
+
+
+def _parse_schedule_from_text(soup: BeautifulSoup) -> pd.DataFrame:
     lines = [
         line.strip()
         for line in soup.get_text("\n", strip=True).splitlines()
@@ -79,7 +132,8 @@ def parse_schedule(html: str) -> pd.DataFrame:
 
         event_match = EVENT_LINE_PATTERN.match(line)
         if not event_match:
-            if current is not None and line not in {"2026", "2025", "2024", "2023"} and not re.fullmatch(r"\d{2}", line):
+            # 연도(4자리)/월(2자리) 라벨 줄은 내용에 합치지 않는다 — 연도 하드코딩 제거
+            if current is not None and not re.fullmatch(r"\d{4}", line) and not re.fullmatch(r"\d{2}", line):
                 if not DEPT_PATTERN.search(line):
                     extra_content = clean_event_content(line)
                     if extra_content:

@@ -59,17 +59,34 @@ DEFAULT_MAX_PAGES = 10 # 5 -> 30으로 증가 (더 많은 과거 공지 수집)
 DEFAULT_REQUEST_DELAY = 0.5
 
 PARSER_CANDIDATES: Iterable[str] = ("lxml", "html5lib", "html.parser")
-HWPJSON_SECTION_PATTERN = re.compile(r"<!\[[^<]*?data-hwpjson.*?\]>", re.IGNORECASE | re.DOTALL)
 
 
 # ===== HTML 처리 헬퍼 =====
 def _strip_hwpjson_sections(markup: str) -> str:
-    cleaned = markup
+    """`<![ ... data-hwpjson ... ]>` 구획을 제거합니다.
+
+    정규식 DOTALL `.*?` 스캔은 대형 HWP 본문에서 catastrophic backtracking을
+    유발할 수 있어, 문자열 인덱스 기반 수동 스캐너로 처리한다.
+    """
+    lower = markup.lower()
+    out: List[str] = []
+    pos = 0
     while True:
-        updated = HWPJSON_SECTION_PATTERN.sub("", cleaned)
-        if updated == cleaned:
+        start = lower.find("<![", pos)
+        if start == -1:
+            out.append(markup[pos:])
             break
-        cleaned = updated
+        end = lower.find("]>", start)
+        if end == -1:
+            out.append(markup[pos:])
+            break
+        section_lower = lower[start : end + 2]
+        if "data-hwpjson" in section_lower:
+            out.append(markup[pos:start])  # 구획 제거
+        else:
+            out.append(markup[pos : end + 2])
+        pos = end + 2
+    cleaned = "".join(out)
     if "data-hwpjson" in cleaned.lower():
         cleaned = re.sub(r"<!\[\s*data-hwpjson", "<![CDATA", cleaned, flags=re.IGNORECASE)
     return cleaned
@@ -243,12 +260,21 @@ def collect_board(
     seen_ids: set[int] = set()
     page = 1
     stop_collecting = False
+    failed_articles = 0
+    # 목록이 대체로 날짜 역순이지만 중간에 섞인 글이 있을 수 있으므로,
+    # 오래된 글이 연속으로 이 횟수만큼 나와야 수집을 중단한다(즉시 중단 시 누락 위험).
+    OLD_STREAK_TO_STOP = 5
 
+    old_streak = 0
     while True:
         if max_pages is not None and page > max_pages:
             break
 
-        notice_list = fetch_notice_list(board_code, page=page)
+        try:
+            notice_list = fetch_notice_list(board_code, page=page)
+        except Exception as exc:  # noqa: BLE001 — 목록 한 페이지 실패가 게시판 전체를 중단시키지 않도록
+            print(f"⚠️ [{board_name}] 목록 페이지 {page} 수집 실패: {exc}")
+            break
         if not notice_list:
             break
 
@@ -258,7 +284,15 @@ def collect_board(
                 continue
             seen_ids.add(article_id)
 
-            detail = fetch_notice_detail(board_code, article_id)
+            # 상세 파싱/네트워크 오류가 게시판 전체 수집을 중단시키지 않도록 격리
+            try:
+                detail = fetch_notice_detail(board_code, article_id)
+            except Exception as exc:  # noqa: BLE001
+                failed_articles += 1
+                print(f"⚠️ [{board_name}] 상세 수집 실패 (article_id={article_id}): {exc}")
+                if delay:
+                    time.sleep(delay)
+                continue
 
             record = {
                 "board_name": board_name,
@@ -279,9 +313,15 @@ def collect_board(
             if earliest_year and isinstance(posted_at, (date, datetime)):
                 if posted_at.year < earliest_year:
                     if not record["is_pinned"]:
-                        stop_collecting = True
-                        break
+                        old_streak += 1
+                        if old_streak >= OLD_STREAK_TO_STOP:
+                            stop_collecting = True
+                            break
+                    if delay:
+                        time.sleep(delay)
                     continue
+                else:
+                    old_streak = 0
 
             records.append(record)
 
@@ -291,6 +331,9 @@ def collect_board(
         if stop_collecting:
             break
         page += 1
+
+    if failed_articles:
+        print(f"⚠️ [{board_name}] 상세 수집 실패 {failed_articles}건 (수집 성공 {len(records)}건)")
 
     if not records:
         columns = [COLUMN_LABELS[col] for col in SELECT_COLUMNS]

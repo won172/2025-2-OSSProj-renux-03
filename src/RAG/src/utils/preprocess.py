@@ -2,35 +2,76 @@
 from __future__ import annotations
 
 import hashlib
+import html as html_module
 import re
+import unicodedata
 from datetime import datetime, date
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Optional
 
 from pandas import DataFrame
 
 
-_TAG_SCRIPT_STYLE = re.compile(r"(?is)<(script|style).*?>.*?</\\1>")
-_TAG_BREAK = re.compile(r"(?is)<br\\s*/?>")
-_TAG_PARAGRAPH = re.compile(r"(?is)</p>")
-_TAG_GENERIC = re.compile(r"(?is)<.*?>")
-_WHITESPACE = re.compile(r"[ \t\u00A0]+")
+# 주의: 이전 버전은 r"</\\1>"처럼 raw string 안에 이중 백슬래시를 써서
+# 백레퍼런스가 동작하지 않았고, script/style 본문(JS/CSS 코드)이
+# 임베딩 텍스트에 그대로 섞여 들어갔다. 아래는 수정된 패턴(정규식 폴백용).
+_TAG_SCRIPT_STYLE = re.compile(r"(?is)<(script|style)\b[^>]*>.*?</\1\s*>")
+_TAG_BREAK = re.compile(r"(?is)<br\s*/?>")
+_TAG_PARAGRAPH = re.compile(r"(?is)</(p|div|li|tr|h[1-6])>")
+_TAG_GENERIC = re.compile(r"(?is)<[^>]*>")
+_WHITESPACE = re.compile(r"[ \t ]+")
+# zero-width space/joiner, BOM, soft hyphen 등 보이지 않는 문자
+_INVISIBLE_CHARS = re.compile(r"[​‌‍⁠﻿­]")
 
 
 def strip_html(text: str | None) -> str:
-    """HTML 태그를 제거하고 줄바꿈을 정리합니다."""
+    """HTML에서 본문 텍스트를 추출합니다.
+
+    BeautifulSoup이 있으면 그것을 사용해 script/style/주석을 안전하게 제거하고
+    블록 요소 경계를 줄바꿈으로 보존한다(중첩/비정형 마크업에 견고).
+    없으면 정규식 폴백을 사용한다. 어느 경로든 HTML 엔티티를 해제한다.
+    """
     if not isinstance(text, str):
         return ""
-    text = _TAG_SCRIPT_STYLE.sub(" ", text)
-    text = _TAG_BREAK.sub("\n", text)
-    text = _TAG_PARAGRAPH.sub("\n", text)
-    text = _TAG_GENERIC.sub(" ", text)
-    return text
+    if not text.strip():
+        return ""
+
+    # 빠른 경로: 태그/엔티티가 없으면 그대로 반환
+    if "<" not in text and "&" not in text:
+        return text
+
+    try:
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(text, "html.parser")
+        for node in soup(["script", "style", "noscript", "iframe", "head"]):
+            node.decompose()
+        # 블록 요소 경계를 줄바꿈으로 보존 (표/목록 구조 평탄화 완화)
+        return soup.get_text("\n")
+    except Exception:
+        cleaned = _TAG_SCRIPT_STYLE.sub(" ", text)
+        cleaned = _TAG_BREAK.sub("\n", cleaned)
+        cleaned = _TAG_PARAGRAPH.sub("\n", cleaned)
+        cleaned = _TAG_GENERIC.sub(" ", cleaned)
+        return html_module.unescape(cleaned)
+
+
+def normalize_unicode(text: str | None) -> str:
+    """임베딩/TF-IDF 일관성을 위한 유니코드 정규화.
+
+    - NFKC: 전각 문자(（）１２ｱ 등)·합성 문자를 표준형으로 통일
+    - zero-width/BOM/soft hyphen 등 보이지 않는 문자 제거
+    """
+    if not isinstance(text, str):
+        return ""
+    text = unicodedata.normalize("NFKC", text)
+    return _INVISIBLE_CHARS.sub("", text)
 
 
 def normalize_whitespace(text: str | None) -> str:
     """노트북에서 정의한 공백 정규화 규칙을 적용합니다."""
     if not isinstance(text, str):
         return ""
+    text = normalize_unicode(text)
     text = _WHITESPACE.sub(" ", text)
     text = re.sub(r"(\d)\n([가-힣])", r"\1\2", text)
     text = re.sub(r"([가-힣])\n(\d)", r"\1 \2", text)
@@ -47,24 +88,41 @@ def normalize_whitespace(text: str | None) -> str:
     return text.strip()
 
 
-def standardize_date(value: Any | None) -> Optional[str]: # Type hint changed to Any for flexibility
-    """날짜 문자열을 YYYY-MM-DD 형식으로 맞춥니다."""
+# "2026.06.05." / "2026. 6. 5" / "2026-6-5" / "2026년 6월 5일" 등 유연 매칭
+_DATE_PATTERN = re.compile(
+    r"(?P<y>\d{4})\s*[.\-/년]\s*(?P<m>\d{1,2})\s*[.\-/월]\s*(?P<d>\d{1,2})\s*[.일]?"
+)
+
+
+def standardize_date(value: Any | None) -> Optional[str]:
+    """날짜 값을 YYYY-MM-DD 형식으로 맞춥니다.
+
+    공지 게시일("2026.06.09.")처럼 구분자 뒤 마침표가 붙거나, 한 자리 월/일,
+    구분자 주변 공백이 있는 형식도 허용한다. 실패 시 None.
+    """
     if value is None:
         return None
-    
-    if isinstance(value, date): # datetime.date 객체인 경우 처리
+
+    if isinstance(value, datetime):
         return value.strftime("%Y-%m-%d")
-    
+    if isinstance(value, date):  # datetime.date 객체인 경우 처리
+        return value.strftime("%Y-%m-%d")
+
     if not isinstance(value, str):
         return None
-    
+
     value = value.strip()
-    for pattern in ("%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d", "%Y년 %m월 %d일"):
-        try:
-            return datetime.strptime(value, pattern).strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return None
+    if not value:
+        return None
+
+    match = _DATE_PATTERN.search(value)
+    if not match:
+        return None
+    try:
+        parsed = date(int(match.group("y")), int(match.group("m")), int(match.group("d")))
+    except ValueError:
+        return None
+    return parsed.strftime("%Y-%m-%d")
 
 
 def make_doc_id(*parts: object) -> str:
@@ -169,10 +227,14 @@ def to_chunks(
             segments = chunk_text(text, chunk_size, chunk_overlap) or [text]
 
         for idx, segment in enumerate(segments):
+            segment = segment.strip()
+            if not segment:
+                # 빈 세그먼트는 임베딩 가치가 없으므로 제외
+                continue
             if include_title and doc.get("title"):
                 chunk_body = f"[{doc['title']}]\n\n{segment}".strip()
             else:
-                chunk_body = segment.strip()
+                chunk_body = segment
             chunk = {
                 "chunk_id": make_chunk_id(doc["doc_id"], idx),
                 "doc_id": doc["doc_id"],
@@ -186,6 +248,7 @@ def to_chunks(
 
 __all__ = [
     "strip_html",
+    "normalize_unicode",
     "normalize_whitespace",
     "standardize_date",
     "make_doc_id",
