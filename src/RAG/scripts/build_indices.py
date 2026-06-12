@@ -12,6 +12,7 @@ from src.pipelines.ingest import (
     ingest_notices,
     ingest_rules,
     ingest_schedule,
+    ingest_staff,
 )
 from src.database import init_db
 
@@ -23,6 +24,7 @@ def main() -> None:
         "rules": ingest_rules,
         "schedule": ingest_schedule,
         "courses": ingest_courses,
+        "staff": ingest_staff,
     }
 
     for key, loader in loaders.items():

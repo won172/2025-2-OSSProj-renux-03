@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CouncilOrganization, PendingAnswerReview } from '../../types/admin'
 import { apiFetch } from '../../api/client'
@@ -121,9 +121,12 @@ const UniversityAdminPage = () => {
   const [ragStatus, setRagStatus] = useState<RagAdminStatus | null>(null)
   const [ragStatusError, setRagStatusError] = useState<string | null>(null)
 
-  // Fetch Data
-  useEffect(() => {
-    const fetchData = async () => {
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Fetch Data — 새로고침 버튼에서도 재사용할 수 있도록 useEffect 밖으로 분리
+  const fetchData = useCallback(async () => {
         console.log('Fetching admin data...'); // Added log
         setLoading(true)
         setError(null) // Clear previous errors
@@ -159,7 +162,7 @@ const UniversityAdminPage = () => {
                             let title = '제목 없음';
                             let content = '';
                             let category = '공통';
-                            let parsedData: any = {};
+                            let parsedData: Record<string, string | undefined> = {};
                             
                             try {
                                 parsedData = JSON.parse(item.data);
@@ -203,7 +206,7 @@ const UniversityAdminPage = () => {
                     setPendingReviews(mappedReviews)
                     if (mappedReviews.length > 0) {
                         // Keep selection if exists, else select first
-                        if (!selectedReviewId) setSelectedReviewId(mappedReviews[0].id)
+                        setSelectedReviewId((prev) => prev ?? mappedReviews[0].id)
                     } else {
                         setSelectedReviewId(null)
                     }
@@ -230,9 +233,22 @@ const UniversityAdminPage = () => {
         } finally {
             setLoading(false)
         }
-    }
+  }, [])
+
+  useEffect(() => {
     fetchData()
-  }, []) // Dependency array empty to run once on mount
+  }, [fetchData])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    setActionNotice(null)
+    setActionError(null)
+    try {
+      await fetchData()
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   const selectedReview = useMemo(
     () => pendingReviews.find((review) => review.id === selectedReviewId) ?? null,
@@ -255,26 +271,28 @@ const UniversityAdminPage = () => {
       return;
     }
 
+    setActionNotice(null)
+    setActionError(null)
     try {
         await apiFetch(`/admin/${action}/${reviewId}`, { method: 'POST' })
-        
+
         // Update UI: update status instead of removing
-        setPendingReviews((prev) => prev.map((review) => 
+        setPendingReviews((prev) => prev.map((review) =>
             review.id === reviewId ? { ...review, status: action === 'approve' ? 'approved' : 'rejected' } : review
         ))
-        
-        const actionLabel = action === 'approve' ? '승인했습니다.' : '반려했습니다.'
-        alert(`검수 내역을 ${actionLabel}`)
+
+        // alert() 대신 인라인 알림 — 블로킹 없이 결과 확인 가능
+        setActionNotice(`검수 내역을 ${action === 'approve' ? '승인' : '반려'}했습니다.`)
     } catch (e) {
         console.error('Action failed:', e);
         let message = '요청 처리에 실패했습니다.';
         if (e instanceof Error) {
             message += ` (${e.message})`;
-            // @ts-ignore
-            if (e.status) message += ` [Status: ${e.status}]`;
+            const status = (e as Error & { status?: number }).status;
+            if (status) message += ` [Status: ${status}]`;
         }
-        setError(message) 
-        alert(message)
+        // setError는 전체 페이지를 에러 화면으로 교체하므로 액션 실패는 인라인으로만 표시
+        setActionError(message)
     }
   }
 
@@ -313,9 +331,14 @@ const UniversityAdminPage = () => {
               <p className="admin-eyebrow">ADMINISTRATION</p>
               <h1 className="admin-title compact">관리자 제어 센터</h1>
             </div>
-            <button className="hero-btn hero-btn--primary" type="button" onClick={handleNavigateHome}>
-              메인페이지로 이동
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="ghost-btn" type="button" onClick={handleRefresh} disabled={refreshing}>
+                {refreshing ? '새로고침 중...' : '새로고침'}
+              </button>
+              <button className="hero-btn hero-btn--primary" type="button" onClick={handleNavigateHome}>
+                메인페이지로 이동
+              </button>
+            </div>
           </div>
         </header>
 
@@ -454,7 +477,18 @@ const UniversityAdminPage = () => {
                       <div className="admin-review-detail__answer">
                         <p>{selectedReview.answer}</p>
                       </div>
-                      
+
+                      {actionNotice && (
+                        <div className="admin-alert" style={{ marginTop: '12px', color: '#15803d', background: '#f0fdf4', padding: '10px 14px', borderRadius: '8px' }}>
+                          {actionNotice}
+                        </div>
+                      )}
+                      {actionError && (
+                        <div className="admin-alert admin-alert--danger" style={{ marginTop: '12px' }}>
+                          {actionError}
+                        </div>
+                      )}
+
                       {selectedReview.status === 'pending' && (
                           <div className="admin-review-detail__actions" style={{ marginTop: '20px' }}>
                             <button
@@ -539,7 +573,9 @@ const UniversityAdminPage = () => {
                 </div>
               )}
 
-              <div className="admin-table">
+              {/* 10컬럼 테이블이 좁은 화면에서 찌그러지지 않도록 가로 스크롤 허용 */}
+              <div className="admin-table" style={{ overflowX: 'auto' }}>
+                <div style={{ minWidth: '960px' }}>
                 <div className="admin-table__head" style={{ gridTemplateColumns: '0.8fr 1.1fr 0.7fr 0.7fr 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr 0.7fr' }}>
                   <span>Dataset</span>
                   <span>Collection</span>
@@ -578,6 +614,7 @@ const UniversityAdminPage = () => {
                     </li>
                   ))}
                 </ul>
+                </div>
               </div>
 
               {ragStatus.notices_ingestion && (

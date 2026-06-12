@@ -2,6 +2,7 @@
 langchain-core>=0.3.0
 langchain-community>=0.3.0
 langchain-openai>=0.2.0
+langchain-ollama>=0.2.0 # 로컬 LLM(Ollama) 답변 생성 프로바이더용
 langchain-chroma>=0.1.0
 langchain-redis>=0.1.0
 langchain-text-splitters>=0.2.0 # RecursiveCharacterTextSplitter for improved chunking

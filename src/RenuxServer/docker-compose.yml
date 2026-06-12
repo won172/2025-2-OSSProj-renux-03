@@ -57,8 +57,13 @@ services:
             - .env
             - ../RAG/.env
         environment:
+            # 답변 생성 프로바이더: "openai"(기본) 또는 "ollama".
+            - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+            # 질의분석/라우터는 항상 OpenAI를 사용하므로 키는 필수.
             - OPENAI_API_KEY=${OPENAI_API_KEY}
-            - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+            - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-gpt-4o-mini}
+            # 로컬 LLM(Ollama)을 쓸 때만 필요. host.docker.internal 로 호스트의 Ollama에 접속.
+            - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
             - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
             - OLLAMA_TIMEOUT_SECONDS=${OLLAMA_TIMEOUT_SECONDS:-300}
             - REDIS_URL=redis://redis:6379/0

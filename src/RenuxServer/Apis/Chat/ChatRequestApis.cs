@@ -14,7 +14,7 @@ namespace RenuxServer.Apis.Chat;
 
 public record StartChat(OrganizationDto Org, string Title);
 public record LoadChat(Guid ChatId, DateTime LastTime);
-public record ToRag(string SessionId, string Question);
+public record ToRag(string SessionId, string Question, string? Major = null);
 public record Reply(
     string Answer,
     List<RagSource>? Sources,
@@ -102,7 +102,7 @@ static public class ChatRequestApis
 
         app.MapPost("/start", async (ServerDbContext db, HttpContext context, StartChat stch, IMapper mapper, IConfiguration configuration) =>
         {
-            DateTime time = DateTime.Now.ToUniversalTime();
+            DateTime time = DateTime.UtcNow;
             Guid id = Guid.NewGuid();
 
             // Authenticated user check
@@ -187,7 +187,7 @@ static public class ChatRequestApis
                     ChatId = askDto.ChatId,
                     Content = replyContent,
                     IsAsk = false,
-                    CreatedTime = DateTime.Now.ToUniversalTime(),
+                    CreatedTime = DateTime.UtcNow,
                     Sources = ragResult.Sources,
                     IsFallback = ragResult.FallbackTriggered,
                     FallbackReason = ragResult.FallbackReason
@@ -196,10 +196,19 @@ static public class ChatRequestApis
             }
 
             // Authenticated Flow
+            if (!TryGetUserId(context, out Guid msgUserId))
+            {
+                return Results.Unauthorized();
+            }
+            if (!await UserOwnsChatAsync(db, askDto.ChatId, msgUserId))
+            {
+                return Results.Forbid();
+            }
+
             ChatMessage ask = mapper.Map<ChatMessage>(askDto);
             await db.ChatMessages.AddAsync(ask);
 
-            ToRag authToRag = new(askDto.ChatId.ToString(), askDto.Content);
+            ToRag authToRag = new(askDto.ChatId.ToString(), askDto.Content, ResolveMajor(context));
             var authRagResult = await CallRagAsync(authToRag, context, configuration, httpClientFactory, logger);
             string authReply = authRagResult.Answer;
             logger.LogInformation(
@@ -213,7 +222,7 @@ static public class ChatRequestApis
                 ChatId = ask.ChatId,
                 Content = authReply,
                 IsAsk = false,
-                CreatedTime = DateTime.Now.ToUniversalTime(),
+                CreatedTime = DateTime.UtcNow,
                 SourcesJson = SerializeSources(authRagResult.Sources),
                 IsFallback = authRagResult.FallbackTriggered,
                 FallbackReason = authRagResult.FallbackReason
@@ -231,88 +240,141 @@ static public class ChatRequestApis
             bool isAuthenticated = context.Request.Cookies.ContainsKey("renux-server-token");
             string sessionId = askDto.ChatId.ToString();
             string question = askDto.Content;
+            string? major = isAuthenticated ? ResolveMajor(context) : null;
 
-            // Authenticated: Save User's question first
+            // Authenticated: verify chat ownership (IDOR 방지), then save User's question first so it is never lost.
             ChatMessage? ask = null;
             if (isAuthenticated)
             {
+                if (!TryGetUserId(context, out Guid streamUserId))
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
+                }
+                if (!await UserOwnsChatAsync(db, askDto.ChatId, streamUserId))
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return;
+                }
+
                 ask = mapper.Map<ChatMessage>(askDto);
                 await db.ChatMessages.AddAsync(ask);
                 await db.SaveChangesAsync();
             }
 
-            var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
-            var client = httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromMinutes(5); // Streaming needs longer timeout
-
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{ragUrl}/ask/stream")
-            {
-                Content = JsonContent.Create(new { question, sessionId })
-            };
-            request.Headers.TryAddWithoutValidation("X-Request-ID", context.TraceIdentifier);
-
-            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
-            
             context.Response.ContentType = "text/event-stream";
             context.Response.Headers.CacheControl = "no-cache";
             context.Response.Headers.Connection = "keep-alive";
 
-            using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
             var fullAnswer = new System.Text.StringBuilder();
             List<ChatSourceDto> sources = [];
             bool fallbackTriggered = false;
             string? fallbackReason = null;
 
-            while (!reader.EndOfStream)
+            try
             {
-                var line = await reader.ReadLineAsync();
-                if (string.IsNullOrEmpty(line)) continue;
+                var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
+                var client = httpClientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromMinutes(5); // Streaming needs longer timeout
 
-                await context.Response.WriteAsync($"{line}\n");
-                await context.Response.Body.FlushAsync();
-
-                if (line.StartsWith("data: "))
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{ragUrl}/ask/stream")
                 {
-                    try
+                    Content = JsonContent.Create(new { question, sessionId, major })
+                };
+                request.Headers.TryAddWithoutValidation("X-Request-ID", context.TraceIdentifier);
+
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await response.Content.ReadAsStringAsync(context.RequestAborted);
+                    logger.LogWarning(
+                        "RAG stream request failed. RequestId={RequestId}, StatusCode={StatusCode}, Body={Body}",
+                        context.TraceIdentifier, (int)response.StatusCode, errorBody);
+                }
+                else
+                {
+                    using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(context.RequestAborted));
+
+                    while (await reader.ReadLineAsync(context.RequestAborted) is { } line)
                     {
-                        var json = line.Substring(6);
-                        var chunk = JsonSerializer.Deserialize<JsonElement>(json);
-                        if (chunk.TryGetProperty("type", out var typeProp))
+                        // Re-emit verbatim, preserving blank lines so SSE event framing (\n\n) survives the proxy.
+                        await context.Response.WriteAsync($"{line}\n", context.RequestAborted);
+                        await context.Response.Body.FlushAsync(context.RequestAborted);
+
+                        if (line.Length == 0 || !line.StartsWith("data: ")) continue;
+
+                        try
                         {
-                            var type = typeProp.GetString();
-                            if (type == "metadata")
+                            var json = line.Substring(6);
+                            var chunk = JsonSerializer.Deserialize<JsonElement>(json);
+                            if (chunk.TryGetProperty("type", out var typeProp))
                             {
-                                if (chunk.TryGetProperty("sources", out var sourcesProp))
+                                var type = typeProp.GetString();
+                                if (type == "metadata")
                                 {
-                                    var ragSources = JsonSerializer.Deserialize<List<RagSource>>(sourcesProp.GetRawText());
-                                    sources = MapSources(ragSources);
+                                    if (chunk.TryGetProperty("sources", out var sourcesProp))
+                                    {
+                                        var ragSources = JsonSerializer.Deserialize<List<RagSource>>(sourcesProp.GetRawText());
+                                        sources = MapSources(ragSources);
+                                    }
+                                    if (chunk.TryGetProperty("fallback_triggered", out var fbProp))
+                                    {
+                                        fallbackTriggered = fbProp.GetBoolean();
+                                    }
+                                    if (chunk.TryGetProperty("fallback_reason", out var fbrProp))
+                                    {
+                                        fallbackReason = fbrProp.GetString();
+                                    }
                                 }
-                                if (chunk.TryGetProperty("fallback_triggered", out var fbProp))
+                                else if (type == "text")
                                 {
-                                    fallbackTriggered = fbProp.GetBoolean();
-                                }
-                                if (chunk.TryGetProperty("fallback_reason", out var fbrProp))
-                                {
-                                    fallbackReason = fbrProp.GetString();
-                                }
-                            }
-                            else if (type == "text")
-                            {
-                                if (chunk.TryGetProperty("content", out var contentProp))
-                                {
-                                    fullAnswer.Append(contentProp.GetString());
+                                    if (chunk.TryGetProperty("content", out var contentProp))
+                                    {
+                                        fullAnswer.Append(contentProp.GetString());
+                                    }
                                 }
                             }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex, "Failed to parse streaming chunk: {Line}", line);
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "Failed to parse streaming chunk: {Line}", line);
+                        }
                     }
                 }
             }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+            {
+                // Client disconnected mid-stream: stop streaming but still persist what we have below.
+                logger.LogInformation("Chat stream cancelled by client. RequestId={RequestId}", context.TraceIdentifier);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "RAG stream error. RequestId={RequestId}", context.TraceIdentifier);
+            }
 
-            // After stream: Save AI's response if authenticated
+            // RAG failed or produced nothing: send a graceful fallback to the client and use it as the saved answer.
+            if (fullAnswer.Length == 0 && !context.RequestAborted.IsCancellationRequested)
+            {
+                fallbackTriggered = true;
+                fullAnswer.Append(DefaultRagFailureMessage);
+                try
+                {
+                    var meta = JsonSerializer.Serialize(
+                        new { type = "metadata", sources = Array.Empty<object>(), fallback_triggered = true, fallback_reason = (string?)null },
+                        JsonOptions);
+                    var text = JsonSerializer.Serialize(new { type = "text", content = DefaultRagFailureMessage }, JsonOptions);
+                    await context.Response.WriteAsync($"data: {meta}\n\n", context.RequestAborted);
+                    await context.Response.WriteAsync($"data: {text}\n\n", context.RequestAborted);
+                    await context.Response.Body.FlushAsync(context.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to emit fallback stream message. RequestId={RequestId}", context.TraceIdentifier);
+                }
+            }
+
+            // Always persist a reply for authenticated users so the saved question is never orphaned.
             if (isAuthenticated && ask != null)
             {
                 ChatMessage reply = new()
@@ -320,7 +382,7 @@ static public class ChatRequestApis
                     ChatId = ask.ChatId,
                     Content = fullAnswer.ToString(),
                     IsAsk = false,
-                    CreatedTime = DateTime.Now.ToUniversalTime(),
+                    CreatedTime = DateTime.UtcNow,
                     SourcesJson = SerializeSources(sources),
                     IsFallback = fallbackTriggered,
                     FallbackReason = fallbackReason
@@ -336,6 +398,16 @@ static public class ChatRequestApis
             if (!context.Request.Cookies.ContainsKey("renux-server-token"))
             {
                 return Results.Ok(new List<ChatMessageDto>());
+            }
+
+            // 인증 사용자는 본인 소유 채팅방만 열람할 수 있다(IDOR 방지).
+            if (!TryGetUserId(context, out Guid loadUserId))
+            {
+                return Results.Unauthorized();
+            }
+            if (!await UserOwnsChatAsync(db, load.ChatId, loadUserId))
+            {
+                return Results.Forbid();
             }
 
             List<ChatMessageDto> chatMessages = await MessagesToList(db, load.LastTime, load.ChatId);
@@ -371,6 +443,18 @@ static public class ChatRequestApis
         });
     }
 
+    // JWT의 sub 클레임에서 사용자 GUID를 추출한다.
+    static private bool TryGetUserId(HttpContext context, out Guid userId)
+    {
+        userId = Guid.Empty;
+        var userIdStr = context.User.FindFirstValue(Microsoft.IdentityModel.JsonWebTokens.JwtRegisteredClaimNames.Sub);
+        return userIdStr != null && Guid.TryParse(userIdStr, out userId);
+    }
+
+    // 인증 사용자가 해당 채팅방의 소유자인지 확인한다(IDOR 방지).
+    static private async Task<bool> UserOwnsChatAsync(ServerDbContext db, Guid chatId, Guid userId)
+        => await db.Chats.AnyAsync(c => c.Id == chatId && c.UserId == userId);
+
     static public async Task<List<ChatMessageDto>> MessagesToList(ServerDbContext db, DateTime lastTime, Guid chatId)
     {
         var messages = await db.ChatMessages.Where(cm => Equals(cm.ChatId, chatId) && cm.CreatedTime < lastTime)
@@ -394,6 +478,18 @@ static public class ChatRequestApis
             IsFallback = message.IsFallback,
             FallbackReason = message.FallbackReason
         };
+    }
+
+    // JWT의 "Major" 클레임에서 학과명을 추출한다. 값이 없거나 "Unknown"이면 null을 반환해
+    // RAG 서비스가 학과 필터를 적용하지 않도록 한다.
+    static private string? ResolveMajor(HttpContext context)
+    {
+        string? major = context.User.FindFirstValue("Major");
+        if (string.IsNullOrWhiteSpace(major) || major == "Unknown")
+        {
+            return null;
+        }
+        return major;
     }
 
     static private string? SerializeSources(List<ChatSourceDto> sources)

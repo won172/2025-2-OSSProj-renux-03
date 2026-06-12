@@ -1,28 +1,39 @@
-"""메시지 이력을 유지하며 Ollama 채팅 API로 답변을 생성하는 헬퍼입니다."""
+"""메시지 이력을 유지하며 답변을 생성하는 헬퍼입니다.
+
+답변 생성 프로바이더는 LLM_PROVIDER 설정으로 OpenAI와 로컬(Ollama) 사이에서
+전환할 수 있습니다. 두 프로바이더 모두 LangChain 채팅 인터페이스를 사용하므로
+스트리밍/비스트리밍 코드 경로는 동일합니다.
+"""
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
+import time
 from functools import lru_cache
 
 import httpx
 import redis
-import requests
 from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_openai import ChatOpenAI
 from langchain_redis import RedisChatMessageHistory
 
 from src.config import (
+    LLM_FALLBACK_ENABLED,
+    LLM_PROVIDER,
     OLLAMA_BASE_URL,
     OLLAMA_CHAT_MODEL,
-    OLLAMA_CONNECT_TIMEOUT_SECONDS,
-    OLLAMA_REQUEST_RETRIES,
+    OLLAMA_CHAT_TEMPERATURE,
     OLLAMA_TIMEOUT_SECONDS,
+    OPENAI_CHAT_MAX_RETRIES,
+    OPENAI_CHAT_MODEL,
+    OPENAI_CHAT_TEMPERATURE,
+    OPENAI_CHAT_TIMEOUT_SECONDS,
+    REDIS_HISTORY_TTL_SECONDS,
     REDIS_URL,
 )
 
@@ -35,18 +46,88 @@ _REDIS_CLIENT = redis.from_url(REDIS_URL)
 logger = logging.getLogger(__name__)
 
 
-def _get_session_history(session_id: str) -> BaseChatMessageHistory:
+def _build_openai_llm() -> BaseChatModel:
+    return ChatOpenAI(
+        model=OPENAI_CHAT_MODEL,
+        temperature=OPENAI_CHAT_TEMPERATURE,
+        timeout=OPENAI_CHAT_TIMEOUT_SECONDS,
+        max_retries=OPENAI_CHAT_MAX_RETRIES,
+    )
+
+
+def _build_ollama_llm() -> BaseChatModel:
+    # langchain_ollama 는 선택적 의존성이므로 필요한 시점에만 import 한다.
+    from langchain_ollama import ChatOllama
+
+    return ChatOllama(
+        model=OLLAMA_CHAT_MODEL,
+        base_url=OLLAMA_BASE_URL,
+        temperature=OLLAMA_CHAT_TEMPERATURE,
+        client_kwargs={"timeout": OLLAMA_TIMEOUT_SECONDS},
+    )
+
+
+_PROVIDER_BUILDERS = {
+    "openai": _build_openai_llm,
+    "ollama": _build_ollama_llm,
+}
+
+
+@lru_cache(maxsize=2)
+def _get_chat_llm(provider: str) -> BaseChatModel:
+    builder = _PROVIDER_BUILDERS.get(provider)
+    if builder is None:
+        logger.warning("Unknown LLM_PROVIDER '%s', falling back to openai.", provider)
+        builder = _build_openai_llm
+    return builder()
+
+
+def _primary_provider() -> str:
+    return LLM_PROVIDER if LLM_PROVIDER in _PROVIDER_BUILDERS else "openai"
+
+
+def _fallback_provider(primary: str) -> str | None:
+    if not LLM_FALLBACK_ENABLED:
+        return None
+    return "ollama" if primary == "openai" else "openai"
+
+
+# Redis 가용성 결과를 짧게 캐시해 매 요청마다 ping() 하지 않도록 한다.
+_REDIS_HEALTH_TTL_SECONDS = 30.0
+_redis_health = {"ok": False, "checked_at": 0.0}
+
+
+def _redis_available() -> bool:
+    now = time.monotonic()
+    if now - _redis_health["checked_at"] < _REDIS_HEALTH_TTL_SECONDS:
+        return _redis_health["ok"]
     try:
         _REDIS_CLIENT.ping()
-        return RedisChatMessageHistory(f"dongttok:chat_history:{session_id}", redis_client=_REDIS_CLIENT)
+        _redis_health["ok"] = True
     except Exception as e:
-        logger.warning(f"Redis unavailable, falling back to ChatMessageHistory: {e}")
-        return ChatMessageHistory()
+        logger.warning("Redis unavailable, falling back to in-memory history: %s", e)
+        _redis_health["ok"] = False
+    _redis_health["checked_at"] = now
+    return _redis_health["ok"]
+
+
+def _get_session_history(session_id: str) -> BaseChatMessageHistory:
+    if _redis_available():
+        try:
+            return RedisChatMessageHistory(
+                f"dongttok:chat_history:{session_id}",
+                redis_client=_REDIS_CLIENT,
+                ttl=REDIS_HISTORY_TTL_SECONDS,
+            )
+        except Exception as e:
+            logger.warning("Redis history init failed, falling back to ChatMessageHistory: %s", e)
+            _redis_health["ok"] = False  # 다음 요청에서 재확인하도록 무효화
+    return ChatMessageHistory()
 
 @lru_cache(maxsize=2)
 def _get_system_prompt(mode: str = "rag") -> str:
     return """
-당신은 동국대학교 AI 어시스턴트 '동똑이'입니다. 다른 수식어나 전문 분야를 언급하지 말세요.
+당신은 동국대학교 AI 어시스턴트 '동똑이'입니다. 다른 수식어나 전문 분야를 언급하지 마세요.
 오늘 날짜 및 시간: {current_date}
 
 [지침]
@@ -77,168 +158,112 @@ def _build_user_prompt(question: str, context: str, mode: str) -> str:
     return f"[참고 자료]\n{context}\n\n[사용자 질문]\n{question}"
 
 
-def _serialize_message(message: BaseMessage) -> dict[str, str] | None:
+def _is_valid_message(message: BaseMessage) -> bool:
     content = getattr(message, "content", None)
-    if not isinstance(content, str) or not content.strip():
-        return None
-
-    if isinstance(message, HumanMessage):
-        role = "user"
-    elif isinstance(message, AIMessage):
-        role = "assistant"
-    elif isinstance(message, SystemMessage):
-        role = "system"
-    else:
-        return None
-
-    return {"role": role, "content": content}
-
-
-def _create_ollama_session() -> requests.Session:
-    session = requests.Session()
-    retries = Retry(
-        total=OLLAMA_REQUEST_RETRIES,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["POST"],
-        raise_on_status=False,
+    return isinstance(content, str) and bool(content.strip()) and isinstance(
+        message, (HumanMessage, AIMessage, SystemMessage)
     )
-    adapter = HTTPAdapter(max_retries=retries)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
 
 
-def _chat_with_ollama(messages: list[dict[str, str]]) -> str:
-    session = _create_ollama_session()
-    try:
-        response = session.post(
-            f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
-            json={
-                "model": OLLAMA_CHAT_MODEL,
-                "messages": messages,
-                "stream": False,
-                "options": {
-                    "temperature": 0.2,
-                },
-            },
-            timeout=(OLLAMA_CONNECT_TIMEOUT_SECONDS, OLLAMA_TIMEOUT_SECONDS),
-        )
-        response.raise_for_status()
-    except requests.exceptions.ReadTimeout as exc:
-        logger.error("Ollama request read timed out after %s seconds", OLLAMA_TIMEOUT_SECONDS, exc_info=exc)
-        raise RuntimeError("Ollama request timed out. Please try again later.") from exc
-    except requests.exceptions.RequestException as exc:
-        logger.error("Ollama request failed", exc_info=exc)
-        raise RuntimeError("Ollama request failed. Please check Ollama availability.") from exc
-
-    payload = response.json()
-    message = payload.get("message", {})
-    content = message.get("content")
-    if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("Ollama returned an empty response.")
-    return content.strip()
-
-
-async def _chat_with_ollama_stream(messages: list[dict[str, str]]):
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(
-            connect=OLLAMA_CONNECT_TIMEOUT_SECONDS,
-            read=OLLAMA_TIMEOUT_SECONDS,
-            write=OLLAMA_CONNECT_TIMEOUT_SECONDS,
-        )
-    ) as client:
-        async with client.stream(
-            "POST",
-            f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
-            json={
-                "model": OLLAMA_CHAT_MODEL,
-                "messages": messages,
-                "stream": True,
-                "options": {
-                    "temperature": 0.2,
-                },
-            },
-        ) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
-                try:
-                    payload = json.loads(line)
-                    content = payload.get("message", {}).get("content")
-                    if content:
-                        yield content
-                    if payload.get("done"):
-                        break
-                except json.JSONDecodeError:
-                    continue
-
-async def generate_langchain_answer(question: str, context: str, session_id: str | None = None, current_date: str = "") -> str:
-    """LangChain 메시지 이력을 활용해 답변을 생성합니다."""
-    actual_session_id = session_id or "default_session"
-    logger.info(f"Generating answer for session_id: {actual_session_id}")
-
-    history = _get_session_history(actual_session_id)
-    messages: list[dict[str, str]] = [
-        {
-            "role": "system",
-            "content": _get_system_prompt("rag").format(current_date=current_date),
-        }
+def _build_messages(
+    question: str, context: str, history: BaseChatMessageHistory, current_date: str
+) -> list[BaseMessage]:
+    """시스템 프롬프트 + 이전 대화 이력 + 현재 질문을 LangChain 메시지로 구성합니다."""
+    messages: list[BaseMessage] = [
+        SystemMessage(content=_get_system_prompt("rag").format(current_date=current_date))
     ]
-    for message in history.messages:
-        serialized = _serialize_message(message)
-        if serialized is not None:
-            messages.append(serialized)
+    messages.extend(m for m in history.messages if _is_valid_message(m))
     messages.append(
-        {
-            "role": "user",
-            "content": _build_user_prompt(
+        HumanMessage(
+            content=_build_user_prompt(
                 question=question,
                 context=context or "컨텍스트가 제공되지 않았습니다.",
                 mode="rag",
-            ),
-        }
+            )
+        )
     )
+    return messages
 
-    answer = await asyncio.to_thread(_chat_with_ollama, messages)
+
+def _extract_text(content) -> str:
+    return content.strip() if isinstance(content, str) else str(content).strip()
+
+
+async def _invoke_with_provider(provider: str, messages: list[BaseMessage]) -> str:
+    llm = _get_chat_llm(provider)
+    response = await llm.ainvoke(messages)
+    answer = _extract_text(response.content)
+    if not answer:
+        raise RuntimeError(f"LLM provider '{provider}' returned an empty response.")
+    return answer
+
+
+async def generate_langchain_answer(question: str, context: str, session_id: str | None = None, current_date: str = "") -> str:
+    """선택된 프로바이더로 답변을 생성합니다. 실패 시 반대 프로바이더로 폴백합니다."""
+    actual_session_id = session_id or "default_session"
+    primary = _primary_provider()
+    logger.info("Generating answer for session_id=%s (provider=%s)", actual_session_id, primary)
+
+    history = _get_session_history(actual_session_id)
+    messages = _build_messages(question, context, history, current_date)
+
+    try:
+        answer = await _invoke_with_provider(primary, messages)
+    except Exception as exc:
+        fallback = _fallback_provider(primary)
+        if fallback is None:
+            raise
+        logger.warning("Provider '%s' failed (%s); falling back to '%s'.", primary, exc, fallback)
+        answer = await _invoke_with_provider(fallback, messages)
+
     history.add_user_message(question)
     history.add_ai_message(answer)
     return answer
 
+
 async def generate_langchain_answer_stream(question: str, context: str, session_id: str | None = None, current_date: str = ""):
-    """LangChain 메시지 이력을 활용해 답변을 스트리밍으로 생성합니다."""
+    """선택된 프로바이더로 답변을 스트리밍 생성합니다.
+
+    스트리밍은 토큰이 이미 전송되기 시작하면 중간 폴백이 불가능하므로, 첫 토큰을
+    받기 전 단계의 실패에 한해 반대 프로바이더로 1회 폴백합니다.
+    """
     actual_session_id = session_id or "default_session"
-    logger.info(f"Generating streaming answer for session_id: {actual_session_id}")
+    primary = _primary_provider()
+    logger.info("Generating streaming answer for session_id=%s (provider=%s)", actual_session_id, primary)
 
     history = _get_session_history(actual_session_id)
-    messages: list[dict[str, str]] = [
-        {
-            "role": "system",
-            "content": _get_system_prompt("rag").format(current_date=current_date),
-        }
-    ]
-    for message in history.messages:
-        serialized = _serialize_message(message)
-        if serialized is not None:
-            messages.append(serialized)
-    messages.append(
-        {
-            "role": "user",
-            "content": _build_user_prompt(
-                question=question,
-                context=context or "컨텍스트가 제공되지 않았습니다.",
-                mode="rag",
-            ),
-        }
-    )
+    messages = _build_messages(question, context, history, current_date)
 
-    full_answer = []
-    async for chunk in _chat_with_ollama_stream(messages):
-        full_answer.append(chunk)
-        yield chunk
-    
+    async def _stream(provider: str):
+        llm = _get_chat_llm(provider)
+        async for chunk in llm.astream(messages):
+            text = _extract_text(chunk.content)
+            if text:
+                yield text
+
+    full_answer: list[str] = []
+    started = False
+    try:
+        async for text in _stream(primary):
+            started = True
+            full_answer.append(text)
+            yield text
+    except Exception as exc:
+        fallback = _fallback_provider(primary)
+        if started or fallback is None:
+            raise
+        logger.warning("Streaming provider '%s' failed before first token (%s); falling back to '%s'.", primary, exc, fallback)
+        async for text in _stream(fallback):
+            full_answer.append(text)
+            yield text
+
     answer_text = "".join(full_answer)
+    # 토큰이 하나도 생성되지 않았다면 빈 AI 메시지를 이력에 남기지 않는다.
+    if not answer_text.strip():
+        logger.warning(
+            "Empty streaming answer; skipping history for session_id=%s", actual_session_id
+        )
+        return
     history.add_user_message(question)
     history.add_ai_message(answer_text)
 

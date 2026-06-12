@@ -1,6 +1,7 @@
 """OpenAI 채팅 API를 감싸 답변을 생성하는 헬퍼입니다."""
 from __future__ import annotations
 
+from datetime import datetime, timezone, timedelta
 from functools import lru_cache
 from typing import Tuple
 
@@ -23,7 +24,7 @@ ANSWER_PROMPT_TEMPLATE = """
 9. 질문에 '최근', '어제' 등 시간 표현이 있다면, 제공된 [컨텍스트] 내 문서의 '게시일'과 현재 날짜({current_date})를 비교하여 정확히 계산하고 답변하세요.\n\n
 [컨텍스트]\n
 {context}
-""",
+"""
 
 
 @lru_cache(maxsize=1)
@@ -73,7 +74,8 @@ def answer_with_citations(
 
     context = build_context(hits)
     citations = format_citations(hits)
-    prompt = ANSWER_PROMPT_TEMPLATE.format(question=query, context=context)
+    current_date = datetime.now(timezone(timedelta(hours=9))).strftime("%Y년 %m월 %d일")
+    prompt = ANSWER_PROMPT_TEMPLATE.format(current_date=current_date, context=context)
 
     client = get_client()
     response = client.chat.completions.create(

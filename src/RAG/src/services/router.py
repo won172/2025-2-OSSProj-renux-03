@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from typing import List
 
+from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field, ValidationError
@@ -63,8 +64,9 @@ prompt = PromptTemplate(
 )
 
 # 라우팅을 수행할 LLM 체인을 구성합니다.
+# 파싱은 별도로 수행해 실패 시 LLM 원본 출력을 로깅할 수 있게 한다(디버깅 용이).
 llm = ChatOpenAI(model=OPENAI_MODEL, temperature=0, model_kwargs={"response_format": {"type": "json_object"}})
-router_chain = prompt | llm | parser
+router_chain = prompt | llm
 
 def _format_destinations() -> str:
     """LLM 프롬프트에 포함될 데이터셋 설명의 형식을 지정합니다."""
@@ -78,20 +80,38 @@ async def route_query(query: str) -> List[str]:
 
     formatted_destinations = _format_destinations()
     
+    raw_text = None
     try:
-        result = await router_chain.ainvoke({
+        raw_message = await router_chain.ainvoke({
             "query": query,
             "destinations": formatted_destinations,
         })
+        raw_text = getattr(raw_message, "content", None) or str(raw_message)
+
+        try:
+            result = parser.parse(raw_text)
+        except (ValidationError, OutputParserException) as e:
+            # 스키마 불일치/엉뚱한 출력을 디버깅할 수 있도록 LLM 원본 출력을 함께 남긴다.
+            logging.warning(
+                "LLM 라우터 출력 파싱에 실패했습니다: %s | 원본 출력=%r. 'notices'로 기본 설정합니다.",
+                e, raw_text,
+            )
+            return ["notices"]
+
         # LLM의 선택에서 유효한 데이터셋 이름만 필터링합니다.
         # LLM이 목록에 없는 이름을 지어낼 경우를 대비합니다.
         valid_routes = [name for name in result.names if name in LLM_ROUTER_DESCRIPTIONS]
+        if not valid_routes:
+            logging.warning(
+                "LLM 라우터가 유효한 데이터셋을 반환하지 않았습니다. 원본 출력=%r. 'notices'로 기본 설정합니다.",
+                raw_text,
+            )
         return valid_routes or ["notices"]  # 유효한 선택이 없으면 기본값으로 'notices' 반환
-    except ValidationError as e:
-        logging.warning(f"LLM 라우터의 Pydantic 검증에 실패했습니다: {e}. 'notices'로 기본 설정합니다.")
-        return ["notices"]
     except Exception as e:
-        logging.error(f"LLM 라우터에서 예기치 않은 오류가 발생했습니다: {e}. 'notices'로 기본 설정합니다.")
+        logging.error(
+            "LLM 라우터에서 예기치 않은 오류가 발생했습니다: %s | 원본 출력=%r. 'notices'로 기본 설정합니다.",
+            e, raw_text,
+        )
         return ["notices"]
 
 # 이 파일에서 외부에 제공할 함수는 route_query 뿐입니다.

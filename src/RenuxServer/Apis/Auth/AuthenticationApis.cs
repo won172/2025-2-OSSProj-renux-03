@@ -84,7 +84,21 @@ static public class AuthenticationApis
 
             if (await db.Users.AnyAsync(p => p.UserId == signup.UserId)) return Results.Conflict("중복된 id");
 
+            // 클라이언트가 보낸 전공이 실제로 존재하는지 검증한다.
+            if (!await db.Majors.AnyAsync(m => m.Id == signup.MajorId))
+            {
+                return Results.BadRequest("유효하지 않은 전공입니다.");
+            }
+
+            // 권한 상승 방지: 신규 가입자는 항상 일반학생 역할로 강제한다(클라이언트 RoleId 무시).
+            var defaultRole = await db.Roles.FirstOrDefaultAsync(r => r.Rolename == "일반학생");
+            if (defaultRole == null)
+            {
+                return Results.Problem("기본 역할이 구성되지 않았습니다.", statusCode: 500);
+            }
+
             User user = mapper.Map<User>(signup);
+            user.RoleId = defaultRole.Id;
 
             user.HashPassword = BCrypt.Net.BCrypt.HashPassword(signup.Password);
             user.UpdatedTime = user.CreatedTime;
@@ -132,7 +146,7 @@ static public class AuthenticationApis
                 issuer: jwt["Issuer"],
                 audience: jwt["Audience"],
                 claims: claims_,
-                expires: DateTime.Now.AddMinutes(60),
+                expires: DateTime.UtcNow.AddMinutes(60),
                 signingCredentials: credential);
 
             CookieOptions copt = BuildAuthCookieOptions(config);

@@ -1,7 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
 import type { DepartmentKnowledge } from '../../types/admin'
+
+interface UserInfoResponse {
+  name?: string;
+  Name?: string;
+  majorName?: string;
+  MajorName?: string;
+}
+
+interface AdminItemResponse {
+  id: number | string;
+  data: string;
+  source_type: string;
+  status: string;
+  created_at: string;
+}
 
 interface KnowledgePayload {
   question: string;
@@ -47,12 +62,15 @@ const DepartmentAdminPage = () => {
   const [category, setCategory] = useState('')
   const [userDepartment, setUserDepartment] = useState('')
   const [userName, setUserName] = useState('')
+  // alert() 대신 사용하는 인라인 알림 (성공/오류)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [errorNotice, setErrorNotice] = useState<string | null>(null)
 
   // Fetch user info to get department
   useEffect(() => {
     const fetchUserInfo = async () => {
       try {
-        const userInfo = await apiFetch<any>('/auth/name');
+        const userInfo = await apiFetch<UserInfoResponse>('/auth/name');
         if (userInfo) {
             // Handle both camelCase and PascalCase
             const major = userInfo.majorName || userInfo.MajorName;
@@ -61,27 +79,27 @@ const DepartmentAdminPage = () => {
             if (major) setUserDepartment(major);
             if (name) setUserName(name);
         }
-      } catch (e: any) {
+      } catch (e) {
         console.error("Failed to fetch user info", e);
-        setUserName(`Error: ${e.message || 'Unknown'}`);
+        setUserName(`Error: ${e instanceof Error ? e.message : 'Unknown'}`);
       }
     };
     fetchUserInfo();
   }, []);
 
   // Fetch items on load
-  useEffect(() => {
-    const fetchItems = async () => {
+  // 새로고침 버튼에서도 재사용할 수 있도록 useEffect 밖으로 분리
+  const fetchItems = useCallback(async () => {
       setIsLoading(true);
       try {
         // Use the new endpoint that returns all items sorted by date
-        const itemsData = await apiFetch<any[]>('/admin/items');
+        const itemsData = await apiFetch<AdminItemResponse[]>('/admin/items');
         
         if (Array.isArray(itemsData)) {
           const mappedList: DepartmentKnowledge[] = itemsData.map((item) => {
              let title = '제목 없음';
              let content = '';
-             let parsedData: any = {};
+             let parsedData: Record<string, string | undefined> = {};
              
              try {
                 parsedData = JSON.parse(item.data);
@@ -119,10 +137,11 @@ const DepartmentAdminPage = () => {
       } finally {
         setIsLoading(false);
       }
-    };
-    
-    fetchItems();
   }, []);
+
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
 
   const selectedItem = useMemo(
     () => knowledgeList.find((item) => item.id === selectedId) ?? null,
@@ -150,8 +169,10 @@ const DepartmentAdminPage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setNotice(null)
+    setErrorNotice(null)
     if (!newTitle.trim() || !newContent.trim()) {
-      alert('제목과 내용을 입력해주세요.')
+      setErrorNotice('제목과 내용을 입력해주세요.')
       return
     }
 
@@ -170,7 +191,7 @@ const DepartmentAdminPage = () => {
       sourceType = 'custom_knowledge'
     } else if (contentType === 'event') {
       if (!startDate) {
-        alert('시작일을 입력해주세요.')
+        setErrorNotice('시작일을 입력해주세요.')
         return
       }
       payloadData = {
@@ -186,7 +207,7 @@ const DepartmentAdminPage = () => {
     } else {
       // contentType === 'announcement'
       if (!startDate) {
-        alert('게시일을 입력해주세요.')
+        setErrorNotice('게시일을 입력해주세요.')
         return
       }
       payloadData = {
@@ -222,9 +243,9 @@ const DepartmentAdminPage = () => {
           createdAt: new Date().toISOString(),
         };
         setKnowledgeList((prev) => [newKnowledgeItem, ...prev])
-        alert('성공적으로 제출되었습니다.')
+        setNotice('성공적으로 제출되었습니다. 검수 승인 후 챗봇에 반영됩니다.')
       } else {
-        alert('제출에 실패했습니다. 응답 형식이 올바르지 않습니다.');
+        setErrorNotice('제출에 실패했습니다. 응답 형식이 올바르지 않습니다.');
       }
       
       setIsCreating(false)
@@ -233,7 +254,7 @@ const DepartmentAdminPage = () => {
       
     } catch (e) {
       console.error('Failed to submit', e)
-      alert('제출에 실패했습니다. 다시 시도해주세요.')
+      setErrorNotice('제출에 실패했습니다. 다시 시도해주세요.')
     } finally {
       setIsLoading(false)
     }
@@ -241,6 +262,8 @@ const DepartmentAdminPage = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm('요청을 취소하시겠습니까? (반려 처리됩니다)')) return
+    setNotice(null)
+    setErrorNotice(null)
 
     try {
       setIsLoading(true)
@@ -254,10 +277,10 @@ const DepartmentAdminPage = () => {
         item.id === id ? { ...item, status: 'REJECTED' } : item
       ))
       
-      alert('요청이 취소되었습니다.')
+      setNotice('요청이 취소되었습니다.')
     } catch (e) {
       console.error('Failed to cancel request', e)
-      alert('요청 취소에 실패했습니다. 다시 시도해주세요.')
+      setErrorNotice('요청 취소에 실패했습니다. 다시 시도해주세요.')
     } finally {
       setIsLoading(false)
     }
@@ -293,9 +316,14 @@ const DepartmentAdminPage = () => {
                 접속: {userName || userDepartment || '로딩 중...'}
               </p>
             </div>
-            <button className="hero-btn hero-btn--primary" type="button" onClick={handleNavigateHome}>
-              메인페이지로 이동
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="ghost-btn" type="button" onClick={() => fetchItems()} disabled={isLoading}>
+                {isLoading ? '새로고침 중...' : '새로고침'}
+              </button>
+              <button className="hero-btn hero-btn--primary" type="button" onClick={handleNavigateHome}>
+                메인페이지로 이동
+              </button>
+            </div>
           </div>
         </header>
 
@@ -383,7 +411,7 @@ const DepartmentAdminPage = () => {
                           <select 
                             className="admin-input" 
                             value={contentType} 
-                            onChange={(e) => setContentType(e.target.value as any)}
+                            onChange={(e) => setContentType(e.target.value as 'knowledge' | 'event' | 'announcement')}
                             disabled={isLoading}
                           >
                             <option value="knowledge">❓ 자주 묻는 질문 (FAQ)</option>
@@ -478,6 +506,17 @@ const DepartmentAdminPage = () => {
                           />
                         </div>
 
+                        {notice && (
+                          <div style={{ marginTop: '12px', color: '#15803d', background: '#f0fdf4', padding: '10px 14px', borderRadius: '8px' }}>
+                            {notice}
+                          </div>
+                        )}
+                        {errorNotice && (
+                          <div className="admin-alert admin-alert--danger" style={{ marginTop: '12px' }}>
+                            {errorNotice}
+                          </div>
+                        )}
+
                         <div className="admin-review-detail__actions">
                           <button className="hero-btn hero-btn--primary" type="submit" disabled={isLoading}>
                             {isLoading ? '제출 중...' : '제출하기'}
@@ -491,10 +530,24 @@ const DepartmentAdminPage = () => {
                         <span className={`status-pill status-pill--${getStatusClass(selectedItem.status)}`}>
                           {getStatusLabel(selectedItem.status)}
                         </span>
-                        <button className="ghost-btn small ghost-btn--danger" onClick={() => handleDelete(selectedItem.id)} disabled={isLoading}>
-                          {isLoading ? '삭제 중...' : '삭제'}
-                        </button>
+                        {/* 승인/반려 완료 항목에는 취소 버튼을 노출하지 않는다 — 승인된 항목을 실수로 반려 처리하는 사고 방지 */}
+                        {selectedItem.status === 'PENDING' && (
+                          <button className="ghost-btn small ghost-btn--danger" onClick={() => handleDelete(selectedItem.id)} disabled={isLoading}>
+                            {isLoading ? '처리 중...' : '요청 취소'}
+                          </button>
+                        )}
                       </div>
+
+                      {notice && (
+                        <div style={{ marginTop: '12px', color: '#15803d', background: '#f0fdf4', padding: '10px 14px', borderRadius: '8px' }}>
+                          {notice}
+                        </div>
+                      )}
+                      {errorNotice && (
+                        <div className="admin-alert admin-alert--danger" style={{ marginTop: '12px' }}>
+                          {errorNotice}
+                        </div>
+                      )}
                       
                       <h3 className="admin-review-detail__title" style={{ marginTop: '1rem' }}>{selectedItem.title}</h3>
                       <dl className="admin-review-detail__meta">

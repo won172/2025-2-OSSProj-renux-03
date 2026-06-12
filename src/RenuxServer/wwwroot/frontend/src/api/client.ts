@@ -44,6 +44,16 @@ const isNgrokUrl = (value: string) => {
   }
 }
 
+/**
+ * apiFetch와 동일한 규칙으로 경로를 절대 URL로 해석한다.
+ * SSE 스트리밍처럼 fetch를 직접 써야 하는 곳에서 base URL 로직을 재사용하기 위함.
+ */
+export const resolveApiUrl = (path: string) => buildRequestUrl(path) as string
+
+/** 해당 URL이 ngrok 도메인이면 경고 우회 헤더를 더한 객체를 반환한다. */
+export const withNgrokHeader = (url: string, headers: Record<string, string>) =>
+  isNgrokUrl(url) ? { ...headers, 'ngrok-skip-browser-warning': 'true' } : headers
+
 const parseJson = async (response: Response) => {
   const text = await response.text()
   if (!text) return undefined

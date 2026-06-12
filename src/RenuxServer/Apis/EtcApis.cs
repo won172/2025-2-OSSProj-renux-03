@@ -11,11 +11,11 @@ static public class EtcApis
     {
         var app = application.MapGroup("/req");
 
-        app.MapGet("/major", async (ServerDbContext db, IMapper mapper) 
+        app.MapGet("/major", async (ServerDbContext db, IMapper mapper)
             => Results.Ok(mapper.Map<List<MajorDto>>(await db.Majors.ToListAsync())));
 
-        app.MapGet("/role", async (ServerDbContext db, IMapper mapper) 
-            => Results.Ok(mapper.Map<List<RoleDto>>(await db.Roles.ToListAsync())));
+        // /role 공개 엔드포인트는 제거되었다. 역할 Guid 노출은 권한 상승 시도에 악용될 수 있고,
+        // 회원가입은 더 이상 클라이언트가 역할을 선택하지 않는다(서버가 일반학생으로 강제).
 
         app.MapGet("/orgs", async (ServerDbContext db, IMapper mapper) =>
         {

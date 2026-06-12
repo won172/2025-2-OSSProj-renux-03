@@ -1,9 +1,10 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import rehypeExternalLinks from 'rehype-external-links'
 import remarkGfm from 'remark-gfm'
 import { apiFetch } from '../../api/client'
+import { useChatStream } from '../../hooks/useChatStream'
 import SourceCards, { type ChatSource } from '../../components/chat/SourceCards'
 import type { ActiveChat } from '../../types/chat'
 
@@ -48,6 +49,8 @@ const ChatPage = () => {
   const [inputValue, setInputValue] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const { streamMessage } = useChatStream()
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const showRagScores = useMemo(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem('renux-user-role') === 'UNIVERSITY_COUNCIL'
@@ -73,7 +76,24 @@ const ChatPage = () => {
           setMessages(messageData.reverse())
         }
 
-        setActiveChat({ id: chatId, title: null, organization: null })
+        // 채팅방 제목 조회: 로그인 사용자는 /chat/active, 게스트는 localStorage에서 찾는다.
+        let title: string | null = null
+        try {
+          const activeChats = await apiFetch<ActiveChat[]>('/chat/active')
+          if (Array.isArray(activeChats)) {
+            title = activeChats.find((c) => c.id === chatId)?.title ?? null
+          }
+        } catch {
+          // 게스트(401 등)는 게스트 채팅 목록에서 조회
+          try {
+            const stored = window.localStorage.getItem('renux-guest-chats')
+            const guestChats: ActiveChat[] = stored ? JSON.parse(stored) : []
+            title = guestChats.find((c) => c.id === chatId)?.title ?? null
+          } catch {
+            title = null
+          }
+        }
+        setActiveChat({ id: chatId, title, organization: null })
       } catch (fetchError) {
         console.error('Failed to load chat messages', fetchError)
         setError('채팅을 불러오는 중 문제가 발생했습니다.')
@@ -85,6 +105,11 @@ const ChatPage = () => {
     loadInitialData()
   }, [chatId, navigate])
 
+  // 새 메시지/스트리밍 토큰이 쌓일 때마다 자동으로 맨 아래로 스크롤
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages])
+
   const headerTitle = useMemo(() => {
     if (activeChat?.title) return activeChat.title
     return '채팅방'
@@ -94,7 +119,7 @@ const ChatPage = () => {
     return null
   }
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement> | KeyboardEvent<HTMLTextAreaElement>) => {
     event.preventDefault()
     if (!chatId) return
 
@@ -133,64 +158,33 @@ const ChatPage = () => {
     setIsSending(true)
 
     try {
-      const { id, chatId: msgChatId, content, createdTime } = newMessage
-      
-      const response = await fetch(`${(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')}/chat/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
+      const { receivedAny } = await streamMessage(
+        { id: newMessage.id, chatId, content: trimmed, createdTime: newMessage.createdTime },
+        {
+          onText: (accumulated) =>
+            setMessages((prev) =>
+              prev.map((msg) => (msg.id === botMessageId ? { ...msg, content: accumulated } : msg)),
+            ),
+          onMetadata: (meta) =>
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId
+                  ? { ...msg, sources: meta.sources, isFallback: meta.isFallback, fallbackReason: meta.fallbackReason }
+                  : msg,
+              ),
+            ),
         },
-        body: JSON.stringify({
-          id,
-          chatId: msgChatId,
-          isAsk: true,
-          content,
-          createdTime,
-        }),
-        credentials: 'include',
-      })
+      )
 
-      if (!response.ok) throw new Error('Streaming failed')
-
-      const reader = response.body?.getReader()
-      if (!reader) throw new Error('No reader available')
-
-      const decoder = new TextDecoder()
-      let accumulatedAnswer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          
-          try {
-            const data = JSON.parse(line.substring(6))
-            if (data.type === 'metadata') {
-              setMessages((prev) => 
-                prev.map((msg) => 
-                  msg.id === botMessageId 
-                    ? { ...msg, sources: data.sources, isFallback: data.fallback_triggered, fallbackReason: data.fallback_reason } 
-                    : msg
-                )
-              )
-            } else if (data.type === 'text') {
-              accumulatedAnswer += data.content
-              setMessages((prev) => 
-                prev.map((msg) => 
-                  msg.id === botMessageId ? { ...msg, content: accumulatedAnswer } : msg
-                )
-              )
-            }
-          } catch (e) {
-            console.warn('Failed to parse SSE data', e)
-          }
-        }
+      // 스트림이 열렸지만 토큰을 하나도 받지 못한 경우 빈 말풍선이 남지 않도록 안내 문구로 대체
+      if (!receivedAny) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === botMessageId
+              ? { ...msg, content: '응답을 받지 못했습니다. 잠시 후 다시 시도해주세요.', isFallback: true }
+              : msg,
+          ),
+        )
       }
     } catch (sendErr) {
       console.error('Failed to send message', sendErr)
@@ -227,9 +221,7 @@ const ChatPage = () => {
             <p className="chat-page-v2__subtitle">Dongguk Buddy AI</p>
             <h1 className="chat-page-v2__title">{headerTitle}</h1>
           </div>
-          <button type="button" className="buddy-secondary-btn" onClick={() => navigate('/settings')}>
-            환경설정
-          </button>
+          {/* 환경설정 페이지가 준비되면 버튼을 복원한다 (빈 페이지로의 이동 방지) */}
         </header>
 
         <div className="chat-page-v2__messages glass-panel">
@@ -283,15 +275,22 @@ const ChatPage = () => {
               })}
             </ul>
           )}
+          <div ref={messagesEndRef} />
         </div>
 
         <form className="chat-page-v2__composer glass-panel" onSubmit={handleSubmit}>
+          {sendError && <p className="chat-page-v2__status chat-page-v2__status--error">{sendError}</p>}
           <div className="chat-page-v2__input-wrapper">
             <textarea
               className="chat-page-v2__input"
-              placeholder="메시지를 입력하세요"
+              placeholder="메시지를 입력하세요 (Enter 전송, Shift+Enter 줄바꿈)"
               value={inputValue}
               onChange={(event) => setInputValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  handleSubmit(event)
+                }
+              }}
               disabled={isSending}
               rows={1}
             />
@@ -300,8 +299,6 @@ const ChatPage = () => {
             </button>
           </div>
         </form>
-
-        {sendError && <p className="chat-page-v2__status chat-page-v2__status--error">{sendError}</p>}
       </section>
     </div>
   )

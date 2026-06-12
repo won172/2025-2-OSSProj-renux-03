@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch, type ApiError } from '../../api/client'
-import type { MajorOption, RoleOption, ApiMessageResponse } from '../../types/user'
+import type { MajorOption, ApiMessageResponse } from '../../types/user'
 
 type IdStatus = 'available' | 'unavailable' | null
 
@@ -14,9 +14,7 @@ const SignUpPage = () => {
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [username, setUsername] = useState('')
   const [majors, setMajors] = useState<MajorOption[]>([])
-  const [roles, setRoles] = useState<RoleOption[]>([])
   const [selectedMajorId, setSelectedMajorId] = useState('')
-  const [selectedRoleId, setSelectedRoleId] = useState('')
   const [idStatus, setIdStatus] = useState<IdStatus>(null)
   const [idMessage, setIdMessage] = useState('')
   const [isCheckingId, setIsCheckingId] = useState(false)
@@ -37,20 +35,7 @@ const SignUpPage = () => {
       }
     }
 
-    const loadRoles = async () => {
-      try {
-        const data = await apiFetch<RoleOption[]>('/req/role', { method: 'GET' })
-        if (Array.isArray(data)) {
-          setRoles(data)
-        }
-      } catch (error) {
-        console.error('역할 데이터 로드 실패', error)
-        setRoles([])
-      }
-    }
-
     loadMajors()
-    loadRoles()
   }, [])
 
   useEffect(() => {
@@ -71,8 +56,6 @@ const SignUpPage = () => {
 
   const findMajorById = (value: string) =>
     majors.find((major) => String(major.id ?? major.majorId ?? '') === value)
-
-  const findRoleById = (value: string) => roles.find((role) => String(role.id ?? role.roleId ?? '') === value)
 
   const handleIdBlur = async () => {
     if (!userId) {
@@ -122,9 +105,8 @@ const SignUpPage = () => {
     }
 
     const selectedMajor = findMajorById(selectedMajorId)
-    const selectedRole = findRoleById(selectedRoleId)
 
-    if (!selectedMajor || !selectedRole || !username) {
+    if (!selectedMajor || !username) {
       setSubmitError('모든 정보를 입력 및 선택해주세요.')
       return
     }
@@ -138,11 +120,10 @@ const SignUpPage = () => {
           password,
           username,
           majorId: selectedMajor.id ?? selectedMajor.majorId,
-          roleId: selectedRole.id ?? selectedRole.roleId,
         },
       })
-      window.alert('회원가입이 성공적으로 완료되었습니다!')
-      navigate('/auth/in')
+      // alert() 대신 로그인 페이지로 이동하며 성공 상태를 전달 (블로킹 다이얼로그 제거)
+      navigate('/auth/in', { state: { signupSuccess: true } })
     } catch (submitError) {
       console.error('회원가입 실패:', submitError)
       if (submitError && typeof submitError === 'object' && 'status' in submitError) {
@@ -245,29 +226,6 @@ const SignUpPage = () => {
                 return (
                   <option key={key} value={value}>
                     {major.majorname ?? '알 수 없는 전공'}
-                  </option>
-                )
-              })}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="role">역할</label>
-            <select
-              id="role"
-              name="role"
-              value={selectedRoleId}
-              onChange={(event) => setSelectedRoleId(event.target.value)}
-              disabled={isSubmitting || roles.length === 0}
-              required
-            >
-              <option value="">역할 선택</option>
-              {roles.map((role, index) => {
-                const value = String(role.id ?? role.roleId ?? '')
-                const key = value || role.rolename || `role-${index}`
-                return (
-                  <option key={key} value={value}>
-                    {role.rolename ?? '알 수 없는 역할'}
                   </option>
                 )
               })}

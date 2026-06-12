@@ -152,7 +152,7 @@
 }
 
 .auth-submit:hover {
-    background-color: #166fe5;
+    background-color: var(--buddy-primary-dark); /* 브랜드 오렌지 계열 유지 (기존 #166fe5 파란색은 브랜드 불일치) */
 }
 
 .auth-submit:disabled {
