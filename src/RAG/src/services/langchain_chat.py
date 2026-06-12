@@ -133,7 +133,8 @@ def _get_system_prompt(mode: str = "rag") -> str:
 [지침]
 1. 사용자가 인사, 이름, 너의 정체, 대화 자체를 묻는 경우에는 [참고 자료]와 무관하게 자연스럽게 답하세요. 이름을 물으면 "동똑이"라고 답하세요.
 2. 학교 정보, 공지, 학사, 장학, 수업, 교직원, 규정, 일정 질문은 아래 [참고 자료]에 명시된 내용만 근거로 답변하세요. 자료에 없는 내용, 일반 상식, 추측, 이전 학기 정보는 보완해서 말하지 마세요.
-3. 학교 정보 질문에 답할 충분한 근거가 [참고 자료]에 없으면 "제공된 학교 자료에서 확인되지 않습니다"라고 말하고, 학교 공식 홈페이지나 담당 부서 확인을 안내하세요.
+2-1. **근거 표기(중요)**: 날짜·기간·금액·자격요건 등 핵심 사실을 말할 때마다 그 근거가 된 자료의 번호를 문장 끝에 [문서N] 형식으로 표기하세요(예: "신청 기간은 6월 9일부터예요 [문서2]."). 어떤 문서로도 뒷받침할 수 없는 사실은 답변에 포함하지 마세요.
+3. 학교 정보 질문에 답할 충분한 근거가 [참고 자료]에 없으면 "제공된 학교 자료에서 확인되지 않습니다"라고 말하고, 학교 공식 홈페이지나 담당 부서 확인을 안내하세요. 일부만 확인되면 확인된 부분만 [문서N]과 함께 답하고 나머지는 확인되지 않는다고 명시하세요.
 4. 서로 다른 자료가 충돌하면 게시일이 더 최신인 자료를 우선하고, 충돌 사실을 함께 설명하세요.
 5. 답변에서 특정 정보를 언급할 때, 그 정보의 출처 URL이 [참고 자료]에 있다면 해당 설명 바로 아래에 '[사이트로 이동하기](URL)' 형식으로 적어주세요. 첨부파일은 본문 중에 '[파일명](URL)' 형식으로 포함하세요.
 6. 친절한 한국어(해요체)로 답변하세요.
@@ -143,6 +144,7 @@ def _get_system_prompt(mode: str = "rag") -> str:
 10. 이전 대화 맥락을 고려하되, 현재 질문이 주제가 바뀌었다면 이전 내용은 무시하고 현재 질문에 집중하세요.
 11. 질문에 '최근', '어제' 등 시간 표현이 포함된 경우, [참고 자료]의 게시일과 현재 날짜({current_date})를 비교하여 정확히 계산해 답변하세요.
 12. 검색 전 분석 단계에서 만들어졌을 수 있는 가정이나 추론을 사실처럼 단정하지 마세요. [참고 자료]에 없는 엔터티를 보완 생성하지 마세요.
+13. [참고 자료]에 서로 다른 종류의 정보(예: 졸업요건·교과목·학사일정·담당부서 연락처)가 함께 있으면, 단순히 항목을 나열하지 말고 사용자가 다음에 무엇을 해야 하는지 실행 관점에서 통합해 설명하세요. 예를 들어 졸업/수강 계획 질문이면 "충족해야 할 요건 → 남은 학기에 들을 만한 과목/이수구분 → 관련 신청·제출 일정 → 더 정확한 확인을 위한 담당 부서 연락처" 흐름으로 엮고, 자료에 없는 부분(예: 개인 수강 이력)은 본인 확인이나 학과 문의를 안내하세요. 단, 자료에 없는 사실을 지어내서는 안 됩니다.
 
 [출력 형식 지침 — 중요]
 - 번호 목록은 반드시 '번호 + 제목'을 같은 줄에 작성하세요.
@@ -186,13 +188,19 @@ def _build_messages(
 
 
 def _extract_text(content) -> str:
-    return content.strip() if isinstance(content, str) else str(content).strip()
+    """content를 문자열로만 변환한다(앞뒤 공백 제거 금지).
+
+    스트리밍은 토큰 단위로 호출되므로 여기서 strip하면 토큰 사이 공백·줄바꿈이
+    모두 사라져 띄어쓰기와 마크다운(코드펜스 등)이 깨진다. 정리는 전체 답변
+    레벨에서만 수행한다.
+    """
+    return content if isinstance(content, str) else str(content)
 
 
 async def _invoke_with_provider(provider: str, messages: list[BaseMessage]) -> str:
     llm = _get_chat_llm(provider)
     response = await llm.ainvoke(messages)
-    answer = _extract_text(response.content)
+    answer = _extract_text(response.content).strip()
     if not answer:
         raise RuntimeError(f"LLM provider '{provider}' returned an empty response.")
     return answer
@@ -268,6 +276,41 @@ async def generate_langchain_answer_stream(question: str, context: str, session_
     history.add_ai_message(answer_text)
 
 
+def get_recent_history_text(
+    session_id: str | None,
+    max_turns: int = 3,
+    max_answer_chars: int = 200,
+) -> str:
+    """질의 재작성용으로 최근 대화 이력을 간결한 텍스트로 반환합니다.
+
+    후속 질문("그럼 신청 기간은?")의 대명사/생략을 해소하기 위한 용도라
+    전체 이력이 아닌 최근 max_turns 쌍만, 답변은 앞부분만 자른다.
+    이력이 없거나 Redis 미가용이면 빈 문자열.
+    """
+    if not session_id:
+        return ""
+    try:
+        history = _get_session_history(session_id)
+        messages = [m for m in history.messages if _is_valid_message(m)]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to load history for query rewriting: %s", e)
+        return ""
+    if not messages:
+        return ""
+
+    recent = messages[-(max_turns * 2):]
+    lines: list[str] = []
+    for m in recent:
+        content = m.content.strip()
+        if isinstance(m, HumanMessage):
+            lines.append(f"사용자: {content}")
+        elif isinstance(m, AIMessage):
+            if len(content) > max_answer_chars:
+                content = content[:max_answer_chars] + "…"
+            lines.append(f"동똑이: {content}")
+    return "\n".join(lines)
+
+
 def append_manual_history(session_id: str | None, question: str, answer: str) -> None:
     actual_session_id = session_id or "default_session"
     history = _get_session_history(actual_session_id)
@@ -278,4 +321,5 @@ __all__ = [
     "generate_langchain_answer",
     "generate_langchain_answer_stream",
     "append_manual_history",
+    "get_recent_history_text",
 ]

@@ -44,12 +44,25 @@ def extract_title(text: str) -> str:
     return text.split("\n", 1)[0].strip()[:120]
 
 
+def _clean_cell(value: object) -> str:
+    """NaN(float)·None·'nan' 문자열을 빈 값으로 취급합니다(NaN은 truthy라 if 검사로 못 거름)."""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return "" if text.lower() in ("nan", "none") else text
+
+
 def format_citations(df: pd.DataFrame) -> str:
     lines = []
     for _, row in df.iterrows():
         title = extract_title(row.get("chunk_text", ""))
-        date = row.get("published_at")
-        url = row.get("url")
+        date = _clean_cell(row.get("published_at"))
+        url = _clean_cell(row.get("url"))
         if url and date:
             lines.append(f"- {title} ({date}) — {url}")
         elif url:
@@ -78,9 +91,14 @@ def answer_with_citations(
     prompt = ANSWER_PROMPT_TEMPLATE.format(current_date=current_date, context=context)
 
     client = get_client()
+    # 시스템 프롬프트(컨텍스트 포함)와 사용자 질문을 분리해 전달한다.
+    # (이전 버전은 질문을 아예 전달하지 않아 사용 시 무의미한 답이 생성됐음)
     response = client.chat.completions.create(
         model=model_name,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": query},
+        ],
         temperature=temperature,
     )
     answer = response.choices[0].message.content.strip()
