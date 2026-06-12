@@ -40,7 +40,9 @@ public class ServerDbContext : DbContext
         role.HasData([
             new() { Id = new("c22bc8f7-98b8-45a3-9053-3b779e027649"), Rolename = "학생회" },
             new() { Id = new("ec62f7d6-069d-4a47-8801-db61b938a299"), Rolename = "관리자" },
-            new() { Id = new("b4114fd1-c9f0-4171-821f-b53a15faba9b"), Rolename = "일반학생" }
+            new() { Id = new("b4114fd1-c9f0-4171-821f-b53a15faba9b"), Rolename = "일반학생" },
+            // 어드민 인가 허용목록(AdminProxyApis)·프론트 가드에서 쓰는 역할 — seed 누락 보완
+            new() { Id = new("7a3f2c44-9d1e-4b6a-8f25-6c0e9b51d7a2"), Rolename = "총학생회" }
             ]);
 
         guest.ToTable("guest");

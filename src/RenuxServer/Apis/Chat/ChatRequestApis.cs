@@ -140,6 +140,12 @@ static public class ChatRequestApis
                 return Results.Unauthorized();
             }
 
+            // 프론트가 보낸 OrganizationId가 실제 존재하는지 검증 (FK 위반/고아 데이터 방지)
+            if (!await db.Organizations.AnyAsync(o => o.Id == stch.Org.Id))
+            {
+                return Results.BadRequest("유효하지 않은 조직입니다.");
+            }
+
             ActiveChat chat = new()
             {
                 Id = id,
@@ -265,6 +271,8 @@ static public class ChatRequestApis
             context.Response.ContentType = "text/event-stream";
             context.Response.Headers.CacheControl = "no-cache";
             context.Response.Headers.Connection = "keep-alive";
+            // nginx 등 리버스 프록시가 SSE를 버퍼링하지 않도록 지시 (nginx.conf의 proxy_buffering off와 이중 안전망)
+            context.Response.Headers["X-Accel-Buffering"] = "no";
 
             var fullAnswer = new System.Text.StringBuilder();
             List<ChatSourceDto> sources = [];

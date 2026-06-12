@@ -26,16 +26,18 @@ static public class EtcApis
 
             List<OrganizationDto> orgDtos = mapper.Map<List<OrganizationDto>>(organizations);
 
+            // 매니저는 학생회 계열 역할만 인정하고(일반 학생이 매니저로 표시되던 버그 수정),
+            // 학과별 일괄 조회로 N+1 쿼리를 제거한다.
+            string[] managerRoles = ["학생회", "총학생회", "관리자"];
+            var managersByMajor = await db.Users
+                .Where(u => u.Role != null && managerRoles.Contains(u.Role!.Rolename))
+                .GroupBy(u => u.MajorId)
+                .Select(g => new { MajorId = g.Key, Name = g.Select(u => u.Username).FirstOrDefault() })
+                .ToDictionaryAsync(x => x.MajorId, x => x.Name);
+
             foreach (var orgDto in orgDtos)
             {
-                // Find a user associated with this major (assuming they are the manager/council)
-                // In a real scenario, you might filter by Role as well.
-                var manager = await db.Users
-                    .Where(u => u.MajorId == orgDto.Major.Id)
-                    .Select(u => u.Username)
-                    .FirstOrDefaultAsync();
-                
-                orgDto.ManagerName = manager ?? "-";
+                orgDto.ManagerName = managersByMajor.GetValueOrDefault(orgDto.Major.Id) ?? "-";
             }
 
             return Results.Ok(orgDtos);

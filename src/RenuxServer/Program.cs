@@ -11,6 +11,7 @@ using RenuxServer.Apis.Auth;
 
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using RenuxServer.Models;
 using RenuxServer.Dtos.ChatDtos;
 using RenuxServer.Dtos.EtcDtos;
@@ -109,6 +110,21 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 builder.Services.AddHttpClient();
 
+// 인증/회원가입 엔드포인트 무차별 대입·열거 방어용 레이트 리미터 (IP 단위 고정 윈도)
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("auth", httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+});
+
 // CORS is credentialed (cookies), so the origin allowlist must be tight.
 // Production must set CORS_ALLOWED_ORIGINS explicitly (e.g. https://dgudongttok.vercel.app);
 // localhost is only permitted in Development. No wildcard origins.
@@ -154,19 +170,9 @@ using (var scope = app.Services.CreateScope())
     try
     {
         var db = scope.ServiceProvider.GetRequiredService<ServerDbContext>();
+        // sources_json / is_fallback / fallback_reason 컬럼은 정식 EF 마이그레이션
+        // (AddChatMessageSources, AddChatMessageFallbackReason)으로 흡수됨.
         await db.Database.MigrateAsync();
-        await db.Database.ExecuteSqlRawAsync("""
-            ALTER TABLE chat_messages
-            ADD COLUMN IF NOT EXISTS sources_json text;
-            """);
-        await db.Database.ExecuteSqlRawAsync("""
-            ALTER TABLE chat_messages
-            ADD COLUMN IF NOT EXISTS is_fallback boolean NOT NULL DEFAULT FALSE;
-            """);
-        await db.Database.ExecuteSqlRawAsync("""
-            ALTER TABLE chat_messages
-            ADD COLUMN IF NOT EXISTS fallback_reason text;
-            """);
 
         List<Major> majors = await db.Majors.ToListAsync();
 
@@ -185,6 +191,8 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
