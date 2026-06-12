@@ -125,16 +125,27 @@ const UniversityAdminPage = () => {
   const [actionError, setActionError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
+  // 성공 알림 자동 소거: 3초 후 사라지도록
+  useEffect(() => {
+    if (!actionNotice) return
+    const timer = setTimeout(() => setActionNotice(null), 3000)
+    return () => clearTimeout(timer)
+  }, [actionNotice])
+
+  // 선택 항목 변경 시 이전 알림 소거
+  useEffect(() => {
+    setActionNotice(null)
+    setActionError(null)
+  }, [selectedReviewId])
+
   // Fetch Data — 새로고침 버튼에서도 재사용할 수 있도록 useEffect 밖으로 분리
   const fetchData = useCallback(async () => {
-        console.log('Fetching admin data...'); // Added log
         setLoading(true)
-        setError(null) // Clear previous errors
+        setError(null)
         try {
             // 1. Fetch Organizations
             try {
                 const orgsData = await apiFetch<ApiOrganization[]>('/req/orgs')
-                console.log('Received organizations data:', orgsData); 
                 if (Array.isArray(orgsData)) {
                     const mappedOrgs: CouncilOrganization[] = orgsData.map(org => ({
                         id: org.id,
@@ -147,15 +158,13 @@ const UniversityAdminPage = () => {
                     setOrganizations(mappedOrgs)
                 }
             } catch (e) {
-                console.warn('Failed to fetch orgs:', e); // Added log
+                console.error('Failed to fetch orgs:', e)
                 // Don't set global error for orgs fetch failure, it might not be critical
             }
 
             // 2. Fetch Pending Reviews (ALL items for history)
             try {
                 const pendingData = await apiFetch<ApiPendingItem[]>(`/admin/items?t=${new Date().getTime()}`)
-                console.log('Received all reviews data:', pendingData); 
-                
                 if (Array.isArray(pendingData)) {
                     const mappedReviews: PendingAnswerReview[] = pendingData
                         .map(item => {
@@ -266,7 +275,6 @@ const UniversityAdminPage = () => {
   const handleNavigateHome = () => navigate('/')
 
   const handleReviewAction = async (reviewId: string, action: 'approve' | 'reject') => {
-    console.log(`handleReviewAction called for ID: ${reviewId}, action: ${action}`);
     if (!confirm(`${action === 'approve' ? '승인' : '반려'} 하시겠습니까?`)) {
       return;
     }
@@ -419,13 +427,17 @@ const UniversityAdminPage = () => {
                     <div
                         key={review.id}
                         className={`admin-review-card ${selectedReviewId === review.id ? 'admin-review-card--active' : ''}`}
-                        onClick={() => setSelectedReviewId(review.id)} 
                     >
-                        <button type="button" style={{all: 'unset', cursor: 'pointer', display: 'block', width: '100%', padding: '10px'}}>
+                        <button
+                          type="button"
+                          style={{all: 'unset', cursor: 'pointer', display: 'block', width: '100%', padding: '10px'}}
+                          onClick={() => setSelectedReviewId(review.id)}
+                          aria-pressed={selectedReviewId === review.id}
+                        >
                         <div style={{display: 'flex', alignItems: 'center', marginBottom: '6px'}}>
                             <span className="admin-review-card__dept" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: '4px' }}>{review.departmentName}</span>
                             {review.status !== 'pending' && (
-                                <span className={`status-pill status-pill--${review.status === 'approved' || review.status === 'approved_manually' ? 'success' : 'pending'}`} style={{fontSize: '0.7rem', padding: '2px 8px', flexShrink: 0, whiteSpace: 'nowrap'}}>
+                                <span className={`status-pill status-pill--${review.status === 'approved' || review.status === 'approved_manually' ? 'success' : 'danger'}`} style={{fontSize: '0.7rem', padding: '2px 8px', flexShrink: 0, whiteSpace: 'nowrap'}}>
                                     {review.status === 'approved' || review.status === 'approved_manually' ? '승인됨' : '반려됨'}
                                 </span>
                             )}
@@ -536,16 +548,18 @@ const UniversityAdminPage = () => {
           ) : ragStatus ? (
             <>
               <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '16px' }}>
-                <article 
+                <button
+                  type="button"
                   className="admin-card admin-card--compact"
                   onClick={() => navigate('/admin/logs')}
-                  style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
-                  onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                  onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                  style={{ cursor: 'pointer', transition: 'transform 0.2s', textAlign: 'left', width: '100%', border: 'none', background: 'inherit' }}
+                  onMouseOver={(e) => (e.currentTarget.style.transform = 'translateY(-2px)')}
+                  onMouseOut={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                  aria-label="총 질문 로그 보기"
                 >
                   <p className="admin-card__label">총 질문 로그</p>
                   <strong className="admin-card__value">{ragStatus.rag_logs.total_queries}</strong>
-                </article>
+                </button>
                 <article className="admin-card admin-card--compact">
                   <p className="admin-card__label">Fallback 비율</p>
                   <strong className="admin-card__value">{fallbackRate}%</strong>
@@ -605,7 +619,7 @@ const UniversityAdminPage = () => {
                       <span title={formatDateTime(dataset.vectorizer_mtime)}>
                         {dataset.vectorizer_exists ? '있음' : '없음'}
                       </span>
-                      <span>{dataset.latest_document_published_at ?? '-'}</span>
+                      <span>{formatDateTime(dataset.latest_document_published_at)}</span>
                       <span title={formatDateTime(dataset.last_successful_indexed_at)}>{formatDateTime(dataset.last_successful_indexed_at)}</span>
                       <span>{dataset.vectorizer_sklearn_version ?? '-'}</span>
                       <span className={`status-pill status-pill--${getStatusPillClass(dataset.status)}`}>

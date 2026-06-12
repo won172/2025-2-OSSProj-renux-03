@@ -1430,6 +1430,16 @@
     color: var(--buddy-muted);
 }
 
+.ghost-btn--danger {
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #b91c1c;
+}
+
+.ghost-btn--danger:hover {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
 .home-chat {
     min-height: 100vh;
     display: flex;
