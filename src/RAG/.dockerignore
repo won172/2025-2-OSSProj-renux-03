@@ -6,3 +6,7 @@ venv/
 .venv/
 artifacts/
 rag_database.db
+huggingface_cache/
+**/huggingface_cache/
+.cache/
+**/.cache/

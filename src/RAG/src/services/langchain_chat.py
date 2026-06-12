@@ -10,8 +10,11 @@ import logging
 import time
 from functools import lru_cache
 
+import httpx
 import redis
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
