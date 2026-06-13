@@ -1,6 +1,8 @@
 """노트북에서 가져온 밀집 임베딩+TF-IDF 하이브리드 검색 유틸리티입니다."""
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -13,13 +15,90 @@ import sklearn
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src.config import DEFAULT_TOP_K, HYBRID_ALPHA, VECTORIZER_DIR
+from src.config import (
+    DEFAULT_TOP_K,
+    HYBRID_ALPHA,
+    TFIDF_REQUIRE_MANIFEST,
+    TFIDF_VERIFY_INTEGRITY,
+    VECTORIZER_DIR,
+)
 from src.models.embedding import encode_queries
 from src.vectorstore.chroma_client import get_collection
+
+logger = logging.getLogger(__name__)
+
+# TF-IDF pkl 무결성 매니페스트: {파일명: sha256}. 학습 시 갱신하고 로드 전 대조한다.
+# 경로는 호출 시점에 VECTORIZER_DIR에서 파생한다(테스트의 VECTORIZER_DIR 패치가 함께 적용되도록).
+_MANIFEST_NAME = "manifest.json"
 
 
 def _vectorizer_path(identifier: str) -> Path:
     return VECTORIZER_DIR / f"{identifier}_tfidf.pkl"
+
+
+def _manifest_path() -> Path:
+    return VECTORIZER_DIR / _MANIFEST_NAME
+
+
+def _sha256_file(path: Path) -> str:
+    """파일의 SHA-256 16진 다이제스트를 청크 단위로 계산한다(대용량 pkl 대비)."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _read_manifest() -> Dict[str, str]:
+    manifest_path = _manifest_path()
+    if not manifest_path.exists():
+        return {}
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("TF-IDF 매니페스트를 읽지 못했습니다(%s): %s", manifest_path, exc)
+        return {}
+
+
+def _update_manifest(filename: str, digest: str) -> None:
+    """학습 직후 매니페스트에 {파일명: sha256}을 기록한다."""
+    manifest_path = _manifest_path()
+    manifest = _read_manifest()
+    manifest[filename] = digest
+    tmp_path = manifest_path.with_suffix(".json.tmp")
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, ensure_ascii=False, indent=2, sort_keys=True)
+    tmp_path.replace(manifest_path)
+
+
+def _verify_artifact_integrity(path: Path) -> None:
+    """joblib.load 이전에 매니페스트 해시와 대조한다(불일치 시 fail-closed).
+
+    pkl/joblib 아티팩트는 역직렬화 중 임의 코드를 실행할 수 있으므로, 신뢰된
+    매니페스트와 다른 파일은 로드하지 않는다. 검증은 TFIDF_VERIFY_INTEGRITY로 끌 수 있고,
+    매니페스트 미등록 항목의 거부 여부는 TFIDF_REQUIRE_MANIFEST로 제어한다.
+    """
+    if not TFIDF_VERIFY_INTEGRITY:
+        return
+    manifest = _read_manifest()
+    expected = manifest.get(path.name)
+    if expected is None:
+        msg = (
+            f"TF-IDF 아티팩트 '{path.name}'가 무결성 매니페스트에 없습니다. "
+            f"scripts/build_indices.py 재생성 또는 매니페스트 갱신이 필요합니다."
+        )
+        if TFIDF_REQUIRE_MANIFEST:
+            raise ValueError(msg + " (TFIDF_REQUIRE_MANIFEST=1 — 로드 거부)")
+        logger.warning(msg + " (검증 없이 로드)")
+        return
+    actual = _sha256_file(path)
+    if actual != expected:
+        raise ValueError(
+            f"TF-IDF 아티팩트 '{path.name}' 무결성 검증 실패: "
+            f"매니페스트 해시와 불일치(변조/손상 가능). 로드를 거부합니다."
+        )
 
 
 def train_tfidf(
@@ -42,6 +121,7 @@ def train_tfidf(
         )
     vectorizer = TfidfVectorizer(max_features=10000)
     matrix = vectorizer.fit_transform(texts)
+    path = _vectorizer_path(identifier)
     joblib.dump(
         {
             "vectorizer": vectorizer,
@@ -54,13 +134,17 @@ def train_tfidf(
                 "sklearn_version": sklearn.__version__,
             },
         },
-        _vectorizer_path(identifier),
+        path,
     )
+    # 방금 쓴 아티팩트의 해시를 매니페스트에 기록 → 이후 로드 시 무결성 검증의 신뢰 기준이 된다.
+    _update_manifest(path.name, _sha256_file(path))
     return vectorizer, matrix
 
 
 def _load_tfidf_artifact(identifier: str) -> dict:
-    artifact = joblib.load(_vectorizer_path(identifier))
+    path = _vectorizer_path(identifier)
+    _verify_artifact_integrity(path)  # joblib.load(임의 코드 실행 가능) 이전에 fail-closed 검증
+    artifact = joblib.load(path)
     if isinstance(artifact, dict) and "vectorizer" in artifact and "matrix" in artifact:
         metadata = artifact.get("metadata")
         if isinstance(metadata, dict):
@@ -309,6 +393,7 @@ def hybrid_search_with_meta(
         "topics", "category", "published_at", "url", "source", "notice_id",
         "major", "entry_year", "source_type", "attachments",
         "doc_id", "position",  # parent-document 확장(이웃 청크 결합)에 사용
+        "is_closed", "restaurant", "meal_date",  # 학식: 휴무 패널티·식당/날짜 표시에 사용
     ]
     existing = [col for col in desired if col in out.columns]
     return out[existing]

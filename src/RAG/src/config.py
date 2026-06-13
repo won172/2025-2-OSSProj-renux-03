@@ -33,6 +33,13 @@ EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "8"))
 # E5 계열처럼 질의/문서에 서로 다른 프리픽스를 요구하는 모델 지원(KURE/BGE-M3는 빈 값).
 EMBED_QUERY_PREFIX = os.getenv("EMBED_QUERY_PREFIX", "")
 EMBED_PASSAGE_PREFIX = os.getenv("EMBED_PASSAGE_PREFIX", "")
+# HuggingFace 모델 로드 시 저장소 동봉 파이썬 코드를 실행할지 여부(trust_remote_code).
+# ⚠️ 공급망 위험: 신뢰할 수 없는 모델은 로드 중 임의 코드를 실행할 수 있으므로 기본 비활성.
+# 기본 모델(KURE-v1, bge-reranker-v2-m3)은 표준 XLM-RoBERTa 구조라 이 플래그가 필요 없다.
+# gte-multilingual-base처럼 커스텀 모델링 코드를 쓰는 모델만, 고정 리비전과 함께 1로 켠다.
+MODEL_TRUST_REMOTE_CODE = os.getenv("MODEL_TRUST_REMOTE_CODE", "0") == "1"
+# 모델 리비전 고정(공급망 무결성). 비우면 HF 기본(main 최신)을 따른다 — 운영은 커밋 해시 권장.
+EMBED_MODEL_REVISION = os.getenv("EMBED_MODEL_REVISION") or None
 
 # Cross-encoder 리랭커 (정확도 향상 — 하이브리드 top-N 후보를 질의-문서 쌍으로 정밀 재정렬).
 # 모델(~2GB) 다운로드와 CPU 추론 지연(쿼리당 1~5초)이 있어 기본 비활성.
@@ -40,6 +47,17 @@ EMBED_PASSAGE_PREFIX = os.getenv("EMBED_PASSAGE_PREFIX", "")
 RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "0") == "1"
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 RERANKER_CANDIDATES = int(os.getenv("RERANKER_CANDIDATES", "20"))  # 재정렬할 상위 후보 수
+RERANKER_MODEL_REVISION = os.getenv("RERANKER_MODEL_REVISION") or None  # 리랭커 리비전 고정(선택)
+
+# TF-IDF 아티팩트(*.pkl) 무결성 검증.
+# pkl은 joblib.load 시 임의 코드를 실행할 수 있어, 학습 시 기록한 SHA-256 매니페스트와
+# 로드 직전 파일 해시를 대조한다. 불일치 시 fail-closed(로드 거부).
+# TFIDF_VERIFY_INTEGRITY=0 으로 끌 수 있으나 운영에서는 끄지 말 것(검증 우회).
+TFIDF_VERIFY_INTEGRITY = os.getenv("TFIDF_VERIFY_INTEGRITY", "1") == "1"
+# 매니페스트에 해당 데이터셋 항목이 아예 없을 때의 동작.
+# 기본(0): 경고만 하고 로드 허용(신규 데이터셋·부트스트랩 호환).
+# 1: 매니페스트 미등록 아티팩트도 로드 거부(엄격 모드 — 운영 권장).
+TFIDF_REQUIRE_MANIFEST = os.getenv("TFIDF_REQUIRE_MANIFEST", "0") == "1"
 
 # Parent-document 확장: 검색은 작은 청크로 하되, 생성 컨텍스트에는 같은 문서의
 # 이웃 청크(앞뒤 1개)를 함께 제공해 잘린 근거를 보완한다(추가 비용 없음, 기본 활성).
@@ -56,6 +74,9 @@ RECENCY_DECAY_DAYS_BY_DATASET = {
     "notices": float(os.getenv("RECENCY_DECAY_DAYS_NOTICES", "90")),
     "schedule": float(os.getenv("RECENCY_DECAY_DAYS_SCHEDULE", "180")),
     "rules": float(os.getenv("RECENCY_DECAY_DAYS_RULES", "1095")),
+    # 학식은 매일 갱신 — 지난 메뉴는 빠르게 감쇠시키고 당일/이번주 메뉴를 선호한다.
+    # (미래 날짜 메뉴는 recency가 1.0으로 클램프되어 다가오는 식단이 우대됨)
+    "meals": float(os.getenv("RECENCY_DECAY_DAYS_MEALS", "4")),
 }
 
 # 컨텍스트 관련 설정
@@ -68,6 +89,7 @@ LLM_ROUTER_DESCRIPTIONS = {
     "schedule": "수강신청, 개강, 종강, 방학, 시험 등 주요 학사일정에 대한 정보입니다.",
     "courses": "개설된 교과목, 수업, 강의, 전공, 선수과목, 학점, 이수구분 등 교과 과정에 대한 상세 정보입니다.",
     "staff": "교직원, 교수, 행정 부서의 연락처, 담당 업무 정보입니다.",
+    "meals": "학생식당(상록원 1/2/3층, 솥앤누들, 누리터, 경영관 D-Flex) 학식 식단, 오늘/이번주 메뉴, 중식·석식, 가격 정보입니다.",
 }
 
 # OpenAI/LLM 기본 설정.
@@ -125,6 +147,7 @@ DATA_SOURCES: Dict[str, Path] = {
     "courses_catalog": DATA_DIR / "dongguk_departments_catalog.csv",
     "courses_curriculum_sources": DATA_DIR / "dongguk_department_curriculum_sources.csv",
     "staff": DATA_DIR / "dongguk_staff_contacts.csv",
+    "meals": DATA_DIR / "dongguk_meals.csv",
 }
 
 
@@ -143,9 +166,12 @@ __all__ = [
     "EMBED_BATCH_SIZE",
     "EMBED_QUERY_PREFIX",
     "EMBED_PASSAGE_PREFIX",
+    "MODEL_TRUST_REMOTE_CODE",
+    "EMBED_MODEL_REVISION",
     "RERANKER_ENABLED",
     "RERANKER_MODEL",
     "RERANKER_CANDIDATES",
+    "RERANKER_MODEL_REVISION",
     "PARENT_CONTEXT_ENABLED",
     "CHUNK_SIZE",
     "CHUNK_OVERLAP",
@@ -154,6 +180,8 @@ __all__ = [
     "MIN_RETRIEVAL_SCORE",
     "RECENCY_WEIGHT",
     "RECENCY_DECAY_DAYS_BY_DATASET",
+    "TFIDF_VERIFY_INTEGRITY",
+    "TFIDF_REQUIRE_MANIFEST",
     "MAX_CONTEXT_LENGTH",
     "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
