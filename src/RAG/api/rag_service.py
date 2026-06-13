@@ -1416,6 +1416,22 @@ def bootstrap_artifacts() -> None:
     except Exception as exc:
         logging.warning(f"⚠️ Embedding model warmup failed: {exc}", exc_info=True)
 
+    # 공지/학식 데이터 주기적 자동 갱신(RAG_SCHEDULER_ENABLED=1일 때만).
+    try:
+        from src.services.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as exc:  # noqa: BLE001 — 스케줄러 실패가 서빙 부팅을 막지 않도록
+        logging.warning(f"⚠️ Data refresh scheduler failed to start: {exc}", exc_info=True)
+
+
+@app.on_event("shutdown")
+def shutdown_scheduler_event() -> None:
+    try:
+        from src.services.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    except Exception:  # noqa: BLE001
+        pass
+
 
 
 # 제출 가능한 source_type과 각 타입의 필수(비공백) 필드
