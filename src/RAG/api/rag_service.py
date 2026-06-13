@@ -2,6 +2,7 @@ import csv
 import functools
 import io
 from importlib.metadata import PackageNotFoundError, version
+import asyncio
 import logging
 import math
 import re
@@ -2040,7 +2041,7 @@ async def ask_stream(req: AskRequest, request: Request):
 
     session_id = req.session_id or str(uuid.uuid4())
 
-    async def stream_generator():
+    async def _stream_body():
         analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
         if USE_QUERY_ANALYSIS:
             # 후속 질문("그럼 신청 기간은?")의 대명사/생략을 해소하기 위해
@@ -2280,6 +2281,23 @@ async def ask_stream(req: AskRequest, request: Request):
             top_hybrid_score, 
             [SourceChunk(**s) for s in sources]
         )
+
+    async def stream_generator():
+        """본문 스트림을 감싸 중간 예외(OpenAI 5xx·타임아웃·Chroma 오류 등)를
+        조용한 끊김 대신 SSE error 이벤트로 전달한다(클라이언트가 실패를 인지·복구 가능)."""
+        try:
+            async for event in _stream_body():
+                yield event
+        except asyncio.CancelledError:
+            # 클라이언트 연결 종료 — 정상 취소이므로 조용히 끝낸다.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _log_event(
+                logging.ERROR, "ask_stream_failed",
+                request_id=request_id, error=str(exc),
+            )
+            fail_msg = "답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+            yield f"data: {json.dumps({'type': 'error', 'content': fail_msg}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
