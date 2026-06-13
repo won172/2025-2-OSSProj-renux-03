@@ -4,6 +4,9 @@ __*/
 **/obj/
 *.env
 *.env.*
+# 단, 플레이스홀더만 담은 .env.example 은 추적해 신규 배포/기여자 가이드로 쓴다.
+!*.env.example
+!**/.env.example
 RenuxServer.csproj.Backup.tmp
 RenuxServer.csproj.user
 .DS_Store
@@ -47,6 +50,7 @@ src/RAG/tests/evaluation_results_*.csv
 /UI_REVIEW.md
 /ADMIN_REVIEW.md
 /KNOWLEDGE_FLOW_REVIEW.md
+/LAUNCH_READINESS.md
 /CLAUDE.md
 
 # 어시스턴트/로컬 작업 디렉터리

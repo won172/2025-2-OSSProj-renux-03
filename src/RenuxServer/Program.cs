@@ -204,6 +204,24 @@ app.AddChatApis();
 app.AddEtcApis();
 app.AddAdminProxyApis();
 
+// 헬스체크: /health = 프로세스 생존(liveness), /ready = DB 연결 확인(readiness).
+// 컨테이너 오케스트레이션(docker healthcheck / fly checks)이 트래픽 라우팅·롤백 판단에 사용.
+app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+app.MapGet("/ready", async (ServerDbContext db, CancellationToken ct) =>
+{
+    try
+    {
+        var canConnect = await db.Database.CanConnectAsync(ct);
+        return canConnect
+            ? Results.Ok(new { status = "ready" })
+            : Results.Json(new { status = "db_unavailable" }, statusCode: 503);
+    }
+    catch
+    {
+        return Results.Json(new { status = "db_unavailable" }, statusCode: 503);
+    }
+}).AllowAnonymous();
+
 app.MapGet("/", async (HttpContext context) =>
 {
     context.Response.ContentType = "text/html";

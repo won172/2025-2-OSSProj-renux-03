@@ -7,3 +7,6 @@ Pages
 .dockerignore
 Dockerfile
 docker-compose.yml
+.env
+.env.*
+!.env.example
