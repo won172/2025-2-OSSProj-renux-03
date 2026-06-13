@@ -11,17 +11,25 @@ from src.config import (
     EMBED_BATCH_SIZE,
     EMBED_DEVICE,
     EMBED_MODEL_NAME,
+    EMBED_MODEL_REVISION,
     EMBED_PASSAGE_PREFIX,
     EMBED_QUERY_PREFIX,
+    MODEL_TRUST_REMOTE_CODE,
 )
 
 
 @lru_cache(maxsize=1)
 def get_embedder() -> SentenceTransformer:
-    """캐시에 담긴 SentenceTransformer 인스턴스를 반환합니다."""
+    """캐시에 담긴 SentenceTransformer 인스턴스를 반환합니다.
+
+    trust_remote_code는 기본 비활성(MODEL_TRUST_REMOTE_CODE)으로, 신뢰할 수 없는
+    HF 모델이 로드 중 임의 코드를 실행하는 공급망 위험을 차단한다. 커스텀 코드가
+    필요한 모델은 고정 리비전(EMBED_MODEL_REVISION)과 함께 명시적으로 켜야 한다.
+    """
     model = SentenceTransformer(
         EMBED_MODEL_NAME,
-        trust_remote_code=True,
+        trust_remote_code=MODEL_TRUST_REMOTE_CODE,
+        revision=EMBED_MODEL_REVISION,
         device=EMBED_DEVICE,
     )
     return model

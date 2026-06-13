@@ -16,9 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.search.hybrid import (  # noqa: E402
     _matches_where,
     hybrid_search,
+    load_tfidf,
     load_tfidf_with_ids,
     train_tfidf,
 )
+import src.search.hybrid as hybrid  # noqa: E402
 
 
 # ---------- _matches_where ----------
@@ -71,6 +73,44 @@ def test_train_tfidf_rejects_mismatched_ids(tmp_path):
     with patch("src.search.hybrid._vectorizer_path", lambda ident: tmp_path / f"{ident}_tfidf.pkl"):
         with pytest.raises(ValueError):
             train_tfidf("testset", ["a", "b"], chunk_ids=["only-one"])
+
+
+# ---------- TF-IDF pkl 무결성 검증(매니페스트) ----------
+
+def test_train_writes_manifest_and_load_verifies(tmp_path):
+    """학습 시 매니페스트에 sha256이 기록되고, 정상 로드는 검증을 통과한다."""
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
+         patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True):
+        train_tfidf("intg", ["가나다", "라마바"], chunk_ids=["c1", "c2"])
+        manifest = hybrid._read_manifest()
+        assert "intg_tfidf.pkl" in manifest
+        # 검증이 켜진 상태에서도 정상 아티팩트는 로드된다(예외 없음).
+        vec, matrix = load_tfidf("intg")
+        assert matrix.shape[0] == 2
+
+
+def test_load_rejects_tampered_artifact(tmp_path):
+    """매니페스트 해시와 다른(변조된) pkl은 fail-closed로 로드를 거부한다."""
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
+         patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True):
+        train_tfidf("intg", ["가나다", "라마바"], chunk_ids=["c1", "c2"])
+        # 아티팩트 바이트를 변조 → 해시 불일치 유발
+        pkl = tmp_path / "intg_tfidf.pkl"
+        pkl.write_bytes(pkl.read_bytes() + b"\x00tampered")
+        with pytest.raises(ValueError, match="무결성"):
+            load_tfidf("intg")
+
+
+def test_load_strict_mode_rejects_unmanifested(tmp_path):
+    """TFIDF_REQUIRE_MANIFEST=1이면 매니페스트 미등록 아티팩트도 거부한다."""
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
+         patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True), \
+         patch("src.search.hybrid.TFIDF_REQUIRE_MANIFEST", True):
+        train_tfidf("intg", ["가나다", "라마바"], chunk_ids=["c1", "c2"])
+        # 매니페스트를 비워 미등록 상태로 만든다
+        (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+        with pytest.raises(ValueError):
+            load_tfidf("intg")
 
 
 # ---------- hybrid_search (Chroma/임베딩 모킹) ----------

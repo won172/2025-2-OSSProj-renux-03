@@ -12,7 +12,13 @@ import logging
 from functools import lru_cache
 from typing import List, Sequence
 
-from src.config import EMBED_DEVICE, RERANKER_ENABLED, RERANKER_MODEL
+from src.config import (
+    EMBED_DEVICE,
+    MODEL_TRUST_REMOTE_CODE,
+    RERANKER_ENABLED,
+    RERANKER_MODEL,
+    RERANKER_MODEL_REVISION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +33,14 @@ def get_reranker():
     from sentence_transformers import CrossEncoder
 
     logger.info("Loading cross-encoder reranker: %s", RERANKER_MODEL)
-    return CrossEncoder(RERANKER_MODEL, device=EMBED_DEVICE, trust_remote_code=True)
+    # trust_remote_code는 기본 비활성(공급망 위험 차단). 커스텀 코드 모델만
+    # 고정 리비전(RERANKER_MODEL_REVISION)과 함께 MODEL_TRUST_REMOTE_CODE=1로 켠다.
+    return CrossEncoder(
+        RERANKER_MODEL,
+        device=EMBED_DEVICE,
+        trust_remote_code=MODEL_TRUST_REMOTE_CODE,
+        revision=RERANKER_MODEL_REVISION,
+    )
 
 
 def rerank_scores(query: str, texts: Sequence[str]) -> List[float] | None:
