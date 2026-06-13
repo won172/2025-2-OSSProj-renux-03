@@ -127,11 +127,28 @@ def make_soup(markup: str) -> BeautifulSoup:
 
 
 # ===== 크롤링 기본 함수 =====
+def _get_with_retry(url: str, *, params: dict | None = None, timeout: float = 40, retries: int = 3):
+    """일시적 네트워크 오류(503/타임아웃 등)에 지수 백오프로 재시도한다.
+
+    한 번의 일시 장애로 게시판 수집이 통째로 중단/누락되는 것을 막는다.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)  # 1s → 2s → 4s
+    raise last_exc  # type: ignore[misc]
+
+
 def fetch_notice_list(board_code: str, page: int = 1) -> List[Dict[str, Any]]:
     """게시판 목록 페이지에서 공지 요약 목록을 가져옵니다."""
     url = f"{BASE_URL}/article/{board_code}/list"
-    response = requests.get(url, params={"pageIndex": page}, headers=HEADERS, timeout=40)
-    response.raise_for_status()
+    response = _get_with_retry(url, params={"pageIndex": page})
 
     soup = make_soup(response.text)
     notices: List[Dict[str, Any]] = []
@@ -186,8 +203,7 @@ def fetch_notice_list(board_code: str, page: int = 1) -> List[Dict[str, Any]]:
 def fetch_notice_detail(board_code: str, article_id: int) -> Dict[str, Any]:
     """단일 공지의 HTML·텍스트·첨부 정보를 가져옵니다."""
     url = f"{BASE_URL}/article/{board_code}/detail/{article_id}"
-    response = requests.get(url, headers=HEADERS, timeout=40)
-    response.raise_for_status()
+    response = _get_with_retry(url)
 
     soup = make_soup(response.text)
     container = soup.select_one("div.board_view")
