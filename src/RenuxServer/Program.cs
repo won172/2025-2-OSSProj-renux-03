@@ -12,6 +12,7 @@ using RenuxServer.Apis.Auth;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using RenuxServer.Models;
 using RenuxServer.Dtos.ChatDtos;
 using RenuxServer.Dtos.EtcDtos;
@@ -46,7 +47,8 @@ var configuredCorsOrigins = (builder.Configuration["CORS_ALLOWED_ORIGINS"] ?? st
 // DbContext Setting
 builder.Services.AddDbContext<ServerDbContext>(options =>
 {
-    options.UseNpgsql(rawConnectionString);
+    // 일시적 DB 단절(컨테이너 재시작 경쟁 등)에 자동 재시도 — 즉시 500 반환 방지.
+    options.UseNpgsql(rawConnectionString, npgsql => npgsql.EnableRetryOnFailure(3));
 });
 
 // AutoMapper Setting
@@ -81,7 +83,10 @@ builder.Services.AddAuthentication(options =>
         {
             IssuerSigningKey = new SymmetricSecurityKey(Convert.FromBase64String(rawJwtKey)),
             ValidateIssuer = false,
-            ValidateAudience = false
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            // 기본 5분 유예 제거 — 만료 토큰이 추가로 유효해지는 창을 없앤다.
+            ClockSkew = TimeSpan.Zero
         };
 
         options.Events = new()
@@ -123,6 +128,17 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));
+
+    // 채팅(RAG) 경로 IP 단위 제한 — LLM 토큰 비용 폭주·남용 방어.
+    options.AddPolicy("chat", httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
 });
 
 // CORS is credentialed (cookies), so the origin allowlist must be tight.
@@ -161,6 +177,17 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// nginx 등 리버스 프록시가 전달하는 X-Forwarded-For/Proto를 신뢰해 실제 클라이언트 IP/스킴을
+// 복원한다. 이게 없으면 레이트 리미터가 프록시(컨테이너) IP로 집계돼 IP별 제한이 무력화된다.
+// 단일 ingress(nginx)만 존재하므로 KnownNetworks/Proxies를 비워 프록시를 신뢰한다.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+forwardedHeadersOptions.KnownNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
 
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 app.UseCors("FrontendCors");

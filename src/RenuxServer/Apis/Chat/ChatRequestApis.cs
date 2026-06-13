@@ -70,9 +70,13 @@ static public class ChatRequestApis
         };
     }
 
+    // 채팅 메시지 최대 길이(자). 초과 시 RAG로 전달하지 않아 토큰 비용·OOM을 방어한다.
+    private const int MaxChatContentLength = 2000;
+
     static public void AddChatApis(this WebApplication application)
     {
-        var app = application.MapGroup("/chat");
+        // IP 단위 레이트리밋(LLM 비용·남용 방어) 적용.
+        var app = application.MapGroup("/chat").RequireRateLimiting("chat");
 
         app.MapGet("/active", async (ServerDbContext db, HttpContext context, IMapper mapper) =>
         {
@@ -174,6 +178,9 @@ static public class ChatRequestApis
 
         app.MapPost("/msg", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper, ILogger<Program> logger, IConfiguration configuration, IHttpClientFactory httpClientFactory) =>
         {
+            if ((askDto.Content?.Length ?? 0) > MaxChatContentLength)
+                return Results.BadRequest(new { message = $"메시지가 너무 깁니다(최대 {MaxChatContentLength}자)." });
+
             bool isAuthenticated = context.Request.Cookies.ContainsKey("renux-server-token");
 
             if (!isAuthenticated)
@@ -243,6 +250,13 @@ static public class ChatRequestApis
 
         app.MapPost("/stream", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper, ILogger<Program> logger, IConfiguration configuration, IHttpClientFactory httpClientFactory) =>
         {
+            if ((askDto.Content?.Length ?? 0) > MaxChatContentLength)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsJsonAsync(new { message = $"메시지가 너무 깁니다(최대 {MaxChatContentLength}자)." });
+                return;
+            }
+
             bool isAuthenticated = context.Request.Cookies.ContainsKey("renux-server-token");
             string sessionId = askDto.ChatId.ToString();
             string question = askDto.Content;
