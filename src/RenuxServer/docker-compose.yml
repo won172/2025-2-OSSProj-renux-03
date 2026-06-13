@@ -67,6 +67,10 @@ services:
             - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
             - OLLAMA_TIMEOUT_SECONDS=${OLLAMA_TIMEOUT_SECONDS:-300}
             - REDIS_URL=redis://redis:6379/0
+            # 공지·학식 데이터 자동 갱신 스케줄러(in-process). 기본 켜짐, env로 끌 수 있음.
+            - RAG_SCHEDULER_ENABLED=${RAG_SCHEDULER_ENABLED:-1}
+            - RAG_NOTICES_REFRESH_HOURS=${RAG_NOTICES_REFRESH_HOURS:-6}
+            - RAG_MEALS_REFRESH_HOURS=${RAG_MEALS_REFRESH_HOURS:-24}
         restart: on-failure
 
     ollama:
@@ -76,16 +80,6 @@ services:
             - "11434:11434"
         volumes:
             - ollama_data:/root/.ollama
-        environment:
-            - NVIDIA_VISIBLE_DEVICES=all
-            - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-        deploy:
-            resources:
-                reservations:
-                    devices:
-                        - driver: nvidia
-                          count: all
-                          capabilities: [gpu]
         restart: always
 
     redis:
