@@ -95,6 +95,8 @@ LLM_ROUTER_DESCRIPTIONS = {
 # OpenAI/LLM 기본 설정.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # 질의분석/라우터용 (항상 OpenAI)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+RAG_REQUIRE_OPENAI_API_KEY = os.getenv("RAG_REQUIRE_OPENAI_API_KEY", "0") == "1"
+RAG_ROUTER_CACHE_TTL_SECONDS = int(os.getenv("RAG_ROUTER_CACHE_TTL_SECONDS", "300"))
 
 # 답변 생성 프로바이더 선택: "openai" 또는 "ollama".
 # LLM_PROVIDER 로 전환하며, 둘 다 LangChain 채팅 인터페이스(.ainvoke/.astream)를 사용한다.
@@ -197,6 +199,8 @@ __all__ = [
     "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
     "OPENAI_API_KEY",
+    "RAG_REQUIRE_OPENAI_API_KEY",
+    "RAG_ROUTER_CACHE_TTL_SECONDS",
     "LLM_PROVIDER",
     "LLM_FALLBACK_ENABLED",
     "OPENAI_CHAT_MODEL",

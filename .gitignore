@@ -26,6 +26,9 @@ src/RenuxServer/wwwroot/frontend/.env*
 
 # DB dumps (PII 위험 — 저장소에 커밋 금지)
 *.sql
+*.dump
+*.dump.sha256
+backups/
 !src/RenuxServer/Migrations/**/*.sql
 src/RAG/rag_data.db
 src/RAG/rag_database.db

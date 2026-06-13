@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import time
 from typing import List
 
 from langchain_core.exceptions import OutputParserException
@@ -10,7 +12,12 @@ from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field, ValidationError
 from langchain_openai import ChatOpenAI
 
-from src.config import LLM_ROUTER_DESCRIPTIONS, OPENAI_MODEL, OPENAI_CHAT_TIMEOUT_SECONDS
+from src.config import (
+    LLM_ROUTER_DESCRIPTIONS,
+    OPENAI_MODEL,
+    OPENAI_CHAT_TIMEOUT_SECONDS,
+    RAG_ROUTER_CACHE_TTL_SECONDS,
+)
 
 # LLM이 출력할 라우팅 결정의 스키마를 정의합니다.
 # 여러 데이터셋과 관련될 수 있으므로 문자열 리스트를 사용합니다.
@@ -77,16 +84,62 @@ llm = ChatOpenAI(
     model_kwargs={"response_format": {"type": "json_object"}},
 )
 router_chain = prompt | llm
+_route_cache: dict[str, tuple[float, List[str]]] = {}
+
+
+_KEYWORD_RULES: list[tuple[str, list[str]]] = [
+    (r"학식|식단|학생식당|상록원|솥앤누들|누리터|d-?flex|디플렉스|메뉴|중식|석식", ["meals"]),
+    (r"전화|연락처|내선|사무실|행정실|담당|교수", ["staff"]),
+    (r"수강신청|취소|재수강|휴학|복학|성적|졸업|학칙|규정|시행세칙|전과|복수전공", ["rules"]),
+    (r"개강|종강|시험|일정|기간|학사일정|이번 주|이번 달", ["schedule"]),
+    (r"교과|교과목|전공과목|이수구분|선수과목|학점|커리큘럼|교육과정|수업|강의", ["courses"]),
+    (r"공지|장학|모집|발표|등록금|입시|채용|신청", ["notices"]),
+]
 
 def _format_destinations() -> str:
     """LLM 프롬프트에 포함될 데이터셋 설명의 형식을 지정합니다."""
     return "\n".join(f"- {name}: {desc}" for name, desc in LLM_ROUTER_DESCRIPTIONS.items())
+
+
+def _keyword_route(query: str) -> List[str]:
+    """LLM 라우터 장애 시 최소한의 의도 보존을 위한 deterministic 폴백."""
+    normalized = query.lower()
+    routes: list[str] = []
+    for pattern, names in _KEYWORD_RULES:
+        if re.search(pattern, normalized, re.IGNORECASE):
+            for name in names:
+                if name not in routes:
+                    routes.append(name)
+    return routes or ["notices"]
+
+
+def _cached_route(query: str) -> List[str] | None:
+    if RAG_ROUTER_CACHE_TTL_SECONDS <= 0:
+        return None
+    cached = _route_cache.get(query)
+    if cached is None:
+        return None
+    expires_at, route = cached
+    if expires_at < time.monotonic():
+        _route_cache.pop(query, None)
+        return None
+    return list(route)
+
+
+def _store_route(query: str, route: List[str]) -> None:
+    if RAG_ROUTER_CACHE_TTL_SECONDS <= 0:
+        return
+    _route_cache[query] = (time.monotonic() + RAG_ROUTER_CACHE_TTL_SECONDS, list(route))
 
 async def route_query(query: str) -> List[str]:
     """LLM 라우터를 사용하여 사용자 질문에 가장 적합한 데이터셋을 결정합니다."""
     if not query:
         # 질문이 비어 있으면 기본값으로 'notices'를 반환합니다.
         return ["notices"]
+
+    cached = _cached_route(query)
+    if cached is not None:
+        return cached
 
     formatted_destinations = _format_destinations()
     
@@ -106,7 +159,9 @@ async def route_query(query: str) -> List[str]:
                 "LLM 라우터 출력 파싱에 실패했습니다: %s | 원본 출력=%r. 'notices'로 기본 설정합니다.",
                 e, raw_text,
             )
-            return ["notices"]
+            route = _keyword_route(query)
+            _store_route(query, route)
+            return route
 
         # LLM의 선택에서 유효한 데이터셋 이름만 필터링합니다.
         # LLM이 목록에 없는 이름을 지어낼 경우를 대비합니다.
@@ -116,13 +171,17 @@ async def route_query(query: str) -> List[str]:
                 "LLM 라우터가 유효한 데이터셋을 반환하지 않았습니다. 원본 출력=%r. 'notices'로 기본 설정합니다.",
                 raw_text,
             )
-        return valid_routes or ["notices"]  # 유효한 선택이 없으면 기본값으로 'notices' 반환
+        route = valid_routes or _keyword_route(query)
+        _store_route(query, route)
+        return route
     except Exception as e:
+        route = _keyword_route(query)
         logging.error(
-            "LLM 라우터에서 예기치 않은 오류가 발생했습니다: %s | 원본 출력=%r. 'notices'로 기본 설정합니다.",
-            e, raw_text,
+            "LLM 라우터에서 예기치 않은 오류가 발생했습니다: %s | 원본 출력=%r. 키워드 폴백 route=%s.",
+            e, raw_text, route,
         )
-        return ["notices"]
+        _store_route(query, route)
+        return route
 
 # 이 파일에서 외부에 제공할 함수는 route_query 뿐입니다.
 __all__ = ["route_query"]

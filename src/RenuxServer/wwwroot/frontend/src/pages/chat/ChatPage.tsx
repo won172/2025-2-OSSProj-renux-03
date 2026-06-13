@@ -173,6 +173,16 @@ const ChatPage = () => {
                   : msg,
               ),
             ),
+          onRetry: (attempt) => {
+            setSendError(`연결이 끊겨 재시도 중입니다. (${attempt}/2)`)
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId
+                  ? { ...msg, content: '응답 연결을 다시 시도하고 있습니다...', isFallback: true }
+                  : msg,
+              ),
+            )
+          },
         },
       )
 
@@ -189,7 +199,13 @@ const ChatPage = () => {
     } catch (sendErr) {
       console.error('Failed to send message', sendErr)
       setSendError('메시지를 전송하지 못했습니다. 다시 시도해주세요.')
-      setMessages((prev) => prev.filter((msg) => msg.id !== newMessage.id && msg.id !== botMessageId))
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === botMessageId
+            ? { ...msg, content: '응답 연결이 끊겼습니다. 입력창의 메시지로 다시 시도해주세요.', isFallback: true }
+            : msg,
+        ),
+      )
       setInputValue(trimmed)
     } finally {
       setIsSending(false)
@@ -282,6 +298,7 @@ const ChatPage = () => {
           {sendError && <p className="chat-page-v2__status chat-page-v2__status--error">{sendError}</p>}
           <div className="chat-page-v2__input-wrapper">
             <textarea
+              aria-label="채팅 메시지"
               className="chat-page-v2__input"
               placeholder="메시지를 입력하세요 (Enter 전송, Shift+Enter 줄바꿈)"
               value={inputValue}
@@ -294,7 +311,7 @@ const ChatPage = () => {
               disabled={isSending}
               rows={1}
             />
-            <button type="submit" className="chat-page-v2__send" disabled={isSending}>
+            <button type="submit" className="chat-page-v2__send" disabled={isSending} aria-label="메시지 전송">
               {isSending ? '전송 중...' : '전송'}
             </button>
           </div>

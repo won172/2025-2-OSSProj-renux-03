@@ -1394,12 +1394,15 @@ def bootstrap_artifacts() -> None:
     
     # OpenAI 키 검증: 라우터/질의분석은 항상 OpenAI를 쓰므로 키가 없으면 첫 요청에서 실패한다.
     # health check를 통과하고도 무음 장애가 나는 것을 막기 위해 startup에서 명시 경고.
-    from src.config import OPENAI_API_KEY
+    from src.config import OPENAI_API_KEY, RAG_REQUIRE_OPENAI_API_KEY
     if not OPENAI_API_KEY:
-        logging.warning(
-            "⚠️ OPENAI_API_KEY가 설정되지 않았습니다. 라우터/질의분석이 동작하지 않아 "
-            "모든 질문이 기본 라우팅(notices)으로 처리되거나 실패할 수 있습니다."
+        message = (
+            "OPENAI_API_KEY가 설정되지 않았습니다. 라우터/질의분석/기본 생성 프로바이더가 "
+            "정상 동작하지 않을 수 있습니다."
         )
+        if RAG_REQUIRE_OPENAI_API_KEY:
+            raise RuntimeError(message)
+        logging.warning("⚠️ %s", message)
 
     # Ensure DB tables exist
     try:

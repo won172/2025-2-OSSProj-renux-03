@@ -15,6 +15,44 @@ public record IdCheck(string Id);
 
 static public class AuthenticationApis
 {
+    private const string CouncilSignupInstagramUrl = "https://www.instagram.com/dongttok.dgu?igsh=MWs3MWJ4OWU3NjdlMw%3D%3D&utm_source=qr";
+
+    private static readonly HashSet<string> UniversityLevelRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "관리자",
+        "총학생회",
+    };
+
+    private static async ValueTask<object?> EnforceUniversityLevelAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next)
+    {
+        var http = context.HttpContext;
+        if (http.User?.Identity?.IsAuthenticated != true)
+        {
+            return Results.Unauthorized();
+        }
+
+        var sub = http.User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+        if (!Guid.TryParse(sub, out Guid userId))
+        {
+            return Results.Unauthorized();
+        }
+
+        var db = http.RequestServices.GetRequiredService<ServerDbContext>();
+        var roleName = await db.Users
+            .Where(u => u.Id == userId)
+            .Select(u => u.Role!.Rolename)
+            .FirstOrDefaultAsync();
+
+        if (string.IsNullOrWhiteSpace(roleName) || !UniversityLevelRoles.Contains(roleName))
+        {
+            return Results.Forbid();
+        }
+
+        return await next(context);
+    }
+
     static private CookieOptions BuildAuthCookieOptions(IConfiguration config)
     {
         bool secure = config.GetValue<bool?>("AuthCookie:Secure")
@@ -73,7 +111,10 @@ static public class AuthenticationApis
 
         // 아이디 중복 검사
         app.MapPost("/idcheck", async (ServerDbContext db, IdCheck id) 
-            => Results.Ok(await db.Users.AnyAsync(u => u.UserId==id.Id)));
+            => Results.Ok(
+                await db.Users.AnyAsync(u => u.UserId == id.Id)
+                || await db.CouncilSignupRequests.AnyAsync(r => r.UserId == id.Id && r.Status == "pending")
+            ));
 
         // 회원가입
         app.MapPost("/signup",
@@ -110,6 +151,143 @@ static public class AuthenticationApis
             await db.SaveChangesAsync();
 
             return Results.Ok(true);
+        });
+
+        app.MapPost("/council-signup-requests",
+            async (ServerDbContext db, SignupUserDto signup, IValidator<SignupUserDto> validator) =>
+        {
+            var results = validator.Validate(signup);
+            if (!results.IsValid) return Results.ValidationProblem(results.ToDictionary());
+
+            if (await db.Users.AnyAsync(p => p.UserId == signup.UserId))
+            {
+                return Results.Conflict(new { message = "이미 사용 중인 아이디입니다." });
+            }
+
+            if (await db.CouncilSignupRequests.AnyAsync(r => r.UserId == signup.UserId && r.Status == "pending"))
+            {
+                return Results.Conflict(new { message = "이미 대기 중인 학생회 가입 요청이 있습니다." });
+            }
+
+            if (!await db.Majors.AnyAsync(m => m.Id == signup.MajorId))
+            {
+                return Results.BadRequest(new { message = "유효하지 않은 전공입니다." });
+            }
+
+            CouncilSignupRequest request = new()
+            {
+                UserId = signup.UserId,
+                Username = signup.Username,
+                MajorId = signup.MajorId,
+                HashPassword = BCrypt.Net.BCrypt.HashPassword(signup.Password),
+                Status = "pending",
+            };
+
+            await db.CouncilSignupRequests.AddAsync(request);
+            await db.SaveChangesAsync();
+
+            return Results.Ok(new
+            {
+                message = "학생회 가입 요청이 접수되었습니다. 확인을 위해 동똑이 인스타그램으로 DM을 보내주세요.",
+                instagramUrl = CouncilSignupInstagramUrl,
+            });
+        });
+
+        var councilSignupAdmin = app.MapGroup("/council-signup-requests")
+            .RequireAuthorization();
+        councilSignupAdmin.AddEndpointFilter(EnforceUniversityLevelAsync);
+
+        councilSignupAdmin.MapGet("", async (ServerDbContext db) =>
+        {
+            var requests = await db.CouncilSignupRequests
+                .Include(r => r.Major)
+                .OrderByDescending(r => r.CreatedTime)
+                .Select(r => new CouncilSignupRequestDto
+                {
+                    Id = r.Id,
+                    UserId = r.UserId,
+                    Username = r.Username,
+                    MajorId = r.MajorId,
+                    MajorName = r.Major == null ? null : r.Major.Majorname,
+                    Status = r.Status,
+                    CreatedTime = r.CreatedTime,
+                    ReviewedTime = r.ReviewedTime,
+                    ReviewNote = r.ReviewNote,
+                })
+                .ToListAsync();
+
+            return Results.Ok(requests);
+        });
+
+        councilSignupAdmin.MapPost("/{requestId:guid}/approve", async (
+            Guid requestId,
+            ServerDbContext db,
+            HttpContext context,
+            CouncilSignupReviewDto review) =>
+        {
+            var request = await db.CouncilSignupRequests.FirstOrDefaultAsync(r => r.Id == requestId);
+            if (request == null) return Results.NotFound(new { message = "요청을 찾을 수 없습니다." });
+            if (request.Status != "pending") return Results.Conflict(new { message = "이미 처리된 요청입니다." });
+
+            if (await db.Users.AnyAsync(u => u.UserId == request.UserId))
+            {
+                request.Status = "rejected";
+                request.ReviewedTime = DateTime.UtcNow;
+                request.ReviewNote = "이미 같은 아이디의 계정이 존재합니다.";
+                await db.SaveChangesAsync();
+                return Results.Conflict(new { message = request.ReviewNote });
+            }
+
+            var councilRole = await db.Roles.FirstOrDefaultAsync(r => r.Rolename == "학생회");
+            if (councilRole == null)
+            {
+                return Results.Problem("학생회 역할이 구성되지 않았습니다.", statusCode: 500);
+            }
+
+            var reviewerSub = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            Guid.TryParse(reviewerSub, out Guid reviewerId);
+
+            User user = new()
+            {
+                UserId = request.UserId,
+                HashPassword = request.HashPassword,
+                Username = request.Username,
+                MajorId = request.MajorId,
+                RoleId = councilRole.Id,
+                UpdatedTime = DateTime.UtcNow,
+            };
+
+            request.Status = "approved";
+            request.ReviewedTime = DateTime.UtcNow;
+            request.ReviewedByUserId = reviewerId == Guid.Empty ? null : reviewerId;
+            request.ReviewNote = review.Note;
+
+            await db.Users.AddAsync(user);
+            await db.SaveChangesAsync();
+
+            return Results.Ok(new { message = "학생회 계정이 승인되었습니다." });
+        });
+
+        councilSignupAdmin.MapPost("/{requestId:guid}/reject", async (
+            Guid requestId,
+            ServerDbContext db,
+            HttpContext context,
+            CouncilSignupReviewDto review) =>
+        {
+            var request = await db.CouncilSignupRequests.FirstOrDefaultAsync(r => r.Id == requestId);
+            if (request == null) return Results.NotFound(new { message = "요청을 찾을 수 없습니다." });
+            if (request.Status != "pending") return Results.Conflict(new { message = "이미 처리된 요청입니다." });
+
+            var reviewerSub = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            Guid.TryParse(reviewerSub, out Guid reviewerId);
+
+            request.Status = "rejected";
+            request.ReviewedTime = DateTime.UtcNow;
+            request.ReviewedByUserId = reviewerId == Guid.Empty ? null : reviewerId;
+            request.ReviewNote = review.Note;
+
+            await db.SaveChangesAsync();
+            return Results.Ok(new { message = "학생회 가입 요청이 거절되었습니다." });
         });
 
         // 로그인

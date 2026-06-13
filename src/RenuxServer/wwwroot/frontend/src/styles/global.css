@@ -30,6 +30,7 @@
     background-color: var(--background-color);
     margin: 0;
     min-height: 100vh;
+    min-height: 100dvh;
   }
 
   /* 앱 컨테이너를 화면 가득 채우도록 */
@@ -37,6 +38,7 @@
     width: 100%;
     max-width: none;      /* 필요 시 제거 */
     height: 100vh;        /* 전체 높이 사용 */
+    height: 100dvh;
     border-radius: 0;     /* 모서리도 제거하고 싶으면 */
     box-shadow: none;     /* 그림자도 제거하고 싶으면 */
     display: flex;
@@ -72,6 +74,7 @@
 
 .auth-page-placeholder {
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -82,6 +85,7 @@
 
 .auth-page {
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -206,6 +210,62 @@
     margin: -10px 0 10px;
 }
 
+.auth-success {
+    color: #15803d;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.95rem;
+}
+
+.auth-success a,
+.auth-info-box a {
+    color: var(--primary-color);
+    font-weight: 700;
+}
+
+.auth-mode-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.auth-mode-tab {
+    border: 1px solid #ddd;
+    background: #fff;
+    color: var(--text-color);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.auth-mode-tab--active {
+    border-color: var(--primary-color);
+    background: #fff7ed;
+    color: var(--primary-color);
+}
+
+.auth-help-text {
+    margin: 0 0 14px;
+    color: var(--secondary-text);
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.auth-info-box {
+    margin: 0 0 16px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #fed7aa;
+    background: #fff7ed;
+    color: #7c2d12;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
 .chat-placeholder {
     flex: 1;
     display: flex;
@@ -246,6 +306,7 @@
 
 .gpt-home {
     height: 100vh; /* min-height 대신 height로 고정 */
+    height: 100dvh;
     display: grid;
     grid-template-columns: 280px 1fr;
     grid-template-rows: auto 1fr;
@@ -392,6 +453,7 @@
     flex-direction: column;
     gap: 10px;
     max-height: calc(100vh - 350px); /* Dynamic height based on viewport */
+    max-height: calc(100dvh - 350px);
     min-height: 150px; /* Minimum height to ensure usability */
     overflow-y: auto;
     /* Custom Scrollbar for better UX */
@@ -494,6 +556,7 @@
 
 .gpt-home__main--chat {
     min-height: calc(100vh - 120px);
+    min-height: calc(100dvh - 120px);
 }
 
 .buddy-topbar {
@@ -737,6 +800,7 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    height: 100dvh;
     background-color: #f7f8fb;
 }
 
@@ -751,6 +815,7 @@
 
 .chat-page-v2 {
     min-height: 100vh;
+    min-height: 100dvh;
     display: grid;
     grid-template-columns: minmax(260px, 320px) 1fr;
     gap: 24px;
@@ -1295,9 +1360,19 @@
 
 .app-shell {
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     background: radial-gradient(circle at top right, rgba(250, 204, 21, 0.1), transparent 40%), #0f172a;
+}
+
+.route-loading {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    color: #fff7ed;
+    font-weight: 700;
 }
 
 .home-layout {
@@ -1446,6 +1521,7 @@
 
 .home-chat {
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     gap: 18px;
@@ -1508,6 +1584,7 @@
 
 .home-chat--fullheight {
     min-height: calc(100vh - 160px);
+    min-height: calc(100dvh - 160px);
 }
 
 .home-chat__header {
@@ -1869,12 +1946,14 @@
         gap: 0;
         height: auto;
         min-height: calc(100vh - 65px); /* Adjust based on topbar height */
+        min-height: calc(100dvh - 65px);
     }
     
     .home-chat {
         border-radius: 0;
         border: none;
         height: calc(100vh - 65px); /* Fill remaining height */
+        height: calc(100dvh - 65px);
         padding: 16px;
     }
 
@@ -2370,6 +2449,7 @@
 
 .admin-page-wrapper {
     min-height: 100vh;
+    min-height: 100dvh;
     width: 100%;
     background: radial-gradient(circle at 15% -10%, rgba(249, 115, 22, 0.16), transparent 36%),
         radial-gradient(circle at 90% 10%, rgba(249, 115, 22, 0.12), transparent 32%),
