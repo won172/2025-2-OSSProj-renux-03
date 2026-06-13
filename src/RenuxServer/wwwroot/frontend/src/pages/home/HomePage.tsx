@@ -542,7 +542,7 @@ const HomePage = () => {
           + 새 대화
         </button>
 
-        <div className="gpt-home__section">
+        <div className="gpt-home__section gpt-home__chat-section">
           <div className="gpt-home__section-head">
             <h3>최근 대화</h3>
           </div>
