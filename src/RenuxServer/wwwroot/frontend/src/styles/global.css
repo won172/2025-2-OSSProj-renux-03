@@ -368,6 +368,10 @@
     background: rgba(255, 255, 255, 0.08);
 }
 
+.gpt-home__chat-section {
+    min-height: 0;
+}
+
 .gpt-home__section h3 {
     margin: 0;
 }
@@ -1807,6 +1811,7 @@
         top: 0;
         left: 0;
         bottom: 0;
+        height: 100dvh;
         width: 280px;
         z-index: 1000;
         transform: translateX(-100%); /* Hidden by default */
@@ -1814,14 +1819,33 @@
         margin: 0;
         border-radius: 0;
         box-shadow: 2px 0 12px rgba(0,0,0,0.15); /* Shadow for drawer effect */
+        overflow: hidden;
         
         /* Flex layout for sidebar content */
         display: flex;
         flex-direction: column;
     }
+
+    .gpt-home__chat-section {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .gpt-home__chat-section .gpt-home__section-head {
+        flex-shrink: 0;
+    }
+
+    .gpt-home__chat-list {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+    }
     
     .gpt-home__sidebar-footer {
         margin-top: auto; /* Push footer to bottom */
+        flex-shrink: 0;
     }
     
     .gpt-home__sidebar.mobile-open {
