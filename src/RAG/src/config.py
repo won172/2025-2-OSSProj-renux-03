@@ -74,6 +74,9 @@ RECENCY_DECAY_DAYS_BY_DATASET = {
     "notices": float(os.getenv("RECENCY_DECAY_DAYS_NOTICES", "90")),
     "schedule": float(os.getenv("RECENCY_DECAY_DAYS_SCHEDULE", "180")),
     "rules": float(os.getenv("RECENCY_DECAY_DAYS_RULES", "1095")),
+    # 학식은 매일 갱신 — 지난 메뉴는 빠르게 감쇠시키고 당일/이번주 메뉴를 선호한다.
+    # (미래 날짜 메뉴는 recency가 1.0으로 클램프되어 다가오는 식단이 우대됨)
+    "meals": float(os.getenv("RECENCY_DECAY_DAYS_MEALS", "4")),
 }
 
 # 컨텍스트 관련 설정
@@ -86,6 +89,7 @@ LLM_ROUTER_DESCRIPTIONS = {
     "schedule": "수강신청, 개강, 종강, 방학, 시험 등 주요 학사일정에 대한 정보입니다.",
     "courses": "개설된 교과목, 수업, 강의, 전공, 선수과목, 학점, 이수구분 등 교과 과정에 대한 상세 정보입니다.",
     "staff": "교직원, 교수, 행정 부서의 연락처, 담당 업무 정보입니다.",
+    "meals": "학생식당(상록원 1/2/3층, 솥앤누들, 누리터, 경영관 D-Flex) 학식 식단, 오늘/이번주 메뉴, 중식·석식, 가격 정보입니다.",
 }
 
 # OpenAI/LLM 기본 설정.
@@ -143,6 +147,7 @@ DATA_SOURCES: Dict[str, Path] = {
     "courses_catalog": DATA_DIR / "dongguk_departments_catalog.csv",
     "courses_curriculum_sources": DATA_DIR / "dongguk_department_curriculum_sources.csv",
     "staff": DATA_DIR / "dongguk_staff_contacts.csv",
+    "meals": DATA_DIR / "dongguk_meals.csv",
 }
 
 

@@ -68,6 +68,11 @@ DATASET_ARTIFACTS: Dict[str, DatasetArtifacts] = {
         collection="dongguk_staff",
         chunk_path=CHUNKS_DIR / "staff.parquet",
     ),
+    "meals": DatasetArtifacts(
+        key="meals",
+        collection="dongguk_meals",
+        chunk_path=CHUNKS_DIR / "meals.parquet",
+    ),
 }
 
 
@@ -915,6 +920,73 @@ def ingest_staff() -> Tuple[pd.DataFrame, object, object]:
     return _persist_chunks("staff", DATASET_ARTIFACTS["staff"].collection, chunks_df)
 
 
+# --- Meals (학식 식단) ---
+
+def build_meal_chunks(df: pd.DataFrame) -> pd.DataFrame:
+    """학식 CSV(날짜·식당·메뉴)를 (날짜×식당) 단위 청크로 만듭니다.
+
+    한 끼/하루의 메뉴가 검색 시 통째로 나오도록 (날짜, 식당)당 한 청크로 둔다.
+    날짜는 published_at/schedule_start 에 넣어 '오늘/이번주 학식' 날짜 필터가 동작하게 한다.
+    """
+    docs: List[dict] = []
+    for _, row in df.iterrows():
+        meal_date = str(row.get("date", "")).strip()
+        if not meal_date:
+            continue
+        weekday = str(row.get("weekday", "")).strip()
+        restaurant = str(row.get("restaurant", "")).strip()
+        menu_text = str(row.get("menu_text", "")).strip()
+        is_closed = str(row.get("is_closed", "")).strip().lower() in {"true", "1", "1.0"}
+
+        date_label = f"{meal_date}({weekday})" if weekday else meal_date
+        title = f"{date_label} {restaurant} 학식"
+
+        if is_closed or not menu_text or menu_text == "휴무":
+            body = f"{restaurant}는 {date_label}에 휴무입니다."
+        else:
+            body = menu_text
+        rich_text = f"{date_label} {restaurant} 학식 식단 메뉴\n\n{body}"
+
+        doc_id = make_doc_id("meals", meal_date, restaurant)
+        docs.append(
+            {
+                "doc_id": doc_id,
+                "title": title,
+                "text": rich_text,
+                "topics": f"학식 식단 메뉴 {restaurant}",
+                "source": "meals",
+                "restaurant": restaurant,
+                "meal_date": meal_date,
+                "weekday": weekday,
+                # 휴무 청크는 검색 시 약하게 패널티를 받아(메뉴/가격 질의에서 운영일이 우선),
+                # 단 휴무 여부 질의에는 여전히 노출되도록 인덱스에는 남긴다.
+                "is_closed": "1" if (is_closed or body.strip().endswith("휴무입니다.")) else "0",
+                "schedule_start": meal_date,
+                "schedule_end": meal_date,
+                "published_at": meal_date,
+                "url": "https://dgucoop.dongguk.edu/store/store.php?w=4",
+            }
+        )
+
+    # 하루·식당당 한 청크(분할 안 함) — 메뉴 전체가 하나의 근거로 검색되도록.
+    chunks = to_chunks(docs, chunk_size=None, include_title=True)
+    return pd.DataFrame(chunks)
+
+
+def ingest_meals() -> Tuple[pd.DataFrame, object, object]:
+    path = DATA_SOURCES["meals"]
+    if not path.exists():
+        print(f"⚠️ Meals CSV not found: {path}")
+        return pd.DataFrame(), None, None
+
+    df = pd.read_csv(path).fillna("").astype(str)
+    chunks_df = build_meal_chunks(df)
+    # 학식은 휘발성 일일 데이터라 SQLite(reindex_from_db 대상)에는 저장하지 않고
+    # CSV → Chroma/TF-IDF 만 갱신한다(스키마 변경 불필요).
+    reset_collection(DATASET_ARTIFACTS["meals"].collection)
+    return _persist_chunks("meals", DATASET_ARTIFACTS["meals"].collection, chunks_df)
+
+
 def ingest_all() -> Dict[str, Tuple[pd.DataFrame, object, object]]:
     # DB 테이블 생성/확인
     init_db()
@@ -926,6 +998,7 @@ def ingest_all() -> Dict[str, Tuple[pd.DataFrame, object, object]]:
     results["schedule"] = ingest_schedule()
     results["courses"] = ingest_courses()
     results["staff"] = ingest_staff()
+    results["meals"] = ingest_meals()
     return results
 
 
@@ -1096,7 +1169,7 @@ def main() -> None:
     parser.add_argument(
         "--target",
         type=str,
-        choices=["notices", "rules", "schedule", "courses", "staff"],
+        choices=["notices", "rules", "schedule", "courses", "staff", "meals"],
         help="Specify a single dataset to ingest (e.g., notices). If omitted, all datasets are ingested.",
     )
     parser.add_argument(
@@ -1123,6 +1196,8 @@ def main() -> None:
             results["courses"] = ingest_courses()
         elif args.target == "staff":
             results["staff"] = ingest_staff()
+        elif args.target == "meals":
+            results["meals"] = ingest_meals()
     else:
         print("🚀 Ingesting ALL datasets...")
         results = ingest_all()
@@ -1142,11 +1217,13 @@ __all__ = [
     "build_schedule_chunks",
     "build_course_chunks",
     "build_staff_chunks",
+    "build_meal_chunks",
     "ingest_notices",
     "ingest_rules",
     "ingest_schedule",
     "ingest_courses",
     "ingest_staff",
+    "ingest_meals",
     "ingest_all",
     "SessionLocal",
     "reindex_from_db",

@@ -10,20 +10,20 @@ from pydantic import BaseModel, Field, ValidationError
 
 from src.config import OPENAI_MODEL, QUERY_ANALYSIS_MAX_QUERIES, RAG_MAX_SUBQUERIES
 
-VALID_INTENTS = {"notices", "rules", "schedule", "staff", "courses", "unknown"}
-VALID_DATASETS = {"notices", "rules", "schedule", "staff", "courses"}
+VALID_INTENTS = {"notices", "rules", "schedule", "staff", "courses", "meals", "unknown"}
+VALID_DATASETS = {"notices", "rules", "schedule", "staff", "courses", "meals"}
 VALID_TIME_FOCUS = {"today", "recent", "this_week", "this_month", "none"}
 
 
 class SubQuery(BaseModel):
     """복합 질문을 측면별로 분해한 단위 검색. dataset은 이 서브쿼리가 노릴 데이터셋."""
     query: str = Field(description="해당 측면을 검색하기 위한 독립적인 검색 문장")
-    dataset: Literal["notices", "rules", "schedule", "staff", "courses"]
+    dataset: Literal["notices", "rules", "schedule", "staff", "courses", "meals"]
 
 
 class QueryAnalysisResult(BaseModel):
     normalized_question: str = Field(description="원문 의미를 크게 바꾸지 않은 정규화 질문")
-    intent: Literal["notices", "rules", "schedule", "staff", "courses", "unknown"]
+    intent: Literal["notices", "rules", "schedule", "staff", "courses", "meals", "unknown"]
     entities: Dict[str, List[str]] = Field(default_factory=dict)
     time_focus: Literal["today", "recent", "this_week", "this_month", "none"] = "none"
     search_queries: List[str] = Field(default_factory=list)
@@ -56,7 +56,7 @@ prompt = PromptTemplate(
 4. search_queries는 최대 {max_queries}개만 생성하세요.
 5. search_queries에는 원문을 크게 벗어나지 않는 검색용 표현만 넣으세요.
 6. intent는 반드시 다음 중 하나만 고르세요:
-   notices, rules, schedule, staff, courses, unknown
+   notices, rules, schedule, staff, courses, meals, unknown
 7. time_focus는 반드시 다음 중 하나만 고르세요:
    today, recent, this_week, this_month, none
 8. 모호하지만 검색은 가능하면 needs_clarification=true로 두고도 search_queries는 생성하세요.
@@ -80,6 +80,8 @@ intent 기준(가장 중심이 되는 단일 측면):
 - schedule: 개강, 종강, 시험, 수강신청 기간, 학사일정
 - staff: 전화번호, 내선, 부서 연락처, 사무실
 - courses: 교과과정, 전공필수, 선수과목, 이수구분, 개설 과목
+- meals: 학식, 학생식당, 상록원, 솥앤누들, 누리터, 경영관 D-Flex, 식단, 메뉴, 중식·석식
+학식/식단 질문에서 '오늘'은 time_focus=today, '이번 주'는 this_week 로 두세요.
 사용자 질문:
 {query}
 

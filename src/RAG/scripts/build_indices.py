@@ -16,6 +16,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.pipelines.ingest import (
     ingest_courses,
+    ingest_meals,
     ingest_notices,
     ingest_rules,
     ingest_schedule,
@@ -29,6 +30,7 @@ ALL_LOADERS: dict = {
     "schedule": ingest_schedule,
     "courses": ingest_courses,
     "staff": ingest_staff,
+    "meals": ingest_meals,
 }
 
 

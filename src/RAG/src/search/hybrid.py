@@ -393,6 +393,7 @@ def hybrid_search_with_meta(
         "topics", "category", "published_at", "url", "source", "notice_id",
         "major", "entry_year", "source_type", "attachments",
         "doc_id", "position",  # parent-document 확장(이웃 청크 결합)에 사용
+        "is_closed", "restaurant", "meal_date",  # 학식: 휴무 패널티·식당/날짜 표시에 사용
     ]
     existing = [col for col in desired if col in out.columns]
     return out[existing]

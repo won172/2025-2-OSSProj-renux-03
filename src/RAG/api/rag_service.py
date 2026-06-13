@@ -634,7 +634,7 @@ def _build_retrieval_queries(
 
 def _merge_routes(analysis: QueryAnalysisMeta, routed: List[str]) -> List[str]:
     merged: List[str] = []
-    if analysis.result is not None and analysis.result.intent in {"notices", "rules", "schedule", "staff", "courses"}:
+    if analysis.result is not None and analysis.result.intent in {"notices", "rules", "schedule", "staff", "courses", "meals"}:
         merged.append(analysis.result.intent)
     for route_name in routed:
         if route_name not in merged:
@@ -716,7 +716,7 @@ def _has_notice_topic_alignment(merged: pd.DataFrame, query: str) -> bool:
 
 
 def _apply_date_filter(hits: pd.DataFrame, dataset: str, date_filter: QueryDateFilter | None) -> tuple[pd.DataFrame, bool]:
-    if date_filter is None or hits.empty or dataset not in ["notices", "schedule", "rules"]:
+    if date_filter is None or hits.empty or dataset not in ["notices", "schedule", "rules", "meals"]:
         return hits, False
     if "published_at" not in hits.columns:
         return hits, False
@@ -833,6 +833,11 @@ async def _retrieve_frames(
         if dataset == "notices" and notice_board_filter:
             current_dataset_filter["topics"] = {"$eq": notice_board_filter}
         final_filter = current_dataset_filter if current_dataset_filter else None
+        # 학식은 코퍼스가 작고 날짜 필터로 좁혀지므로, 해당 주의 모든 식당이 후보에
+        # 남도록 top_k를 키운다(작게 잡으면 그날 운영 중인 식당이 잘려 휴무로 오인됨).
+        dataset_top_k = DEFAULT_TOP_K * 2
+        if dataset == "meals":
+            dataset_top_k = max(dataset_top_k, 40)
         search_func = functools.partial(
             hybrid_search_with_meta,
             collection_name=artifacts.collection,
@@ -840,7 +845,7 @@ async def _retrieve_frames(
             tfidf_vectorizer=vectorizer,
             tfidf_matrix=matrix,
             query=query,
-            top_k=DEFAULT_TOP_K * 2,
+            top_k=dataset_top_k,
             alpha=HYBRID_ALPHA,
             where_filter=final_filter,
             tfidf_chunk_ids=tfidf_chunk_ids,
@@ -998,6 +1003,12 @@ def _prepare_merged_results(
         merged["matched_query_count"] = 1
     merged["query_match_bonus"] = (merged["matched_query_count"].clip(lower=1) - 1) * 0.03
     merged["final_score"] = merged["final_score"] + merged["query_match_bonus"]
+    # 학식 휴무 청크 패널티: 메뉴/가격 질의에서 휴무일이 운영일을 밀어내지 않도록 약하게 강등한다.
+    # (인덱스에는 남아 있어 '오늘 휴무?'·날짜필터된 질의에는 여전히 노출됨)
+    if "is_closed" in merged.columns:
+        closed_mask = merged["is_closed"].astype(str).isin({"1", "True", "true"})
+        if closed_mask.any():
+            merged.loc[closed_mask, "final_score"] = merged.loc[closed_mask, "final_score"] - 0.25
     if "source_type" in merged.columns:
         guide_mask = merged["source_type"].astype(str).eq(ENTRY_YEAR_GUIDE_SOURCE_TYPE)
         if guide_mask.any() and _has_entry_year_guide_intent(query):
