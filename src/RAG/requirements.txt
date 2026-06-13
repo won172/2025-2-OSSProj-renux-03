@@ -29,6 +29,7 @@ scikit-learn==1.8.0
 pyarrow>=16.0.0
 beautifulsoup4>=4.12.0 # Added for web scraping
 lxml>=4.9.0            # Added for web scraping (BeautifulSoup's parser)
+pdfplumber>=0.11.0     # D-Flex 학식 PDF 식단표 텍스트/표 추출
 
 # === Utility / reranking / fuzzy matching ===
 rapidfuzz>=3.9.0
