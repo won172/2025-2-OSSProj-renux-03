@@ -70,9 +70,13 @@ static public class ChatRequestApis
         };
     }
 
+    // 채팅 메시지 최대 길이(자). 초과 시 RAG로 전달하지 않아 토큰 비용·OOM을 방어한다.
+    private const int MaxChatContentLength = 2000;
+
     static public void AddChatApis(this WebApplication application)
     {
-        var app = application.MapGroup("/chat");
+        // IP 단위 레이트리밋(LLM 비용·남용 방어) 적용.
+        var app = application.MapGroup("/chat").RequireRateLimiting("chat");
 
         app.MapGet("/active", async (ServerDbContext db, HttpContext context, IMapper mapper) =>
         {
@@ -174,12 +178,18 @@ static public class ChatRequestApis
 
         app.MapPost("/msg", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper, ILogger<Program> logger, IConfiguration configuration, IHttpClientFactory httpClientFactory) =>
         {
+            if (string.IsNullOrWhiteSpace(askDto.Content))
+                return Results.BadRequest(new { message = "메시지를 입력해주세요." });
+            var content = askDto.Content;
+            if ((askDto.Content?.Length ?? 0) > MaxChatContentLength)
+                return Results.BadRequest(new { message = $"메시지가 너무 깁니다(최대 {MaxChatContentLength}자)." });
+
             bool isAuthenticated = context.Request.Cookies.ContainsKey("renux-server-token");
 
             if (!isAuthenticated)
             {
                 // Guest Flow: Do NOT save to DB
-                ToRag toRag = new(askDto.ChatId.ToString(), askDto.Content);
+                ToRag toRag = new(askDto.ChatId.ToString(), content);
                 var ragResult = await CallRagAsync(toRag, context, configuration, httpClientFactory, logger);
                 string replyContent = ragResult.Answer;
                 logger.LogInformation(
@@ -214,7 +224,7 @@ static public class ChatRequestApis
             ChatMessage ask = mapper.Map<ChatMessage>(askDto);
             await db.ChatMessages.AddAsync(ask);
 
-            ToRag authToRag = new(askDto.ChatId.ToString(), askDto.Content, ResolveMajor(context));
+            ToRag authToRag = new(askDto.ChatId.ToString(), content, ResolveMajor(context));
             var authRagResult = await CallRagAsync(authToRag, context, configuration, httpClientFactory, logger);
             string authReply = authRagResult.Answer;
             logger.LogInformation(
@@ -243,9 +253,23 @@ static public class ChatRequestApis
 
         app.MapPost("/stream", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, IMapper mapper, ILogger<Program> logger, IConfiguration configuration, IHttpClientFactory httpClientFactory) =>
         {
+            if (string.IsNullOrWhiteSpace(askDto.Content))
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsJsonAsync(new { message = "메시지를 입력해주세요." });
+                return;
+            }
+            var content = askDto.Content;
+            if ((askDto.Content?.Length ?? 0) > MaxChatContentLength)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsJsonAsync(new { message = $"메시지가 너무 깁니다(최대 {MaxChatContentLength}자)." });
+                return;
+            }
+
             bool isAuthenticated = context.Request.Cookies.ContainsKey("renux-server-token");
             string sessionId = askDto.ChatId.ToString();
-            string question = askDto.Content;
+            string question = content;
             string? major = isAuthenticated ? ResolveMajor(context) : null;
 
             // Authenticated: verify chat ownership (IDOR 방지), then save User's question first so it is never lost.
@@ -263,9 +287,13 @@ static public class ChatRequestApis
                     return;
                 }
 
-                ask = mapper.Map<ChatMessage>(askDto);
-                await db.ChatMessages.AddAsync(ask);
-                await db.SaveChangesAsync();
+                ask = await db.ChatMessages.FindAsync([askDto.Id], context.RequestAborted);
+                if (ask is null)
+                {
+                    ask = mapper.Map<ChatMessage>(askDto);
+                    await db.ChatMessages.AddAsync(ask);
+                    await db.SaveChangesAsync(context.RequestAborted);
+                }
             }
 
             context.Response.ContentType = "text/event-stream";

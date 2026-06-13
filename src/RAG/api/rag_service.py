@@ -2,6 +2,7 @@ import csv
 import functools
 import io
 from importlib.metadata import PackageNotFoundError, version
+import asyncio
 import logging
 import math
 import re
@@ -1391,6 +1392,18 @@ def bootstrap_artifacts() -> None:
         sklearn_version=_safe_package_version("scikit-learn"),
     )
     
+    # OpenAI 키 검증: 라우터/질의분석은 항상 OpenAI를 쓰므로 키가 없으면 첫 요청에서 실패한다.
+    # health check를 통과하고도 무음 장애가 나는 것을 막기 위해 startup에서 명시 경고.
+    from src.config import OPENAI_API_KEY, RAG_REQUIRE_OPENAI_API_KEY
+    if not OPENAI_API_KEY:
+        message = (
+            "OPENAI_API_KEY가 설정되지 않았습니다. 라우터/질의분석/기본 생성 프로바이더가 "
+            "정상 동작하지 않을 수 있습니다."
+        )
+        if RAG_REQUIRE_OPENAI_API_KEY:
+            raise RuntimeError(message)
+        logging.warning("⚠️ %s", message)
+
     # Ensure DB tables exist
     try:
         init_db()
@@ -1414,6 +1427,22 @@ def bootstrap_artifacts() -> None:
         logging.info("✅ Embedding model warmup completed.")
     except Exception as exc:
         logging.warning(f"⚠️ Embedding model warmup failed: {exc}", exc_info=True)
+
+    # 공지/학식 데이터 주기적 자동 갱신(RAG_SCHEDULER_ENABLED=1일 때만).
+    try:
+        from src.services.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as exc:  # noqa: BLE001 — 스케줄러 실패가 서빙 부팅을 막지 않도록
+        logging.warning(f"⚠️ Data refresh scheduler failed to start: {exc}", exc_info=True)
+
+
+@app.on_event("shutdown")
+def shutdown_scheduler_event() -> None:
+    try:
+        from src.services.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 
@@ -2040,7 +2069,7 @@ async def ask_stream(req: AskRequest, request: Request):
 
     session_id = req.session_id or str(uuid.uuid4())
 
-    async def stream_generator():
+    async def _stream_body():
         analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
         if USE_QUERY_ANALYSIS:
             # 후속 질문("그럼 신청 기간은?")의 대명사/생략을 해소하기 위해
@@ -2280,6 +2309,23 @@ async def ask_stream(req: AskRequest, request: Request):
             top_hybrid_score, 
             [SourceChunk(**s) for s in sources]
         )
+
+    async def stream_generator():
+        """본문 스트림을 감싸 중간 예외(OpenAI 5xx·타임아웃·Chroma 오류 등)를
+        조용한 끊김 대신 SSE error 이벤트로 전달한다(클라이언트가 실패를 인지·복구 가능)."""
+        try:
+            async for event in _stream_body():
+                yield event
+        except asyncio.CancelledError:
+            # 클라이언트 연결 종료 — 정상 취소이므로 조용히 끝낸다.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _log_event(
+                logging.ERROR, "ask_stream_failed",
+                request_id=request_id, error=str(exc),
+            )
+            fail_msg = "답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+            yield f"data: {json.dumps({'type': 'error', 'content': fail_msg}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
 

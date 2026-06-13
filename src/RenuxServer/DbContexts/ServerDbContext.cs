@@ -14,6 +14,7 @@ public class ServerDbContext : DbContext
     public DbSet<Major> Majors { get; set; }
     public DbSet<Role> Roles { get; set; }
     public DbSet<GuestChat> GuestChats { get; set; }
+    public DbSet<CouncilSignupRequest> CouncilSignupRequests { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -26,6 +27,7 @@ public class ServerDbContext : DbContext
         var majors = modelBuilder.Entity<Major>();
         var role = modelBuilder.Entity<Role>();
         var guest = modelBuilder.Entity<GuestChat>();
+        var councilSignup = modelBuilder.Entity<CouncilSignupRequest>();
 
         users.ToTable("users").HasIndex(p => p.UserId).IsUnique();
         activeChats.ToTable("active_chats");
@@ -46,6 +48,10 @@ public class ServerDbContext : DbContext
             ]);
 
         guest.ToTable("guest");
+        councilSignup.ToTable("council_signup_requests");
+        councilSignup.HasIndex(r => r.UserId);
+        councilSignup.HasIndex(r => r.Status);
+        councilSignup.HasOne(r => r.Major).WithMany().HasForeignKey(r => r.MajorId);
 
         users.Property(u => u.Id).HasColumnName("id");
         users.Property(u => u.UserId).HasColumnName("user_id");
@@ -89,5 +95,16 @@ public class ServerDbContext : DbContext
         guest.Property(g => g.Title).HasColumnName("title");
         guest.Property(g => g.CreatedTime).HasColumnName("created_time");
         guest.Property(g => g.UpdatedTime).HasColumnName("updated_time");
+
+        councilSignup.Property(r => r.Id).HasColumnName("id");
+        councilSignup.Property(r => r.UserId).HasColumnName("user_id");
+        councilSignup.Property(r => r.HashPassword).HasColumnName("password");
+        councilSignup.Property(r => r.Username).HasColumnName("user_name");
+        councilSignup.Property(r => r.MajorId).HasColumnName("major_id");
+        councilSignup.Property(r => r.Status).HasColumnName("status").HasDefaultValue("pending");
+        councilSignup.Property(r => r.CreatedTime).HasColumnName("created_time");
+        councilSignup.Property(r => r.ReviewedTime).HasColumnName("reviewed_time");
+        councilSignup.Property(r => r.ReviewedByUserId).HasColumnName("reviewed_by_user_id");
+        councilSignup.Property(r => r.ReviewNote).HasColumnName("review_note");
     }
 }

@@ -239,6 +239,10 @@ const HomePage = () => {
     navigate('/auth/in')
   }
 
+  const handleSignup = () => {
+    navigate('/auth/up')
+  }
+
   const handleLogout = async () => {
     try {
       await apiFetch('/auth/signout', { method: 'POST' })
@@ -451,6 +455,17 @@ const HomePage = () => {
                   : msg,
               ),
             ),
+          onRetry: (attempt) => {
+            setChatError(`연결이 끊겨 재시도 중입니다. (${attempt}/2)`)
+            setChatMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId
+                  ? { ...msg, content: '응답 연결을 다시 시도하고 있습니다...', isFallback: true }
+                  : msg,
+              ),
+            )
+            setTimeout(scrollToBottom, 0)
+          },
         },
       )
 
@@ -468,8 +483,13 @@ const HomePage = () => {
     } catch (err) {
       console.error('Failed to send message', err)
       setChatError('메시지를 전송하지 못했습니다.')
-      // 실패 시 내 메시지와 빈 봇 말풍선을 모두 제거하고 입력값 복원
-      setChatMessages((prev) => prev.filter((msg) => msg.id !== newMsg.id && msg.id !== botMessageId))
+      setChatMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === botMessageId
+            ? { ...msg, content: '응답 연결이 끊겼습니다. 입력창의 메시지로 다시 시도해주세요.', isFallback: true }
+            : msg,
+        ),
+      )
       setChatInput(trimmed)
     } finally {
       setChatSending(false)
@@ -528,6 +548,7 @@ const HomePage = () => {
       <div 
         className={`mobile-backdrop ${isSidebarOpen ? 'open' : ''}`} 
         onClick={() => setIsSidebarOpen(false)}
+        aria-hidden={!isSidebarOpen}
       />
 
       <aside className={`gpt-home__sidebar ${isSidebarOpen ? 'mobile-open' : ''}`}>
@@ -588,6 +609,9 @@ const HomePage = () => {
                             <button className="ghost-btn small" type="button" onClick={handleLogin}>
                                 로그인
                             </button>
+                            <button className="ghost-btn small ghost-btn--accent" type="button" onClick={handleSignup}>
+                                회원가입
+                            </button>
                         </>
                     )}
                 </div>
@@ -601,6 +625,8 @@ const HomePage = () => {
               type="button" 
               className="mobile-menu-btn"
               onClick={() => setIsSidebarOpen(true)}
+              aria-label="채팅 목록 열기"
+              aria-expanded={isSidebarOpen}
             >
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="3" y1="12" x2="21" y2="12"></line>
@@ -629,7 +655,7 @@ const HomePage = () => {
                 <span className="buddy-topbar__badge">{roleLabel}</span>
               </>
             ) : (
-              <span className="buddy-topbar__text buddy-topbar__text--muted">로그인 기능만 제공 중입니다</span>
+              <span className="buddy-topbar__text buddy-topbar__text--muted">로그인 또는 회원가입 후 이용할 수 있습니다</span>
             )}
           </div>
           <div className="buddy-topbar__meta buddy-topbar__meta--actions">
@@ -651,6 +677,9 @@ const HomePage = () => {
               <>
                 <button className="ghost-btn small" type="button" onClick={handleLogin}>
                   로그인
+                </button>
+                <button className="ghost-btn small ghost-btn--accent" type="button" onClick={handleSignup}>
+                  회원가입
                 </button>
               </>
             )}
@@ -694,7 +723,7 @@ const HomePage = () => {
                     </li>
                     <li>
                       <strong>로그인 기능</strong>
-                      <p>로그인하면 대화 내역이 저장되고, 소속 학과에 맞는 맞춤형 답변을 받을 수 있습니다. 회원가입은 현재 비활성화되어 있습니다.</p>
+                      <p>회원가입 후 로그인하면 대화 내역이 저장되고, 소속 학과에 맞는 맞춤형 답변을 받을 수 있습니다.</p>
                     </li>
                   </ol>
                 </div>
@@ -761,6 +790,7 @@ const HomePage = () => {
             <form className="home-chat__composer" onSubmit={handleChatSubmit}>
               <div className="home-chat__input-wrapper">
                 <textarea
+                  aria-label="채팅 메시지"
                   className="home-chat__input"
                   placeholder={selectedChatId ? '무엇이든 물어보세요' : '무엇이든 물어보세요 (새 대화가 자동으로 시작됩니다)'}
                   value={chatInput}
@@ -779,6 +809,7 @@ const HomePage = () => {
                   className="hero-btn hero-btn--primary home-chat__send-btn"
                   type="submit"
                   disabled={chatSending || (departmentsLoading && !selectedChatId)}
+                  aria-label="메시지 보내기"
                 >
                   {chatSending ? '전송 중...' : '보내기'}
                 </button>

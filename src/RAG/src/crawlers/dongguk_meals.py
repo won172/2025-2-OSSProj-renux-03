@@ -211,6 +211,8 @@ def parse_dflex_pdf(pdf_bytes: bytes, ref_date: date) -> List[dict]:
         print(f"⚠️ D-Flex PDF 파싱 실패: {exc}")
         return []
     if not tables:
+        # 텍스트 레이어/표가 없으면 스캔본(이미지 전용) PDF일 가능성 — 조용한 누락 방지용 경고.
+        print(f"⚠️ D-Flex PDF에 표/텍스트 레이어가 없습니다(이미지 전용 PDF 가능성, ref={ref_date}). 메뉴 누락.")
         return []
     table = tables[0]
 

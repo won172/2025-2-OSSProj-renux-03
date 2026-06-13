@@ -5,9 +5,12 @@ import './styles/bootstrap-overrides.css'
 import './styles/global.css'
 import './styles/markdown.css'
 import App from './App.tsx'
+import ErrorBoundary from './components/ErrorBoundary.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )

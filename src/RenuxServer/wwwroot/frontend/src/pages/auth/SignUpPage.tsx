@@ -6,6 +6,10 @@ import type { MajorOption, ApiMessageResponse } from '../../types/user'
 type IdStatus = 'available' | 'unavailable' | null
 
 type PasswordStatus = 'match' | 'mismatch' | null
+type SignupMode = 'student' | 'council'
+
+const councilInstagramUrl =
+  'https://www.instagram.com/dongttok.dgu?igsh=MWs3MWJ4OWU3NjdlMw%3D%3D&utm_source=qr'
 
 const SignUpPage = () => {
   const navigate = useNavigate()
@@ -21,6 +25,8 @@ const SignUpPage = () => {
   const [isIdAvailable, setIsIdAvailable] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [signupMode, setSignupMode] = useState<SignupMode>('student')
+  const [requestSuccess, setRequestSuccess] = useState<string | null>(null)
 
   useEffect(() => {
     const loadMajors = async () => {
@@ -93,6 +99,7 @@ const SignUpPage = () => {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitError(null)
+    setRequestSuccess(null)
 
     if (!isIdAvailable) {
       setSubmitError('아이디 중복 확인을 완료해주세요.')
@@ -113,7 +120,8 @@ const SignUpPage = () => {
 
     try {
       setIsSubmitting(true)
-      await apiFetch('/auth/signup', {
+      const endpoint = signupMode === 'council' ? '/auth/council-signup-requests' : '/auth/signup'
+      await apiFetch<{ message?: string; instagramUrl?: string } | boolean>(endpoint, {
         method: 'POST',
         json: {
           userId,
@@ -122,6 +130,12 @@ const SignUpPage = () => {
           majorId: selectedMajor.id ?? selectedMajor.majorId,
         },
       })
+      if (signupMode === 'council') {
+        setRequestSuccess('학생회 가입 요청이 접수되었습니다. 확인을 위해 동똑이 인스타그램으로 DM을 보내주세요.')
+        setPassword('')
+        setPasswordConfirm('')
+        return
+      }
       // alert() 대신 로그인 페이지로 이동하며 성공 상태를 전달 (블로킹 다이얼로그 제거)
       navigate('/auth/in', { state: { signupSuccess: true } })
     } catch (submitError) {
@@ -147,6 +161,36 @@ const SignUpPage = () => {
     <div className="auth-page">
       <div className="auth-container">
         <h2>회원가입</h2>
+        <div className="auth-mode-tabs" role="tablist" aria-label="가입 유형">
+          <button
+            type="button"
+            className={`auth-mode-tab ${signupMode === 'student' ? 'auth-mode-tab--active' : ''}`}
+            onClick={() => setSignupMode('student')}
+            aria-pressed={signupMode === 'student'}
+          >
+            일반학생 가입
+          </button>
+          <button
+            type="button"
+            className={`auth-mode-tab ${signupMode === 'council' ? 'auth-mode-tab--active' : ''}`}
+            onClick={() => setSignupMode('council')}
+            aria-pressed={signupMode === 'council'}
+          >
+            학생회 가입 요청
+          </button>
+        </div>
+        <p className="auth-help-text">
+          관리자 계정은 공개 회원가입으로 만들 수 없으며, 운영자가 별도로 아이디와 비밀번호를 발급합니다.
+        </p>
+        {signupMode === 'council' && (
+          <div className="auth-info-box" role="status">
+            학생회 계정은 요청 접수 후 확인 절차를 거쳐 승인됩니다. 요청 후 동똑이 인스타그램으로 DM을 보내주세요.
+            <br />
+            <a href={councilInstagramUrl} target="_blank" rel="noopener noreferrer">
+              @dongttok.dgu 인스타그램으로 DM 보내기
+            </a>
+          </div>
+        )}
         <form className="auth-form" onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="userId">아이디</label>
@@ -233,9 +277,18 @@ const SignUpPage = () => {
           </div>
 
           {submitError && <div className="auth-error">{submitError}</div>}
+          {requestSuccess && (
+            <div className="auth-success">
+              {requestSuccess}
+              <br />
+              <a href={councilInstagramUrl} target="_blank" rel="noopener noreferrer">
+                @dongttok.dgu 인스타그램으로 DM 보내기
+              </a>
+            </div>
+          )}
 
           <button className="auth-submit" type="submit" disabled={isSubmitting || isCheckingId}>
-            {isSubmitting ? '가입 중...' : '가입하기'}
+            {isSubmitting ? '처리 중...' : signupMode === 'council' ? '학생회 가입 요청 보내기' : '가입하기'}
           </button>
         </form>
 

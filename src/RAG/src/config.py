@@ -95,6 +95,8 @@ LLM_ROUTER_DESCRIPTIONS = {
 # OpenAI/LLM 기본 설정.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # 질의분석/라우터용 (항상 OpenAI)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+RAG_REQUIRE_OPENAI_API_KEY = os.getenv("RAG_REQUIRE_OPENAI_API_KEY", "0") == "1"
+RAG_ROUTER_CACHE_TTL_SECONDS = int(os.getenv("RAG_ROUTER_CACHE_TTL_SECONDS", "300"))
 
 # 답변 생성 프로바이더 선택: "openai" 또는 "ollama".
 # LLM_PROVIDER 로 전환하며, 둘 다 LangChain 채팅 인터페이스(.ainvoke/.astream)를 사용한다.
@@ -124,6 +126,17 @@ QUERY_ANALYSIS_MAX_QUERIES = int(os.getenv("QUERY_ANALYSIS_MAX_QUERIES", "1"))
 RAG_DECOMPOSE_ENABLED = os.getenv("RAG_DECOMPOSE_ENABLED", "1") == "1"
 # 복합 질문에서 사용할 분해 서브쿼리 최대 개수(라우트 데이터셋 수와 곱해져 검색 횟수가 되므로 과도하지 않게).
 RAG_MAX_SUBQUERIES = int(os.getenv("RAG_MAX_SUBQUERIES", "4"))
+
+# 데이터 자동 갱신 스케줄러 (rag-service 프로세스 내 APScheduler).
+# 이미 로드된 임베딩 모델을 재사용하고 Chroma 클라이언트를 단일 프로세스가 소유하므로
+# 별도 워커 컨테이너 대비 메모리·동시성 안전성이 좋다. 기본 비활성(배포 env에서 1로 켠다).
+RAG_SCHEDULER_ENABLED = os.getenv("RAG_SCHEDULER_ENABLED", "0") == "1"
+# 공지 갱신 주기(시간). 기본 6시간 = 하루 4회.
+RAG_NOTICES_REFRESH_HOURS = float(os.getenv("RAG_NOTICES_REFRESH_HOURS", "6"))
+# 학식 갱신 주기(시간). 기본 24시간 = 매일.
+RAG_MEALS_REFRESH_HOURS = float(os.getenv("RAG_MEALS_REFRESH_HOURS", "24"))
+# 공지 갱신 시 게시판당 페이지 수(증분 갱신이므로 작게).
+RAG_NOTICES_REFRESH_MAX_PAGES = int(os.getenv("RAG_NOTICES_REFRESH_MAX_PAGES", "5"))
 
 # 대화 기록 관련 설정 (인메모리).
 MAX_HISTORY_STORE_SIZE = int(os.getenv("MAX_HISTORY_STORE_SIZE", "1000"))
@@ -186,6 +199,8 @@ __all__ = [
     "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
     "OPENAI_API_KEY",
+    "RAG_REQUIRE_OPENAI_API_KEY",
+    "RAG_ROUTER_CACHE_TTL_SECONDS",
     "LLM_PROVIDER",
     "LLM_FALLBACK_ENABLED",
     "OPENAI_CHAT_MODEL",
@@ -200,6 +215,10 @@ __all__ = [
     "QUERY_ANALYSIS_MAX_QUERIES",
     "RAG_DECOMPOSE_ENABLED",
     "RAG_MAX_SUBQUERIES",
+    "RAG_SCHEDULER_ENABLED",
+    "RAG_NOTICES_REFRESH_HOURS",
+    "RAG_MEALS_REFRESH_HOURS",
+    "RAG_NOTICES_REFRESH_MAX_PAGES",
     "MAX_HISTORY_STORE_SIZE",
     "REDIS_URL",
     "REDIS_HISTORY_TTL_SECONDS",

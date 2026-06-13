@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { apiFetch, type ApiError } from '../../api/client'
 
 const SignInPage = () => {
@@ -86,7 +86,9 @@ const SignInPage = () => {
           </button>
         </form>
         <div className="auth-footer">
-          <p>회원가입은 현재 비활성화되어 있습니다.</p>
+          <p>
+            계정이 없으신가요? <Link to="/auth/up">회원가입</Link>
+          </p>
         </div>
       </div>
     </div>
