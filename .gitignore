@@ -33,6 +33,7 @@ src/RAG/artifacts/raw/
 src/RAG/artifacts/normalized/
 src/RAG/artifacts/chunks/
 src/RAG/artifacts/vectorizers/
+# 단, *_tfidf.pkl 과 manifest.json(무결성 검증 기준)은 `git add -f`로 추적 중 — 함께 커밋할 것.
 src/RAG/artifacts/vectorizers_backup_*/
 src/RAG/artifacts/models/
 src/RAG/artifacts/db_chroma/
@@ -54,3 +55,11 @@ src/RAG/tests/evaluation_results_*.csv
 # 인스타 홍보용 이미지 + 이미지 생성 코드/폰트 (소스 아님)
 /insta/
 /canvas-design/
+
+# 발표/시연 산출물·대용량 비소스 (저장소에 올리지 않음)
+/video/
+/발표자료/
+/GEMINI.md
+# doc/ 의 보고서·발표자료·시연영상(대용량)은 제외하되, README가 참조하는 doc/images 는 유지
+/doc/*
+!/doc/images/
