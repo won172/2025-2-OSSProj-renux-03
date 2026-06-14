@@ -11,6 +11,7 @@ export interface ChatStreamPayload {
 
 export interface ChatStreamMetadata {
   sources?: ChatSource[] | null
+  requestId?: string
   isFallback?: boolean
   fallbackReason?: string | null
 }
@@ -20,6 +21,8 @@ export interface ChatStreamHandlers {
   onText: (accumulated: string) => void
   /** 검색 메타데이터(출처/폴백) 수신 시 호출 */
   onMetadata?: (meta: ChatStreamMetadata) => void
+  /** 추천 후속질문 수신 시 호출 */
+  onSuggestions?: (questions: string[]) => void
   /** 첫 토큰 수신 전 연결 실패가 발생해 같은 payload로 재연결할 때 호출 */
   onRetry?: (attempt: number, delayMs: number) => void
 }
@@ -87,11 +90,13 @@ export const useChatStream = () => {
           if (!line.startsWith('data: ')) return
           let data: {
             type?: string
+            request_id?: string
             sources?: ChatSource[] | null
             fallback_triggered?: boolean
             fallback_reason?: string | null
             content?: string
             message?: string
+            questions?: string[]
           }
           try {
             data = JSON.parse(line.substring(6))
@@ -103,12 +108,15 @@ export const useChatStream = () => {
           if (data.type === 'metadata') {
             handlers.onMetadata?.({
               sources: data.sources,
+              requestId: data.request_id,
               isFallback: data.fallback_triggered,
               fallbackReason: data.fallback_reason,
             })
           } else if (data.type === 'text') {
             accumulatedAnswer += data.content ?? ''
             handlers.onText(accumulatedAnswer)
+          } else if (data.type === 'suggestions') {
+            handlers.onSuggestions?.(data.questions ?? [])
           } else if (data.type === 'error') {
             throw new Error(data.message ?? 'Streaming error')
           }

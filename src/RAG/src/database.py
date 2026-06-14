@@ -261,6 +261,21 @@ class RagRetrievalLog(Base):
 
     query_log = relationship("RagQueryLog", back_populates="retrievals")
 
+
+# 12. RAG 답변 사용자 피드백
+class RagFeedback(Base):
+    __tablename__ = "rag_feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String, index=True, nullable=False)
+    session_id = Column(String, index=True, nullable=True)
+    rating = Column(Integer, nullable=False)
+    reason = Column(String, nullable=True)
+    comment = Column(Text, nullable=True)
+    major = Column(String, nullable=True)
+    created_at = Column(DateTime, default=kst_now, index=True)
+
+
 def _ensure_sqlite_columns(table_name: str, columns: dict[str, str]) -> None:
     with engine.begin() as connection:
         existing = {

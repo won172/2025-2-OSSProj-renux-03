@@ -45,7 +45,9 @@ services:
             context: ../RAG
             dockerfile: Dockerfile
         volumes:
-            - ../RAG/huggingface_cache:/root/.cache/huggingface
+            # uvicorn은 appuser(비root)로 실행되므로 캐시는 appuser 홈에 마운트한다.
+            # (/root 는 0700이라 appuser가 못 읽어 오프라인 모델 로드가 실패했음)
+            - ../RAG/huggingface_cache:/home/appuser/.cache/huggingface
             - ../RAG/artifacts:/app/artifacts
             - ../RAG/data:/app/data
             - ../RAG/rag_database.db:/app/rag_database.db
@@ -71,7 +73,19 @@ services:
             - RAG_SCHEDULER_ENABLED=${RAG_SCHEDULER_ENABLED:-1}
             - RAG_NOTICES_REFRESH_HOURS=${RAG_NOTICES_REFRESH_HOURS:-6}
             - RAG_MEALS_REFRESH_HOURS=${RAG_MEALS_REFRESH_HOURS:-24}
+            # appuser 홈 기준으로 HF 캐시 경로를 명시(오프라인 캐시 로드 보장).
+            - HOME=/home/appuser
+            - HF_HOME=/home/appuser/.cache/huggingface
+            - HUGGINGFACE_HUB_CACHE=/home/appuser/.cache/huggingface/hub
+            - HF_HUB_OFFLINE=1
+            - TRANSFORMERS_OFFLINE=1
         restart: on-failure
+        healthcheck:
+            test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")'"]
+            interval: 15s
+            timeout: 10s
+            retries: 5
+            start_period: 180s
 
     ollama:
         container_name: renux_ollama

@@ -1,10 +1,13 @@
 ﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using RenuxServer.DbContexts;
 
 #nullable disable
 
 namespace RenuxServer.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(ServerDbContext))]
     [Migration("20260511052000_AddChatMessageSources")]
     public partial class AddChatMessageSources : Migration
     {

@@ -13,6 +13,8 @@ public class ChatMessageDto
 
     public List<ChatSourceDto>? Sources { get; init; }
 
+    public string? RequestId { get; init; }
+
     public bool IsFallback { get; init; }
 
     public string? FallbackReason { get; init; }

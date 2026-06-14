@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch, type ApiError } from '../../api/client'
 import type { MajorOption, ApiMessageResponse } from '../../types/user'
@@ -7,9 +7,33 @@ type IdStatus = 'available' | 'unavailable' | null
 
 type PasswordStatus = 'match' | 'mismatch' | null
 type SignupMode = 'student' | 'council'
+type ValidationProblem = {
+  errors?: Record<string, string[]>
+  title?: string
+}
 
 const councilInstagramUrl =
   'https://www.instagram.com/dongttok.dgu?igsh=MWs3MWJ4OWU3NjdlMw%3D%3D&utm_source=qr'
+
+const getApiErrorMessage = (error: ApiError) => {
+  if (typeof error.details === 'object' && error.details) {
+    if ('message' in error.details) {
+      return String((error.details as ApiMessageResponse).message)
+    }
+
+    const validation = error.details as ValidationProblem
+    const firstValidationMessage = validation.errors ? Object.values(validation.errors).flat()[0] : undefined
+    if (firstValidationMessage) {
+      return firstValidationMessage
+    }
+
+    if (validation.title) {
+      return validation.title
+    }
+  }
+
+  return error.message
+}
 
 const SignUpPage = () => {
   const navigate = useNavigate()
@@ -19,6 +43,8 @@ const SignUpPage = () => {
   const [username, setUsername] = useState('')
   const [majors, setMajors] = useState<MajorOption[]>([])
   const [selectedMajorId, setSelectedMajorId] = useState('')
+  const [isMajorLoading, setIsMajorLoading] = useState(false)
+  const [majorLoadError, setMajorLoadError] = useState<string | null>(null)
   const [idStatus, setIdStatus] = useState<IdStatus>(null)
   const [idMessage, setIdMessage] = useState('')
   const [isCheckingId, setIsCheckingId] = useState(false)
@@ -27,28 +53,47 @@ const SignUpPage = () => {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [signupMode, setSignupMode] = useState<SignupMode>('student')
   const [requestSuccess, setRequestSuccess] = useState<string | null>(null)
+  const submitErrorRef = useRef<HTMLDivElement>(null)
+
+  const loadMajors = useCallback(async () => {
+    setIsMajorLoading(true)
+    setMajorLoadError(null)
+    try {
+      const data = await apiFetch<MajorOption[]>('/req/major', { method: 'GET' })
+      if (Array.isArray(data)) {
+        setMajors(data)
+      }
+    } catch (error) {
+      console.error('전공 데이터 로드 실패', error)
+      setMajors([])
+      setMajorLoadError('전공 목록을 불러오지 못했습니다. 새로고침해주세요.')
+    } finally {
+      setIsMajorLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    const loadMajors = async () => {
-      try {
-        const data = await apiFetch<MajorOption[]>('/req/major', { method: 'GET' })
-        if (Array.isArray(data)) {
-          setMajors(data)
-        }
-      } catch (error) {
-        console.error('전공 데이터 로드 실패', error)
-        setMajors([])
-      }
-    }
-
     loadMajors()
-  }, [])
+  }, [loadMajors])
+
+  useEffect(() => {
+    if (submitError) {
+      submitErrorRef.current?.focus()
+    }
+  }, [submitError])
 
   useEffect(() => {
     setIsIdAvailable(false)
     setIdStatus(null)
     setIdMessage('')
   }, [userId])
+
+  useEffect(() => {
+    setUserId('')
+    setIsIdAvailable(false)
+    setIdStatus(null)
+    setIdMessage('')
+  }, [signupMode])
 
   const passwordStatus = useMemo<PasswordStatus>(() => {
     if (!password && !passwordConfirm) return null
@@ -63,37 +108,51 @@ const SignUpPage = () => {
   const findMajorById = (value: string) =>
     majors.find((major) => String(major.id ?? major.majorId ?? '') === value)
 
-  const handleIdBlur = async () => {
-    if (!userId) {
+  const checkUserIdAvailability = async (idValue: string) => {
+    if (!idValue) {
       setIdStatus(null)
       setIdMessage('')
       setIsIdAvailable(false)
-      return
+      return false
+    }
+
+    if (idValue.length < 4) {
+      setIdStatus('unavailable')
+      setIdMessage('아이디는 4글자 이상 입력해주세요.')
+      setIsIdAvailable(false)
+      return false
     }
 
     try {
       setIsCheckingId(true)
       const isDuplicate = await apiFetch<boolean>('/auth/idcheck', {
         method: 'POST',
-        json: { id: userId },
+        json: { id: idValue },
       })
       if (isDuplicate) {
         setIdStatus('unavailable')
         setIdMessage('이미 사용 중인 아이디입니다.')
         setIsIdAvailable(false)
+        return false
       } else {
         setIdStatus('available')
         setIdMessage('사용 가능한 아이디입니다.')
         setIsIdAvailable(true)
+        return true
       }
     } catch (error) {
       console.error('ID check error:', error)
       setIdStatus('unavailable')
       setIdMessage('아이디 확인 중 오류가 발생했습니다.')
       setIsIdAvailable(false)
+      return false
     } finally {
       setIsCheckingId(false)
     }
+  }
+
+  const handleIdBlur = async () => {
+    await checkUserIdAvailability(userId)
   }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -101,7 +160,17 @@ const SignUpPage = () => {
     setSubmitError(null)
     setRequestSuccess(null)
 
-    if (!isIdAvailable) {
+    let checkedIdAvailable = isIdAvailable
+
+    if (userId && !checkedIdAvailable) {
+      checkedIdAvailable = await checkUserIdAvailability(userId)
+      if (!checkedIdAvailable) {
+        setSubmitError('아이디 중복 확인을 완료해주세요.')
+        return
+      }
+    }
+
+    if (!checkedIdAvailable) {
       setSubmitError('아이디 중복 확인을 완료해주세요.')
       return
     }
@@ -142,11 +211,7 @@ const SignUpPage = () => {
       console.error('회원가입 실패:', submitError)
       if (submitError && typeof submitError === 'object' && 'status' in submitError) {
         const apiError = submitError as ApiError
-        const messageFromDetails =
-          typeof apiError.details === 'object' && apiError.details && 'message' in apiError.details
-            ? String((apiError.details as ApiMessageResponse).message)
-            : undefined
-        setSubmitError(messageFromDetails ?? apiError.message ?? '회원가입 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.')
+        setSubmitError(getApiErrorMessage(apiError) ?? '회원가입 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.')
       } else {
         setSubmitError(
           submitError instanceof Error ? submitError.message : '회원가입 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
@@ -161,7 +226,7 @@ const SignUpPage = () => {
     <div className="auth-page">
       <div className="auth-container">
         <h2>회원가입</h2>
-        <div className="auth-mode-tabs" role="tablist" aria-label="가입 유형">
+        <div className="auth-mode-tabs" role="group" aria-label="가입 유형">
           <button
             type="button"
             className={`auth-mode-tab ${signupMode === 'student' ? 'auth-mode-tab--active' : ''}`}
@@ -191,106 +256,133 @@ const SignUpPage = () => {
             </a>
           </div>
         )}
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="userId">아이디</label>
-            <input
-              id="userId"
-              name="userId"
-              type="text"
-              value={userId}
-              onChange={(event) => setUserId(event.target.value)}
-              onBlur={handleIdBlur}
-              autoComplete="off"
-              disabled={isSubmitting}
-              required
-            />
-            <span className={`auth-field-message${idStatus ? ` ${idStatus}` : ''}`}>{idMessage}</span>
+        {requestSuccess ? (
+          <div className="auth-success">
+            {requestSuccess}
+            <br />
+            <a href={councilInstagramUrl} target="_blank" rel="noopener noreferrer">
+              @dongttok.dgu 인스타그램으로 DM 보내기
+            </a>
           </div>
-
-          <div className="form-group">
-            <label htmlFor="password">비밀번호</label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="new-password"
-              disabled={isSubmitting}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="password-confirm">비밀번호 확인</label>
-            <input
-              id="password-confirm"
-              name="password-confirm"
-              type="password"
-              value={passwordConfirm}
-              onChange={(event) => setPasswordConfirm(event.target.value)}
-              autoComplete="new-password"
-              disabled={isSubmitting}
-              required
-            />
-            {passwordStatus && (
-              <span className={`auth-field-message ${passwordStatus}`}>{passwordMessage}</span>
-            )}
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="username">이름</label>
-            <input
-              id="username"
-              name="username"
-              type="text"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              autoComplete="name"
-              disabled={isSubmitting}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="major">전공</label>
-            <select
-              id="major"
-              name="major"
-              value={selectedMajorId}
-              onChange={(event) => setSelectedMajorId(event.target.value)}
-              disabled={isSubmitting || majors.length === 0}
-              required
-            >
-              <option value="">전공 선택</option>
-              {majors.map((major, index) => {
-                const value = String(major.id ?? major.majorId ?? '')
-                const key = value || major.majorname || `major-${index}`
-                return (
-                  <option key={key} value={value}>
-                    {major.majorname ?? '알 수 없는 전공'}
-                  </option>
-                )
-              })}
-            </select>
-          </div>
-
-          {submitError && <div className="auth-error">{submitError}</div>}
-          {requestSuccess && (
-            <div className="auth-success">
-              {requestSuccess}
-              <br />
-              <a href={councilInstagramUrl} target="_blank" rel="noopener noreferrer">
-                @dongttok.dgu 인스타그램으로 DM 보내기
-              </a>
+        ) : (
+          <form className="auth-form" onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label htmlFor="userId">아이디</label>
+              <input
+                id="userId"
+                name="userId"
+                type="text"
+                value={userId}
+                onChange={(event) => setUserId(event.target.value)}
+                onBlur={handleIdBlur}
+                autoComplete="off"
+                placeholder="영문/숫자 4~30자"
+                disabled={isSubmitting}
+                required
+              />
+              <span className={`auth-field-message${idStatus ? ` ${idStatus}` : ''}`}>
+                {isCheckingId ? '확인 중...' : idMessage}
+              </span>
             </div>
-          )}
 
-          <button className="auth-submit" type="submit" disabled={isSubmitting || isCheckingId}>
-            {isSubmitting ? '처리 중...' : signupMode === 'council' ? '학생회 가입 요청 보내기' : '가입하기'}
-          </button>
-        </form>
+            <div className="form-group">
+              <label htmlFor="password">비밀번호</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="new-password"
+                placeholder="10자 이상"
+                minLength={10}
+                disabled={isSubmitting}
+                required
+              />
+              <span className="auth-field-message">10자 이상 입력해주세요 (현재 {password.length}자)</span>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="password-confirm">비밀번호 확인</label>
+              <input
+                id="password-confirm"
+                name="password-confirm"
+                type="password"
+                value={passwordConfirm}
+                onChange={(event) => setPasswordConfirm(event.target.value)}
+                autoComplete="new-password"
+                placeholder="10자 이상"
+                minLength={10}
+                disabled={isSubmitting}
+                required
+              />
+              {passwordStatus && (
+                <span className={`auth-field-message ${passwordStatus}`}>{passwordMessage}</span>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="username">이름</label>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="name"
+                placeholder="2~10자 실명"
+                disabled={isSubmitting}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="major">전공</label>
+              <select
+                id="major"
+                name="major"
+                value={selectedMajorId}
+                onChange={(event) => setSelectedMajorId(event.target.value)}
+                disabled={isSubmitting || isMajorLoading || majors.length === 0}
+                required
+              >
+                <option value="">{isMajorLoading ? '전공 불러오는 중...' : '전공 선택'}</option>
+                {majors.map((major, index) => {
+                  const value = String(major.id ?? major.majorId ?? '')
+                  const key = value || major.majorname || `major-${index}`
+                  return (
+                    <option key={key} value={value}>
+                      {major.majorname ?? '알 수 없는 전공'}
+                    </option>
+                  )
+                })}
+              </select>
+              {majorLoadError && (
+                <span className="auth-field-message unavailable">
+                  {majorLoadError}{' '}
+                  <button
+                    type="button"
+                    className="auth-retry-button"
+                    onClick={loadMajors}
+                    disabled={isMajorLoading}
+                  >
+                    다시 시도
+                  </button>
+                </span>
+              )}
+            </div>
+
+            {submitError && (
+              <div className="auth-error" ref={submitErrorRef} tabIndex={-1} role="alert">
+                {submitError}
+              </div>
+            )}
+
+            <button className="auth-submit" type="submit" disabled={isSubmitting || isCheckingId}>
+              {isSubmitting ? '처리 중...' : signupMode === 'council' ? '학생회 가입 요청 보내기' : '가입하기'}
+            </button>
+          </form>
+        )}
 
         <div className="auth-footer">
           <p>

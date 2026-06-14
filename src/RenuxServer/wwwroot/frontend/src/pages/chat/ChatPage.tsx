@@ -5,6 +5,9 @@ import rehypeExternalLinks from 'rehype-external-links'
 import remarkGfm from 'remark-gfm'
 import { apiFetch } from '../../api/client'
 import { useChatStream } from '../../hooks/useChatStream'
+import CopyButton from '../../components/chat/CopyButton'
+import MessageFeedback from '../../components/chat/MessageFeedback'
+import SuggestedQuestions from '../../components/chat/SuggestedQuestions'
 import SourceCards, { type ChatSource } from '../../components/chat/SourceCards'
 import type { ActiveChat } from '../../types/chat'
 
@@ -15,8 +18,10 @@ interface ChatPageMessage {
   content: string
   createdTime: string | number
   sources?: ChatSource[] | null
+  requestId?: string
   isFallback?: boolean
   fallbackReason?: string | null
+  suggestedQuestions?: string[]
 }
 
 const epochTicks = 621355968000000000 // .NET DateTime epoch ticks
@@ -119,15 +124,8 @@ const ChatPage = () => {
     return null
   }
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement> | KeyboardEvent<HTMLTextAreaElement>) => {
-    event.preventDefault()
+  const sendMessage = async (text: string) => {
     if (!chatId) return
-
-    const trimmed = inputValue.trim()
-    if (!trimmed) {
-      setSendError('메시지를 입력해주세요.')
-      return
-    }
 
     setSendError(null)
 
@@ -135,7 +133,7 @@ const ChatPage = () => {
       id: typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
       chatId,
       isAsk: true,
-      content: trimmed,
+      content: text,
       createdTime: new Date().toISOString(),
     }
 
@@ -154,12 +152,11 @@ const ChatPage = () => {
     }
     setMessages((prev) => [...prev, botPlaceholder])
     
-    setInputValue('')
     setIsSending(true)
 
     try {
       const { receivedAny } = await streamMessage(
-        { id: newMessage.id, chatId, content: trimmed, createdTime: newMessage.createdTime },
+        { id: newMessage.id, chatId, content: text, createdTime: newMessage.createdTime },
         {
           onText: (accumulated) =>
             setMessages((prev) =>
@@ -169,9 +166,19 @@ const ChatPage = () => {
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === botMessageId
-                  ? { ...msg, sources: meta.sources, isFallback: meta.isFallback, fallbackReason: meta.fallbackReason }
+                  ? {
+                      ...msg,
+                      sources: meta.sources,
+                      requestId: meta.requestId,
+                      isFallback: meta.isFallback,
+                      fallbackReason: meta.fallbackReason,
+                    }
                   : msg,
               ),
+            ),
+          onSuggestions: (questions) =>
+            setMessages((prev) =>
+              prev.map((msg) => (msg.id === botMessageId ? { ...msg, suggestedQuestions: questions } : msg)),
             ),
           onRetry: (attempt) => {
             setSendError(`연결이 끊겨 재시도 중입니다. (${attempt}/2)`)
@@ -206,10 +213,23 @@ const ChatPage = () => {
             : msg,
         ),
       )
-      setInputValue(trimmed)
+      setInputValue(text)
     } finally {
       setIsSending(false)
     }
+  }
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement> | KeyboardEvent<HTMLTextAreaElement>) => {
+    event.preventDefault()
+
+    const trimmed = inputValue.trim()
+    if (!trimmed) {
+      setSendError('메시지를 입력해주세요.')
+      return
+    }
+
+    setInputValue('')
+    await sendMessage(trimmed)
   }
 
   return (
@@ -283,6 +303,15 @@ const ChatPage = () => {
                         sources={message.sources}
                         showScores={showRagScores}
                         isFallback={message.isFallback}
+                      />
+                    )}
+                    {!message.isAsk && message.content.trim().length > 0 && <CopyButton text={message.content} />}
+                    {!message.isAsk && message.requestId && <MessageFeedback requestId={message.requestId} />}
+                    {!message.isAsk && (
+                      <SuggestedQuestions
+                        questions={message.suggestedQuestions ?? []}
+                        disabled={isSending}
+                        onSelect={(question) => sendMessage(question)}
                       />
                     )}
                     {messageTime && <time className="chat-bubble__time">{messageTime}</time>}

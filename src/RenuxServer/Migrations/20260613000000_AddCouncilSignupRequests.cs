@@ -1,11 +1,15 @@
 using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using RenuxServer.DbContexts;
 
 #nullable disable
 
 namespace RenuxServer.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(ServerDbContext))]
+    [Migration("20260613000000_AddCouncilSignupRequests")]
     public partial class AddCouncilSignupRequests : Migration
     {
         /// <inheritdoc />

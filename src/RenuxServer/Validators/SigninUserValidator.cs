@@ -10,7 +10,7 @@ public class SigninUserValidator : AbstractValidator<SigninUserDto>
     {
         RuleFor(p => p.UserId)
             .NotNull()
-            .Length(8, 30);
+            .Length(4, 30);
         RuleFor(p => p.Password)
             .NotNull()
             .Length(10, 30)/*

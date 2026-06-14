@@ -54,7 +54,10 @@ src/RAG/tests/evaluation_results_*.csv
 /ADMIN_REVIEW.md
 /KNOWLEDGE_FLOW_REVIEW.md
 /LAUNCH_READINESS.md
+/FEATURE_ROADMAP.md
+/SECURITY_LAUNCH_RUNBOOK.md
 /CLAUDE.md
+/docker-compose.yml
 
 # 어시스턴트/로컬 작업 디렉터리
 /.claude/

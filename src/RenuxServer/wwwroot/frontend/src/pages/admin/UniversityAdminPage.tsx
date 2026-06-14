@@ -23,6 +23,45 @@ interface ApiOrganization {
     ManagerName?: string
 }
 
+interface CouncilSignupRequest {
+  id: string
+  userId: string
+  username: string
+  majorId: string
+  majorName?: string | null
+  status: string
+  createdTime: string
+  reviewedTime?: string | null
+  reviewNote?: string | null
+}
+
+interface ApiMessageResponse {
+  message?: string
+}
+
+interface MajorOption {
+  id: string
+  majorname?: string
+  Majorname?: string
+}
+
+interface AdminRoleOption {
+  id: string
+  roleName: string
+}
+
+interface AdminUserAccount {
+  id: string
+  userId: string
+  username: string
+  majorId: string
+  majorName?: string | null
+  roleId: string
+  roleName?: string | null
+  createdTime: string
+  updatedTime: string
+}
+
 interface RagDatasetStatus {
   key: string
   collection: string
@@ -98,6 +137,33 @@ const getStatusPillClass = (status?: string) => {
   return 'pending'
 }
 
+const getRequestStatusLabel = (status?: string) => {
+  if (status === 'approved') return '승인됨'
+  if (status === 'rejected') return '반려됨'
+  return '대기 중'
+}
+
+const getRequestStatusPillClass = (status?: string) => {
+  if (status === 'approved') return 'success'
+  if (status === 'rejected') return 'danger'
+  return 'pending'
+}
+
+const getApiErrorMessage = (error: unknown, fallback: string) => {
+  if (error && typeof error === 'object' && 'details' in error) {
+    const details = (error as { details?: unknown }).details
+    if (details && typeof details === 'object' && 'message' in details) {
+      return String((details as ApiMessageResponse).message)
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return fallback
+}
+
 const formatDateTime = (value?: string | null) => {
   if (!value) return '-'
   const date = new Date(value)
@@ -115,6 +181,16 @@ const UniversityAdminPage = () => {
   const [organizations, setOrganizations] = useState<CouncilOrganization[]>([])
   const [pendingReviews, setPendingReviews] = useState<PendingAnswerReview[]>([])
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null)
+  const [councilSignupRequests, setCouncilSignupRequests] = useState<CouncilSignupRequest[]>([])
+  const [councilSignupError, setCouncilSignupError] = useState<string | null>(null)
+  const [accountUsers, setAccountUsers] = useState<AdminUserAccount[]>([])
+  const [accountRoles, setAccountRoles] = useState<AdminRoleOption[]>([])
+  const [accountMajors, setAccountMajors] = useState<MajorOption[]>([])
+  const [accountError, setAccountError] = useState<string | null>(null)
+  const [accountSearchTerm, setAccountSearchTerm] = useState('')
+  const [accountRoleFilter, setAccountRoleFilter] = useState('all')
+  const [accountMajorFilter, setAccountMajorFilter] = useState('all')
+  const [pendingReviewsError, setPendingReviewsError] = useState<string | null>(null)
   
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -213,6 +289,7 @@ const UniversityAdminPage = () => {
                     });
                     
                     setPendingReviews(mappedReviews)
+                    setPendingReviewsError(null)
                     if (mappedReviews.length > 0) {
                         // Keep selection if exists, else select first
                         setSelectedReviewId((prev) => prev ?? mappedReviews[0].id)
@@ -222,10 +299,50 @@ const UniversityAdminPage = () => {
                 }
             } catch (e) {
                 console.error('Failed to fetch pending reviews:', e);
-                setError('검수 대기 데이터를 불러오는데 실패했습니다.');
+                setPendingReviews([])
+                setSelectedReviewId(null)
+                setPendingReviewsError('검수 대기 데이터를 불러오는데 실패했습니다.')
             }
 
-            // 3. Fetch RAG operation status
+            // 3. Fetch Council signup requests
+            try {
+                const requests = await apiFetch<CouncilSignupRequest[]>(`/auth/council-signup-requests?t=${new Date().getTime()}`)
+                if (Array.isArray(requests)) {
+                    const sortedRequests = [...requests].sort((a, b) => {
+                        const isAPending = a.status === 'pending'
+                        const isBPending = b.status === 'pending'
+                        if (isAPending && !isBPending) return -1
+                        if (!isAPending && isBPending) return 1
+                        return new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime()
+                    })
+                    setCouncilSignupRequests(sortedRequests)
+                    setCouncilSignupError(null)
+                }
+            } catch (e) {
+                console.error('Failed to fetch council signup requests:', e)
+                setCouncilSignupRequests([])
+                setCouncilSignupError('학생회 가입 요청을 불러오지 못했습니다.')
+            }
+
+            // 4. Fetch Account management data
+            try {
+                const [users, roles, majors] = await Promise.all([
+                    apiFetch<AdminUserAccount[]>(`/auth/admin/users?t=${new Date().getTime()}`),
+                    apiFetch<AdminRoleOption[]>(`/auth/admin/users/roles?t=${new Date().getTime()}`),
+                    apiFetch<MajorOption[]>('/req/major'),
+                ])
+
+                setAccountUsers(Array.isArray(users) ? users : [])
+                setAccountRoles(Array.isArray(roles) ? roles : [])
+                setAccountMajors(Array.isArray(majors) ? majors : [])
+                setAccountError(null)
+            } catch (e) {
+                console.error('Failed to fetch account users:', e)
+                setAccountUsers([])
+                setAccountError('계정 관리는 관리자 계정만 사용할 수 있습니다.')
+            }
+
+            // 5. Fetch RAG operation status
             try {
                 const statusData = await apiFetch<RagAdminStatus>(`/admin/rag/status?t=${new Date().getTime()}`)
                 setRagStatus(statusData)
@@ -264,8 +381,24 @@ const UniversityAdminPage = () => {
     [pendingReviews, selectedReviewId],
   )
 
+  const filteredUsers = useMemo(() => {
+    const normalizedSearch = accountSearchTerm.trim().toLowerCase()
+
+    return accountUsers.filter((user) => {
+      const matchesSearch = !normalizedSearch
+        || user.username.toLowerCase().includes(normalizedSearch)
+        || user.userId.toLowerCase().includes(normalizedSearch)
+
+      const matchesRole = accountRoleFilter === 'all' || user.roleId === accountRoleFilter
+      const matchesMajor = accountMajorFilter === 'all' || user.majorId === accountMajorFilter
+
+      return matchesSearch && matchesRole && matchesMajor
+    })
+  }, [accountMajorFilter, accountRoleFilter, accountSearchTerm, accountUsers])
+
   const registeredCount = organizations.length
   const pendingCount = pendingReviews.filter(r => r.status === 'pending').length
+  const councilSignupPendingCount = councilSignupRequests.filter((request) => request.status === 'pending').length
   const systemStatus = ragStatus?.status ?? (ragStatusError ? 'error' : undefined)
   const systemStatusLabel = getStatusLabel(systemStatus)
   const fallbackRate = ragStatus && ragStatus.rag_logs.total_queries > 0
@@ -273,6 +406,114 @@ const UniversityAdminPage = () => {
     : 0
 
   const handleNavigateHome = () => navigate('/')
+
+  const handleCouncilSignupAction = async (requestId: string, action: 'approve' | 'reject') => {
+    if (!confirm(`학생회 가입 요청을 ${action === 'approve' ? '승인' : '반려'}하시겠습니까?`)) {
+      return
+    }
+
+    setActionNotice(null)
+    setActionError(null)
+    try {
+      const result = await apiFetch<ApiMessageResponse>(`/auth/council-signup-requests/${requestId}/${action}`, {
+        method: 'POST',
+        json: { note: null },
+      })
+
+      setCouncilSignupRequests((prev) =>
+        prev.map((request) =>
+          request.id === requestId
+            ? {
+                ...request,
+                status: action === 'approve' ? 'approved' : 'rejected',
+                reviewedTime: new Date().toISOString(),
+              }
+            : request,
+        ),
+      )
+      setActionNotice(result.message ?? `학생회 가입 요청을 ${action === 'approve' ? '승인' : '반려'}했습니다.`)
+    } catch (e) {
+      console.error('Council signup action failed:', e)
+      setActionError(getApiErrorMessage(e, '학생회 가입 요청 처리에 실패했습니다.'))
+    }
+  }
+
+  const handleAccountUpdate = async (
+    targetUserId: string,
+    update: { majorId?: string; roleId?: string },
+  ) => {
+    setActionNotice(null)
+    setActionError(null)
+    try {
+      const result = await apiFetch<ApiMessageResponse>(`/auth/admin/users/${targetUserId}`, {
+        method: 'PATCH',
+        json: update,
+      })
+
+      setAccountUsers((prev) =>
+        prev.map((user) => {
+          if (user.id !== targetUserId) return user
+
+          const nextMajor = update.majorId
+            ? accountMajors.find((major) => major.id === update.majorId)
+            : null
+          const nextRole = update.roleId
+            ? accountRoles.find((role) => role.id === update.roleId)
+            : null
+
+          return {
+            ...user,
+            majorId: update.majorId ?? user.majorId,
+            majorName: nextMajor ? (nextMajor.majorname ?? nextMajor.Majorname ?? user.majorName) : user.majorName,
+            roleId: update.roleId ?? user.roleId,
+            roleName: nextRole ? nextRole.roleName : user.roleName,
+            updatedTime: new Date().toISOString(),
+          }
+        }),
+      )
+      setActionNotice(result.message ?? '계정 정보가 수정되었습니다.')
+    } catch (e) {
+      console.error('Account update failed:', e)
+      setActionError(getApiErrorMessage(e, '계정 정보 수정에 실패했습니다.'))
+    }
+  }
+
+  const handlePasswordReset = async (targetUserId: string, displayUserId: string) => {
+    const password = prompt(`${displayUserId} 계정의 새 비밀번호를 입력하세요. (10~30자)`)
+    if (!password) return
+
+    setActionNotice(null)
+    setActionError(null)
+    try {
+      const result = await apiFetch<ApiMessageResponse>(`/auth/admin/users/${targetUserId}/reset-password`, {
+        method: 'POST',
+        json: { password },
+      })
+      setActionNotice(result.message ?? '비밀번호가 재설정되었습니다.')
+    } catch (e) {
+      console.error('Password reset failed:', e)
+      setActionError(getApiErrorMessage(e, '비밀번호 재설정에 실패했습니다.'))
+    }
+  }
+
+  const handleAccountDelete = async (targetUserId: string, displayUserId: string) => {
+    if (!confirm(`${displayUserId} 계정을 삭제하시겠습니까? 삭제된 계정은 복구할 수 없습니다.`)) {
+      return
+    }
+
+    setActionNotice(null)
+    setActionError(null)
+    try {
+      await apiFetch(`/auth/admin/users/${targetUserId}`, {
+        method: 'DELETE',
+      })
+      setAccountUsers((prev) => prev.filter((user) => user.id !== targetUserId))
+      setActionNotice(`${displayUserId} 계정을 삭제했습니다.`)
+    } catch (e) {
+      console.error('Account delete failed:', e)
+      setActionError(getApiErrorMessage(e, '계정 삭제에 실패했습니다.'))
+    }
+  }
 
   const handleReviewAction = async (reviewId: string, action: 'approve' | 'reject') => {
     if (!confirm(`${action === 'approve' ? '승인' : '반려'} 하시겠습니까?`)) {
@@ -351,7 +592,7 @@ const UniversityAdminPage = () => {
         </header>
 
         <section className="admin-metrics compact">
-          <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
             <article className="admin-card admin-card--accent admin-card--compact">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                 <div>
@@ -364,10 +605,19 @@ const UniversityAdminPage = () => {
             <article className="admin-card admin-card--compact">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                 <div>
-                    <p className="admin-card__label">대기 중 요청</p>
+                    <p className="admin-card__label">RAG 검수 대기</p>
                     <strong className="admin-card__value">{pendingCount}</strong>
                 </div>
-                <span className="admin-card__icon admin-card__icon--blue" aria-hidden="true">📄</span>
+                <span className="admin-card__icon admin-card__icon--blue" aria-hidden="true">!</span>
+              </div>
+            </article>
+            <article className="admin-card admin-card--compact">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <div>
+                    <p className="admin-card__label">가입 승인 대기</p>
+                    <strong className="admin-card__value">{councilSignupPendingCount}</strong>
+                </div>
+                <span className="admin-card__icon admin-card__icon--blue" aria-hidden="true">+</span>
               </div>
             </article>
             <article className="admin-card admin-card--compact">
@@ -382,6 +632,221 @@ const UniversityAdminPage = () => {
               </div>
             </article>
           </div>
+        </section>
+
+        <section className="admin-panel glass-panel" style={{ marginBottom: '16px' }}>
+          <header className="admin-panel__header">
+            <div>
+              <h2 className="admin-panel__title">학생회 가입 요청</h2>
+              <p className="admin-panel__subtitle">학생회 계정 신청을 확인하고 승인 또는 반려합니다.</p>
+            </div>
+            <span className="status-pill status-pill--pending">
+              대기 {councilSignupPendingCount}
+            </span>
+          </header>
+
+          {councilSignupError ? (
+            <div className="admin-alert admin-alert--danger" style={{ marginTop: '14px' }}>{councilSignupError}</div>
+          ) : (
+            <div className="admin-table" style={{ marginTop: '14px', overflowX: 'auto' }}>
+              <div style={{ minWidth: '760px' }}>
+                <div className="admin-table__head" style={{ gridTemplateColumns: '1fr 1fr 1.4fr 1fr 0.8fr 1.2fr' }}>
+                  <span>아이디</span>
+                  <span>이름</span>
+                  <span>전공</span>
+                  <span>신청일</span>
+                  <span>상태</span>
+                  <span>처리</span>
+                </div>
+                <ul className="admin-table__body">
+                  {councilSignupRequests.map((request) => (
+                    <li
+                      key={request.id}
+                      className="admin-table__row"
+                      style={{ gridTemplateColumns: '1fr 1fr 1.4fr 1fr 0.8fr 1.2fr' }}
+                    >
+                      <span>{request.userId}</span>
+                      <span>{request.username}</span>
+                      <span>{request.majorName ?? '-'}</span>
+                      <span>{formatDateTime(request.createdTime)}</span>
+                      <span className={`status-pill status-pill--${getRequestStatusPillClass(request.status)}`}>
+                        {getRequestStatusLabel(request.status)}
+                      </span>
+                      <span style={{ display: 'flex', gap: '8px', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
+                        {request.status === 'pending' ? (
+                          <>
+                            <button
+                              className="ghost-btn ghost-btn--muted small"
+                              type="button"
+                              onClick={() => handleCouncilSignupAction(request.id, 'reject')}
+                            >
+                              반려
+                            </button>
+                            <button
+                              className="ghost-btn ghost-btn--accent small"
+                              type="button"
+                              onClick={() => handleCouncilSignupAction(request.id, 'approve')}
+                            >
+                              승인
+                            </button>
+                          </>
+                        ) : (
+                          <span style={{ color: 'var(--buddy-muted)', fontSize: '0.85rem' }}>
+                            {request.reviewedTime ? `${formatDateTime(request.reviewedTime)} 처리` : '처리 완료'}
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                  {councilSignupRequests.length === 0 && (
+                    <li className="admin-table__empty">학생회 가입 요청이 없습니다.</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {(actionNotice || actionError) && (
+            <div style={{ marginTop: '12px' }}>
+              {actionNotice && (
+                <div className="admin-alert" style={{ color: '#15803d', background: '#f0fdf4', borderColor: '#bbf7d0' }}>
+                  {actionNotice}
+                </div>
+              )}
+              {actionError && (
+                <div className="admin-alert admin-alert--danger" style={{ marginTop: actionNotice ? '8px' : 0 }}>
+                  {actionError}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        <section className="admin-panel glass-panel" style={{ marginBottom: '16px' }}>
+          <header className="admin-panel__header">
+            <div>
+              <h2 className="admin-panel__title">계정 관리</h2>
+              <p className="admin-panel__subtitle">사용자 역할과 전공을 변경하고 비밀번호를 재설정합니다.</p>
+            </div>
+            <span className="status-pill status-pill--success">
+              계정 {accountUsers.length}
+            </span>
+          </header>
+
+          {accountError ? (
+            <div className="admin-alert admin-alert--danger" style={{ marginTop: '14px' }}>{accountError}</div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '14px' }}>
+                <input
+                  type="search"
+                  value={accountSearchTerm}
+                  onChange={(event) => setAccountSearchTerm(event.target.value)}
+                  placeholder="이름/이메일(아이디) 검색"
+                  aria-label="계정 이름 또는 이메일 검색"
+                  style={{ flex: '1 1 240px', minHeight: '38px', borderRadius: '8px', border: '1px solid #d1d5db', padding: '8px 10px', background: '#fff' }}
+                />
+                <select
+                  value={accountRoleFilter}
+                  onChange={(event) => setAccountRoleFilter(event.target.value)}
+                  aria-label="역할 필터"
+                  style={{ flex: '0 1 180px', minHeight: '38px', borderRadius: '8px', border: '1px solid #d1d5db', padding: '8px 10px', background: '#fff' }}
+                >
+                  <option value="all">전체 역할</option>
+                  {accountRoles.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.roleName}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={accountMajorFilter}
+                  onChange={(event) => setAccountMajorFilter(event.target.value)}
+                  aria-label="전공 필터"
+                  style={{ flex: '0 1 200px', minHeight: '38px', borderRadius: '8px', border: '1px solid #d1d5db', padding: '8px 10px', background: '#fff' }}
+                >
+                  <option value="all">전체 학과</option>
+                  {accountMajors.map((major) => (
+                    <option key={major.id} value={major.id}>
+                      {major.majorname ?? major.Majorname ?? '전공 미상'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="admin-table" style={{ marginTop: '14px', maxHeight: '420px', overflow: 'auto' }}>
+              <div style={{ minWidth: '1120px' }}>
+                <div className="admin-table__head" style={{ gridTemplateColumns: '1fr 1fr 1.3fr 1fr 0.85fr 1.6fr' }}>
+                  <span>아이디</span>
+                  <span>이름</span>
+                  <span>전공</span>
+                  <span>역할</span>
+                  <span>수정일</span>
+                  <span>관리</span>
+                </div>
+                <ul className="admin-table__body">
+                  {filteredUsers.map((user) => (
+                    <li
+                      key={user.id}
+                      className="admin-table__row"
+                      style={{ gridTemplateColumns: '1fr 1fr 1.3fr 1fr 0.85fr 1.6fr', alignItems: 'center' }}
+                    >
+                      <span>{user.userId}</span>
+                      <span>{user.username}</span>
+                      <span>
+                        <select
+                          value={user.majorId}
+                          onChange={(event) => handleAccountUpdate(user.id, { majorId: event.target.value })}
+                          style={{ width: '100%', minHeight: '36px', borderRadius: '8px', border: '1px solid #d1d5db', padding: '6px 8px', background: '#fff' }}
+                        >
+                          {accountMajors.map((major) => (
+                            <option key={major.id} value={major.id}>
+                              {major.majorname ?? major.Majorname ?? '전공 미상'}
+                            </option>
+                          ))}
+                        </select>
+                      </span>
+                      <span>
+                        <select
+                          value={user.roleId}
+                          onChange={(event) => handleAccountUpdate(user.id, { roleId: event.target.value })}
+                          style={{ width: '100%', minHeight: '36px', borderRadius: '8px', border: '1px solid #d1d5db', padding: '6px 8px', background: '#fff' }}
+                        >
+                          {accountRoles.map((role) => (
+                            <option key={role.id} value={role.id}>
+                              {role.roleName}
+                            </option>
+                          ))}
+                        </select>
+                      </span>
+                      <span>{formatDateTime(user.updatedTime)}</span>
+                      <span style={{ display: 'flex', gap: '8px', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
+                        <button
+                          className="ghost-btn ghost-btn--muted small"
+                          type="button"
+                          onClick={() => handlePasswordReset(user.id, user.userId)}
+                        >
+                          비밀번호 재설정
+                        </button>
+                        <button
+                          className="ghost-btn ghost-btn--danger small"
+                          type="button"
+                          onClick={() => handleAccountDelete(user.id, user.userId)}
+                        >
+                          삭제
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                  {filteredUsers.length === 0 && (
+                    <li className="admin-table__empty">
+                      {accountUsers.length === 0 ? '관리할 계정이 없습니다.' : '검색 결과가 없습니다.'}
+                    </li>
+                  )}
+                </ul>
+              </div>
+            </div>
+            </>
+          )}
         </section>
 
         <div className="admin-dashboard-grid">
@@ -423,6 +888,11 @@ const UniversityAdminPage = () => {
               <h2 className="admin-panel__title">검수 대기 내역</h2>
               <p className="admin-panel__subtitle">제출된 답변 승인/반려</p>
               <div className="admin-review-list-scroll">
+                  {pendingReviewsError && (
+                    <div className="admin-alert admin-alert--danger" style={{ marginBottom: '12px' }}>
+                      {pendingReviewsError}
+                    </div>
+                  )}
                   {pendingReviews.map((review) => (
                     <div
                         key={review.id}
@@ -449,7 +919,7 @@ const UniversityAdminPage = () => {
                         </button>
                     </div>
                   ))}
-                  {pendingReviews.length === 0 && (
+                  {!pendingReviewsError && pendingReviews.length === 0 && (
                     <div className="admin-table__empty">검수할 요청이 없습니다.</div>
                   )}
               </div>

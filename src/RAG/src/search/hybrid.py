@@ -383,14 +383,16 @@ def hybrid_search_with_meta(
     hits = hybrid_search(collection_name, chunks_df, tfidf_vectorizer, tfidf_matrix, query, top_k, alpha, where_filter, tfidf_chunk_ids) # where_filter 전달
     out = hits.copy()
     out["title"] = out["chunk_text"].apply(_extract_title)
-    for column in ("topics", "category", "published_at", "url", "source", "notice_id"):
+    for column in ("topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id"):
         if column not in out.columns:
             out[column] = ""
+        else:
+            out[column] = out[column].fillna("")
     # major/entry_year/source_type/attachments는 후속 학과 필터·entry_year 가산점·첨부 링크
     # 로직이 사용하므로 존재하면 반드시 함께 반환한다(누락 시 해당 기능이 조용히 비활성).
     desired = [
         "chunk_id", "title", "chunk_text", "hybrid_score", "vector_score", "sparse_score",
-        "topics", "category", "published_at", "url", "source", "notice_id",
+        "topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id",
         "major", "entry_year", "source_type", "attachments",
         "doc_id", "position",  # parent-document 확장(이웃 청크 결합)에 사용
         "is_closed", "restaurant", "meal_date",  # 학식: 휴무 패널티·식당/날짜 표시에 사용

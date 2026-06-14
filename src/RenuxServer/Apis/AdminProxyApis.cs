@@ -89,7 +89,22 @@ static public class AdminProxyApis
         {
             logger.LogInformation("Proxying /admin/items to {Url}/admin/items", RagServiceUrl);
             var client = httpClientFactory.CreateClient();
-            var proxyRes = await client.GetAsync($"{RagServiceUrl}/admin/items");
+            HttpResponseMessage proxyRes;
+            try
+            {
+                proxyRes = await client.GetAsync($"{RagServiceUrl}/admin/items", context.RequestAborted);
+            }
+            catch (TaskCanceledException ex) when (!context.RequestAborted.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Timed out proxying /admin/items to RAG service at {Url}/admin/items", RagServiceUrl);
+                return Results.Problem(detail: "RAG 서비스 응답 시간이 초과되었습니다.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (HttpRequestException ex)
+            {
+                logger.LogError(ex, "Error proxying /admin/items to RAG service at {Url}/admin/items", RagServiceUrl);
+                return Results.Problem(detail: "RAG 서비스 연결에 실패했습니다.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
             var body = await proxyRes.Content.ReadAsStringAsync();
             if (!proxyRes.IsSuccessStatusCode)
             {

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 import json
@@ -187,6 +188,103 @@ def _first_nonempty(row, keys: Iterable[str]) -> str:
     return ""
 
 
+_TITLE_DEADLINE_PATTERN = re.compile(r"~\s*(?P<month>\d{1,2})\s*/\s*(?P<day>\d{1,2})")
+_BODY_PERIOD_KEYWORD_PATTERN = re.compile(r"(신청\s*기간|접수\s*기간|신청기간|접수기간)")
+_BODY_FULL_DATE_END_PATTERN = re.compile(
+    r"(?:~|-|–|—|∼|〜)\s*"
+    r"(?P<year>\d{4})\s*[.\-/년]\s*"
+    r"(?P<month>\d{1,2})\s*[.\-/월]\s*"
+    r"(?P<day>\d{1,2})"
+)
+_BODY_MONTH_DAY_END_PATTERN = re.compile(
+    r"(?:~|-|–|—|∼|〜)\s*(?P<month>\d{1,2})\s*/\s*(?P<day>\d{1,2})"
+)
+
+
+def _parse_date_parts(year: int, month: int, day: int) -> date | None:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _parse_notice_deadline_from_title(title: object, published_date: str | None) -> str | None:
+    if not isinstance(title, str) or not published_date:
+        return None
+
+    published = pd.to_datetime(published_date, errors="coerce")
+    if pd.isna(published):
+        return None
+
+    match = _TITLE_DEADLINE_PATTERN.search(title)
+    if not match:
+        return None
+
+    deadline = _parse_date_parts(
+        int(published.year),
+        int(match.group("month")),
+        int(match.group("day")),
+    )
+    if deadline is None:
+        return None
+
+    published_day = published.date()
+    if deadline < published_day:
+        deadline = _parse_date_parts(deadline.year + 1, deadline.month, deadline.day)
+        if deadline is None:
+            return None
+    return deadline.strftime("%Y-%m-%d")
+
+
+def _parse_notice_deadline_from_body(content: object, published_date: str | None) -> str | None:
+    if not isinstance(content, str) or not content.strip():
+        return None
+
+    published = pd.to_datetime(published_date, errors="coerce") if published_date else pd.NaT
+    published_year = None if pd.isna(published) else int(published.year)
+
+    keyword_match = _BODY_PERIOD_KEYWORD_PATTERN.search(content)
+    if not keyword_match:
+        return None
+
+    # 기간 라벨 근처만 본다. 너무 넓게 잡으면 본문 내 다른 날짜를 마감일로 오인할 수 있다.
+    window = content[keyword_match.end() : keyword_match.end() + 180]
+
+    full_match = _BODY_FULL_DATE_END_PATTERN.search(window)
+    if full_match:
+        deadline = _parse_date_parts(
+            int(full_match.group("year")),
+            int(full_match.group("month")),
+            int(full_match.group("day")),
+        )
+        return None if deadline is None else deadline.strftime("%Y-%m-%d")
+
+    month_day_match = _BODY_MONTH_DAY_END_PATTERN.search(window)
+    if month_day_match and published_year is not None:
+        deadline = _parse_date_parts(
+            published_year,
+            int(month_day_match.group("month")),
+            int(month_day_match.group("day")),
+        )
+        if deadline is None:
+            return None
+        published_day = published.date()
+        if deadline < published_day:
+            deadline = _parse_date_parts(deadline.year + 1, deadline.month, deadline.day)
+            if deadline is None:
+                return None
+        return deadline.strftime("%Y-%m-%d")
+
+    return None
+
+
+def _extract_notice_apply_deadline(title: object, content: object, published_date: str | None) -> str | None:
+    return (
+        _parse_notice_deadline_from_title(title, published_date)
+        or _parse_notice_deadline_from_body(content, published_date)
+    )
+
+
 # --- Notices ---
 
 def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
@@ -209,6 +307,11 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
         
         topic_type = row.get(column["topic"], "")
         published_date = row.get("clean_date", "")
+        apply_deadline = _extract_notice_apply_deadline(
+            row.get(column["title"], ""),
+            text_content,
+            published_date,
+        )
 
         prefix_parts = []
         if topic_type:
@@ -243,6 +346,7 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 "topics": row.get(column["topic"], ""),
                 "category": row.get("카테고리", ""),
                 "published_at": published_date or "",
+                "apply_deadline": apply_deadline,
                 "url": row.get(column["url"], ""),
                 "attachments": attachments_str,
                 "source": "notices",
@@ -334,6 +438,7 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
     chunks_df = build_notice_chunks(raw_df)
     _save_chunks_to_sqlite(chunks_df, "notices")
     
+    reset_collection(DATASET_ARTIFACTS["notices"].collection)
     return _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, chunks_df)
 
 
@@ -981,6 +1086,9 @@ def ingest_meals() -> Tuple[pd.DataFrame, object, object]:
 
     df = pd.read_csv(path).fillna("").astype(str)
     chunks_df = build_meal_chunks(df)
+    if chunks_df.empty:
+        print("⚠️ Warning: No meal chunks generated; preserving existing meals index")
+        return chunks_df, None, None
     # 학식은 휘발성 일일 데이터라 SQLite(reindex_from_db 대상)에는 저장하지 않고
     # CSV → Chroma/TF-IDF 만 갱신한다(스키마 변경 불필요).
     reset_collection(DATASET_ARTIFACTS["meals"].collection)
@@ -1055,6 +1163,7 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
             # Combine both data sources
             all_notices_data = notice_data + custom_knowledge_data
 
+            reset_collection(DATASET_ARTIFACTS["notices"].collection)
             if all_notices_data:
                 df = pd.DataFrame(all_notices_data)
                 results["notices"] = _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, df)

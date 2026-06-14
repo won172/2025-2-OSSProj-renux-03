@@ -35,6 +35,7 @@ public record RagSource(
     [property: JsonPropertyName("final_score")] double? FinalScore
 );
 public record RagCallResult(string Answer, string RequestId, bool Succeeded, List<ChatSourceDto> Sources, bool FallbackTriggered, string? FallbackReason);
+public record FeedbackDto(string RequestId, int Rating, string? Reason, string? Comment);
 
 static public class ChatRequestApis
 {
@@ -205,6 +206,7 @@ static public class ChatRequestApis
                     IsAsk = false,
                     CreatedTime = DateTime.UtcNow,
                     Sources = ragResult.Sources,
+                    RequestId = ragResult.RequestId,
                     IsFallback = ragResult.FallbackTriggered,
                     FallbackReason = ragResult.FallbackReason
                 };
@@ -247,7 +249,7 @@ static public class ChatRequestApis
             await db.ChatMessages.AddAsync(apply);
             await db.SaveChangesAsync();
 
-            ChatMessageDto applyDto = ToDto(apply);
+            ChatMessageDto applyDto = ToDto(apply, authRagResult.RequestId);
             return Results.Ok(applyDto);
         });
 
@@ -428,6 +430,50 @@ static public class ChatRequestApis
             }
         });
 
+        app.MapPost("/feedback", async (FeedbackDto feedback, HttpContext context, IConfiguration configuration, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
+        {
+            if (string.IsNullOrWhiteSpace(feedback.RequestId))
+            {
+                return Results.BadRequest(new { message = "requestId가 필요합니다." });
+            }
+
+            var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
+            var client = httpClientFactory.CreateClient();
+            bool isAuthenticated = context.Request.Cookies.ContainsKey("renux-server-token");
+            var payload = new
+            {
+                requestId = feedback.RequestId,
+                rating = feedback.Rating,
+                reason = feedback.Reason,
+                comment = feedback.Comment,
+                sessionId = (string?)null,
+                major = isAuthenticated ? ResolveMajor(context) : null
+            };
+
+            try
+            {
+                using var response = await client.PostAsJsonAsync($"{ragUrl}/feedback", payload, JsonOptions, context.RequestAborted);
+                if (response.IsSuccessStatusCode)
+                {
+                    return Results.Ok(new { ok = true });
+                }
+
+                var body = await response.Content.ReadAsStringAsync(context.RequestAborted);
+                logger.LogWarning(
+                    "RAG feedback request failed. RequestId={RequestId}, StatusCode={StatusCode}, Body={Body}",
+                    feedback.RequestId,
+                    (int)response.StatusCode,
+                    body
+                );
+                return Results.StatusCode(StatusCodes.Status502BadGateway);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "RAG feedback request failed. RequestId={RequestId}", feedback.RequestId);
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        });
+
         app.MapPost("/load", async (ServerDbContext db, HttpContext context, LoadChat load) =>
         {
             // For guests, return empty list (no persistence)
@@ -498,10 +544,10 @@ static public class ChatRequestApis
                 .Take(20)
                 .ToListAsync();
 
-        return messages.Select(ToDto).ToList();
+        return messages.Select(message => ToDto(message)).ToList();
     }
 
-    static private ChatMessageDto ToDto(ChatMessage message)
+    static private ChatMessageDto ToDto(ChatMessage message, string? requestId = null)
     {
         return new ChatMessageDto
         {
@@ -511,6 +557,7 @@ static public class ChatRequestApis
             Content = message.Content,
             CreatedTime = message.CreatedTime,
             Sources = DeserializeSources(message.SourcesJson),
+            RequestId = requestId,
             IsFallback = message.IsFallback,
             FallbackReason = message.FallbackReason
         };
