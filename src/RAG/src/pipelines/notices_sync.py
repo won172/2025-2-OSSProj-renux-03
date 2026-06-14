@@ -25,12 +25,12 @@ from src.database import (
 from src.models.embedding import encode_texts
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
+    _persist_chunks,
     build_notice_chunks,
     build_notice_index_frame_from_db,
-    persist_dataset_artifacts_only,
 )
 from src.utils.preprocess import standardize_date
-from src.vectorstore.chroma_client import delete_items, upsert_items
+from src.vectorstore.chroma_client import delete_items, reset_collection, upsert_items
 
 NOTICE_SCHEMA_VERSION = 1
 NOTICE_COLLECTION = DATASET_ARTIFACTS["notices"].collection
@@ -566,10 +566,12 @@ def apply_notice_normalized_documents(
 
 
 def refresh_notice_artifacts() -> None:
+    """DB의 notice chunks를 기준으로 parquet, TF-IDF, Chroma를 함께 재생성합니다."""
     frame = build_notice_index_frame_from_db()
+    reset_collection(NOTICE_COLLECTION)
     if frame.empty:
         return
-    persist_dataset_artifacts_only("notices", frame)
+    _persist_chunks("notices", NOTICE_COLLECTION, frame)
 
 
 def sync_notices(

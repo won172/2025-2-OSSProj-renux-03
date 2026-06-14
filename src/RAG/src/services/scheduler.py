@@ -12,12 +12,11 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from src.config import (
     DATA_SOURCES,
-    RAG_MEALS_REFRESH_HOURS,
-    RAG_NOTICES_REFRESH_HOURS,
     RAG_NOTICES_REFRESH_MAX_PAGES,
     RAG_SCHEDULER_ENABLED,
 )
@@ -79,31 +78,35 @@ def start_scheduler():
 
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
-        from apscheduler.triggers.interval import IntervalTrigger
+        from apscheduler.triggers.cron import CronTrigger
     except ImportError:
         logger.warning("[scheduler] APScheduler 미설치 — 자동 갱신을 건너뜁니다(requirements.txt 확인).")
         return None
 
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-    job_defaults = dict(max_instances=1, coalesce=True, misfire_grace_time=3600)
+    # 부팅 시 따라잡기(catch-up) 실행을 막기 위해 misfire 유예를 짧게 둔다.
+    # → 컨테이너를 켜도 '정해진 시각'이 아니면 수집하지 않는다.
+    job_defaults = dict(max_instances=1, coalesce=True, misfire_grace_time=120)
 
-    # 시작 직후 한 번 실행(콜드 배포 시 데이터 신선화) + 이후 주기 실행.
-    now = datetime.now(KST)
+    # 고정 시각(cron)에만 실행 — docker up 때마다 수집하지 않는다.
+    # 기본: 공지 매일 0/6/12/18시 정각(4회), 학식 매일 04:30. env(cron 식)로 재정의 가능.
+    notices_cron = os.getenv("RAG_NOTICES_REFRESH_CRON", "0 0,6,12,18 * * *")
+    meals_cron = os.getenv("RAG_MEALS_REFRESH_CRON", "30 4 * * *")
     scheduler.add_job(
         refresh_notices_job,
-        IntervalTrigger(hours=RAG_NOTICES_REFRESH_HOURS, start_date=now + timedelta(seconds=60)),
+        CronTrigger.from_crontab(notices_cron, timezone="Asia/Seoul"),
         id="refresh_notices", **job_defaults,
     )
     scheduler.add_job(
         refresh_meals_job,
-        IntervalTrigger(hours=RAG_MEALS_REFRESH_HOURS, start_date=now + timedelta(seconds=120)),
+        CronTrigger.from_crontab(meals_cron, timezone="Asia/Seoul"),
         id="refresh_meals", **job_defaults,
     )
     scheduler.start()
     _scheduler = scheduler
     logger.info(
-        "[scheduler] 시작됨 — 공지 %sh 주기, 학식 %sh 주기",
-        RAG_NOTICES_REFRESH_HOURS, RAG_MEALS_REFRESH_HOURS,
+        "[scheduler] 시작됨 — 공지 cron='%s', 학식 cron='%s' (부팅 시 즉시 실행 안 함)",
+        notices_cron, meals_cron,
     )
     return scheduler
 

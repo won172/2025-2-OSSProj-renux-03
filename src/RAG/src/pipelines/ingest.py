@@ -438,6 +438,7 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
     chunks_df = build_notice_chunks(raw_df)
     _save_chunks_to_sqlite(chunks_df, "notices")
     
+    reset_collection(DATASET_ARTIFACTS["notices"].collection)
     return _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, chunks_df)
 
 
@@ -1085,6 +1086,9 @@ def ingest_meals() -> Tuple[pd.DataFrame, object, object]:
 
     df = pd.read_csv(path).fillna("").astype(str)
     chunks_df = build_meal_chunks(df)
+    if chunks_df.empty:
+        print("⚠️ Warning: No meal chunks generated; preserving existing meals index")
+        return chunks_df, None, None
     # 학식은 휘발성 일일 데이터라 SQLite(reindex_from_db 대상)에는 저장하지 않고
     # CSV → Chroma/TF-IDF 만 갱신한다(스키마 변경 불필요).
     reset_collection(DATASET_ARTIFACTS["meals"].collection)
@@ -1159,6 +1163,7 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
             # Combine both data sources
             all_notices_data = notice_data + custom_knowledge_data
 
+            reset_collection(DATASET_ARTIFACTS["notices"].collection)
             if all_notices_data:
                 df = pd.DataFrame(all_notices_data)
                 results["notices"] = _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, df)

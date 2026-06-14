@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from starlette.concurrency import run_in_threadpool
 from sklearn import __version__ as sklearn_version
+from sklearn.metrics.pairwise import cosine_similarity
 
 from src.config import (
     DEFAULT_TOP_K,
@@ -36,6 +37,8 @@ from src.config import (
     QUERY_ANALYSIS_MAX_QUERIES,
     RAG_DECOMPOSE_ENABLED,
     RAG_MAX_SUBQUERIES,
+    RAG_SUGGEST_FOLLOWUPS,
+    RAG_SUGGEST_FOLLOWUPS_COUNT,
     RECENCY_DECAY_DAYS_BY_DATASET,
     PARENT_CONTEXT_ENABLED,
     RECENCY_WEIGHT,
@@ -54,6 +57,7 @@ from src.database import (
     Schedule,
     RagQueryLog,
     RagRetrievalLog,
+    RagFeedback,
     SourceDocument,
     init_db,
 )
@@ -71,6 +75,7 @@ from src.search.hybrid import read_tfidf_metadata
 from src.services.answer import format_citations
 from src.services.langchain_chat import (
     append_manual_history,
+    generate_followup_questions,
     generate_langchain_answer,
     generate_langchain_answer_stream,
     get_recent_history_text,
@@ -271,6 +276,13 @@ NOTICE_BOARD_ALIASES = {
     "안전공지": "안전공지",
     "안전 공지": "안전공지",
 }
+DEADLINE_NOTICE_HIT_COLUMNS = [
+    "chunk_id", "title", "chunk_text", "hybrid_score", "vector_score", "sparse_score",
+    "topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id",
+    "major", "entry_year", "source_type", "attachments",
+    "doc_id", "position",
+    "is_closed", "restaurant", "meal_date",
+]
 SCHOOL_INFO_TERMS = (
     "동국",
     "학교",
@@ -324,12 +336,26 @@ class SourceChunk(BaseModel):
 
 
 class AskResponse(BaseModel):
+    request_id: str
     answer: str
     citations: str
     route: List[str]
     sources: List[SourceChunk]
+    suggested_questions: list[str] = Field(default_factory=list)
     fallback_triggered: bool = False
     fallback_reason: str | None = None
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str = Field(..., alias="requestId")
+    rating: int
+    reason: str | None = None
+    comment: str | None = None
+    session_id: str | None = Field(None, alias="sessionId")
+    major: str | None = None
+
+    class Config:
+        populate_by_name = True
 
 
 class AskRequest(BaseModel):
@@ -741,6 +767,139 @@ def _apply_date_filter(hits: pd.DataFrame, dataset: str, date_filter: QueryDateF
     return filtered, was_eliminated
 
 
+def _matches_where_filter(row: pd.Series, where_filter: Dict | None) -> bool:
+    if not where_filter:
+        return True
+
+    for key, condition in where_filter.items():
+        if key == "$and":
+            if not all(_matches_where_filter(row, sub) for sub in condition):
+                return False
+            continue
+        if key == "$or":
+            if not any(_matches_where_filter(row, sub) for sub in condition):
+                return False
+            continue
+
+        value = row.get(key) if key in row.index else None
+        if isinstance(condition, dict):
+            for op, expected in condition.items():
+                if op == "$eq" and str(value) != str(expected):
+                    return False
+                if op == "$ne" and str(value) == str(expected):
+                    return False
+                if op == "$in" and str(value) not in {str(item) for item in expected}:
+                    return False
+                if op not in {"$eq", "$ne", "$in"}:
+                    return False
+        elif str(value) != str(condition):
+            return False
+    return True
+
+
+def _extract_chunk_title(text: object) -> str:
+    if not isinstance(text, str) or not text.strip():
+        return ""
+    if text.startswith("[") and "]" in text:
+        return text[1:text.index("]")].strip()
+    return text.split("\n", 1)[0].strip()[:120]
+
+
+def _empty_deadline_notice_hits() -> pd.DataFrame:
+    return pd.DataFrame(columns=DEADLINE_NOTICE_HIT_COLUMNS)
+
+
+def _deadline_filter_rank_notices(
+    *,
+    chunks_df: pd.DataFrame,
+    vectorizer: object,
+    matrix: object,
+    tfidf_chunk_ids: list | None,
+    query: str,
+    date_filter: QueryDateFilter,
+    top_k: int,
+    where_filter: Dict | None = None,
+) -> pd.DataFrame:
+    """공지 마감일 질의는 먼저 deadline 범위로 recall을 확보한 뒤 TF-IDF로 정렬한다."""
+    if chunks_df.empty or "apply_deadline" not in chunks_df.columns or "chunk_id" not in chunks_df.columns:
+        return _empty_deadline_notice_hits()
+
+    deadlines = pd.to_datetime(chunks_df["apply_deadline"], errors="coerce")
+    start = pd.Timestamp(date_filter.start)
+    end = pd.Timestamp(date_filter.end)
+    mask = deadlines.notna() & (deadlines >= start) & (deadlines <= end)
+
+    eligible = chunks_df.loc[mask].copy()
+    if eligible.empty:
+        return _empty_deadline_notice_hits()
+
+    eligible["_deadline_ts"] = deadlines.loc[eligible.index]
+    if where_filter:
+        eligible = eligible[eligible.apply(lambda row: _matches_where_filter(row, where_filter), axis=1)].copy()
+        if eligible.empty:
+            return _empty_deadline_notice_hits()
+
+    eligible["chunk_id"] = eligible["chunk_id"].astype(str)
+    eligible["sparse_score"] = 0.0
+
+    row_ids: list[str] | None = None
+    matrix_rows = getattr(matrix, "shape", (0,))[0]
+    if tfidf_chunk_ids is not None and len(tfidf_chunk_ids) == matrix_rows:
+        row_ids = [str(chunk_id) for chunk_id in tfidf_chunk_ids]
+    elif matrix_rows == len(chunks_df):
+        row_ids = chunks_df["chunk_id"].astype(str).tolist()
+
+    if row_ids is not None and matrix_rows:
+        id_to_matrix_row: Dict[str, int] = {}
+        for row_idx, chunk_id in enumerate(row_ids):
+            id_to_matrix_row.setdefault(str(chunk_id), row_idx)
+
+        matrix_positions: list[int] = []
+        scored_ids: list[str] = []
+        for chunk_id in eligible["chunk_id"].tolist():
+            matrix_row = id_to_matrix_row.get(chunk_id)
+            if matrix_row is None:
+                continue
+            matrix_positions.append(matrix_row)
+            scored_ids.append(chunk_id)
+
+        if matrix_positions:
+            query_vector = vectorizer.transform([query])
+            subset_matrix = matrix[matrix_positions]
+            sparse_scores = cosine_similarity(query_vector, subset_matrix).ravel()
+            sparse_by_id = {chunk_id: float(score) for chunk_id, score in zip(scored_ids, sparse_scores)}
+            eligible["sparse_score"] = eligible["chunk_id"].map(sparse_by_id).fillna(0.0)
+
+    eligible["vector_score"] = 0.0
+    if end > start:
+        span_seconds = max((end - start).total_seconds(), 1.0)
+        deadline_position = (eligible["_deadline_ts"] - start).dt.total_seconds().clip(lower=0.0)
+        eligible["_deadline_score"] = 1.0 - (deadline_position / span_seconds).clip(upper=1.0)
+    else:
+        eligible["_deadline_score"] = 1.0
+
+    rank_score = (0.85 * eligible["sparse_score"]) + (0.15 * eligible["_deadline_score"])
+    eligible["hybrid_score"] = (MIN_RETRIEVAL_SCORE + rank_score).clip(upper=1.0)
+    eligible.sort_values(
+        by=["hybrid_score", "sparse_score", "_deadline_ts"],
+        ascending=[False, False, True],
+        inplace=True,
+    )
+
+    if len(eligible) > 50:
+        eligible = eligible.head(max(top_k, 50)).copy()
+
+    eligible["title"] = eligible["chunk_text"].apply(_extract_chunk_title) if "chunk_text" in eligible.columns else ""
+    for column in ("topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id"):
+        if column not in eligible.columns:
+            eligible[column] = ""
+        else:
+            eligible[column] = eligible[column].fillna("")
+
+    existing = [column for column in DEADLINE_NOTICE_HIT_COLUMNS if column in eligible.columns]
+    return eligible[existing].reset_index(drop=True)
+
+
 def _expand_chunk_with_neighbors(row: pd.Series) -> str:
     """검색된 청크에 같은 문서의 앞뒤 이웃 청크를 결합해 반환합니다 (parent-document 확장).
 
@@ -846,20 +1005,35 @@ async def _retrieve_frames(
         dataset_top_k = DEFAULT_TOP_K * 2
         if dataset == "meals":
             dataset_top_k = max(dataset_top_k, 40)
-        search_func = functools.partial(
-            hybrid_search_with_meta,
-            collection_name=artifacts.collection,
-            chunks_df=chunks_df,
-            tfidf_vectorizer=vectorizer,
-            tfidf_matrix=matrix,
-            query=query,
-            top_k=dataset_top_k,
-            alpha=HYBRID_ALPHA,
-            where_filter=final_filter,
-            tfidf_chunk_ids=tfidf_chunk_ids,
-        )
-        hits = await run_in_threadpool(search_func)
-        hits, eliminated = _apply_date_filter(hits, dataset, date_filter)
+        if dataset == "notices" and date_filter is not None and getattr(date_filter, "kind", "published") == "deadline":
+            search_func = functools.partial(
+                _deadline_filter_rank_notices,
+                chunks_df=chunks_df,
+                vectorizer=vectorizer,
+                matrix=matrix,
+                tfidf_chunk_ids=tfidf_chunk_ids,
+                query=query,
+                date_filter=date_filter,
+                top_k=dataset_top_k,
+                where_filter=final_filter,
+            )
+            hits = await run_in_threadpool(search_func)
+            eliminated = False
+        else:
+            search_func = functools.partial(
+                hybrid_search_with_meta,
+                collection_name=artifacts.collection,
+                chunks_df=chunks_df,
+                tfidf_vectorizer=vectorizer,
+                tfidf_matrix=matrix,
+                query=query,
+                top_k=dataset_top_k,
+                alpha=HYBRID_ALPHA,
+                where_filter=final_filter,
+                tfidf_chunk_ids=tfidf_chunk_ids,
+            )
+            hits = await run_in_threadpool(search_func)
+            hits, eliminated = _apply_date_filter(hits, dataset, date_filter)
         date_filter_eliminated_any = date_filter_eliminated_any or eliminated
 
         _log_event(
@@ -1170,6 +1344,27 @@ def _save_rag_evaluation_log(
     except Exception:
         session.rollback()
         _log_event(logging.ERROR, "rag_evaluation_log_failed", exc_info=True, request_id=request_id)
+    finally:
+        session.close()
+
+
+def _save_feedback(feedback: FeedbackRequest) -> None:
+    session = SessionLocal()
+    try:
+        session.add(
+            RagFeedback(
+                request_id=feedback.request_id,
+                session_id=feedback.session_id,
+                rating=feedback.rating,
+                reason=feedback.reason,
+                comment=None if feedback.comment is None else feedback.comment[:2000],
+                major=feedback.major,
+            )
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
 
@@ -1783,6 +1978,34 @@ async def rag_admin_status():
             "latest_query_at": None if latest_query is None else latest_query.created_at.isoformat(),
             "fallback_reasons": fallback_reason_counts,
         }
+        feedback = {
+            "total": 0,
+            "up": 0,
+            "down": 0,
+            "satisfaction": None,
+            "down_reasons": {},
+        }
+        try:
+            up_count = session.query(RagFeedback).filter(RagFeedback.rating == 1).count()
+            down_count = session.query(RagFeedback).filter(RagFeedback.rating == -1).count()
+            vote_count = up_count + down_count
+            feedback = {
+                "total": session.query(RagFeedback).count(),
+                "up": up_count,
+                "down": down_count,
+                "satisfaction": None if vote_count == 0 else up_count / vote_count,
+                "down_reasons": {
+                    (reason or "unknown"): count
+                    for reason, count in (
+                        session.query(RagFeedback.reason, func.count(RagFeedback.id))
+                        .filter(RagFeedback.rating == -1)
+                        .group_by(RagFeedback.reason)
+                        .all()
+                    )
+                },
+            }
+        except Exception:
+            _log_event(logging.WARNING, "rag_feedback_status_failed", exc_info=True)
         notices_ingestion = _build_notices_ingestion_status(session)
 
         return {
@@ -1791,6 +2014,7 @@ async def rag_admin_status():
             "datasets": datasets,
             "pending_items": pending_items,
             "rag_logs": rag_logs,
+            "feedback": feedback,
             "notices_ingestion": notices_ingestion,
         }
     except Exception as exc:
@@ -1803,6 +2027,13 @@ async def rag_admin_status():
                 "datasets": [],
                 "pending_items": {"pending": 0, "approved": 0, "rejected": 0},
                 "rag_logs": {"total_queries": 0, "fallback_count": 0, "latest_query_at": None},
+                "feedback": {
+                    "total": 0,
+                    "up": 0,
+                    "down": 0,
+                    "satisfaction": None,
+                    "down_reasons": {},
+                },
                 "notices_ingestion": {
                     "last_collection_at": None,
                     "last_successful_ingestion_at": None,
@@ -2095,7 +2326,7 @@ async def ask_stream(req: AskRequest, request: Request):
             context_text = "일반 대화입니다. 학교 자료 검색이 필요한 질문이 아니면 자연스럽고 짧게 답하세요."
             
             # 메타데이터 전송 (소스 없음)
-            yield f"data: {json.dumps({'type': 'metadata', 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
             
             full_answer = []
             async for chunk in generate_langchain_answer_stream(
@@ -2210,7 +2441,7 @@ async def ask_stream(req: AskRequest, request: Request):
                     analysis_meta.result.clarification_reason if analysis_meta.result and analysis_meta.result.needs_clarification else None
                 )
             )
-            yield f"data: {json.dumps({'type': 'metadata', 'sources': [], 'citations': '', 'route': route, 'fallback_triggered': True, 'fallback_reason': fallback_reason}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': route, 'fallback_triggered': True, 'fallback_reason': fallback_reason}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'text', 'content': fallback_answer}, ensure_ascii=False)}\n\n"
             
             await run_in_threadpool(
@@ -2282,7 +2513,7 @@ async def ask_stream(req: AskRequest, request: Request):
         citations = re.sub(r'<[^>]+>', '', citations_raw)
 
         # 메타데이터 먼저 전송
-        yield f"data: {json.dumps({'type': 'metadata', 'sources': sources, 'citations': citations, 'route': route, 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': sources, 'citations': citations, 'route': route, 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
 
         # 답변 스트리밍 시작
         full_answer = []
@@ -2302,6 +2533,22 @@ async def ask_stream(req: AskRequest, request: Request):
 
         # 최종 로깅
         final_answer = "".join(full_answer)
+        if RAG_SUGGEST_FOLLOWUPS:
+            try:
+                suggestions = await generate_followup_questions(
+                    raw_query,
+                    final_answer,
+                    RAG_SUGGEST_FOLLOWUPS_COUNT,
+                )
+                if suggestions:
+                    yield f"data: {json.dumps({'type': 'suggestions', 'questions': suggestions}, ensure_ascii=False)}\n\n"
+            except Exception as exc:  # noqa: BLE001
+                _log_event(
+                    logging.WARNING,
+                    "followup_suggestions_failed",
+                    request_id=request_id,
+                    error=str(exc),
+                )
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id, session_id, raw_query, expanded_query, route, final_answer,
@@ -2396,6 +2643,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             [],
         )
         return AskResponse(
+            request_id=request_id,
             answer=answer,
             citations="",
             route=["unknown"],
@@ -2600,6 +2848,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         )
         await run_in_threadpool(append_manual_history, session_id, raw_query, fallback_answer)
         return AskResponse(
+            request_id=request_id,
             answer=fallback_answer,
             citations="",
             route=route,
@@ -2695,6 +2944,22 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         for _, row in merged.iterrows()
     ]
 
+    suggested_questions: list[str] = []
+    if RAG_SUGGEST_FOLLOWUPS:
+        try:
+            suggested_questions = await generate_followup_questions(
+                raw_query,
+                answer,
+                RAG_SUGGEST_FOLLOWUPS_COUNT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log_event(
+                logging.WARNING,
+                "followup_suggestions_failed",
+                request_id=request_id,
+                error=str(exc),
+            )
+
     await run_in_threadpool(
         _save_rag_evaluation_log,
         request_id,
@@ -2738,13 +3003,29 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     )
 
     return AskResponse(
+        request_id=request_id,
         answer=answer,
         citations=citations,
         route=route,
         sources=sources,
+        suggested_questions=suggested_questions,
         fallback_triggered=False,
         fallback_reason=None,
     )
+
+
+@app.post("/feedback")
+async def submit_feedback(feedback: FeedbackRequest):
+    allowed_reasons = {"inaccurate", "outdated", "no_source", "irrelevant", "other"}
+    if feedback.rating not in (1, -1):
+        raise HTTPException(status_code=400, detail="rating은 1 또는 -1이어야 합니다.")
+    if feedback.reason is not None and feedback.reason not in allowed_reasons:
+        raise HTTPException(status_code=400, detail="지원하지 않는 피드백 사유입니다.")
+
+    feedback.comment = None if feedback.comment is None else feedback.comment[:2000]
+    await run_in_threadpool(_save_feedback, feedback)
+    _log_event(logging.INFO, "feedback_received", request_id=feedback.request_id, rating=feedback.rating)
+    return {"ok": True}
 
 
 @app.post("/admin/reindex/{target}")

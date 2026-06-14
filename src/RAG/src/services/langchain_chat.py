@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import time
 from functools import lru_cache
 
@@ -239,6 +240,76 @@ async def generate_langchain_answer(question: str, context: str, session_id: str
     return answer
 
 
+async def generate_followup_questions(question: str, answer: str, count: int = 3) -> list[str]:
+    """답변 이후 이어서 물어볼 만한 후속 질문을 생성합니다. 실패해도 호출자를 깨지 않습니다."""
+    try:
+        messages: list[BaseMessage] = [
+            SystemMessage(
+                content=(
+                    "당신은 동국대학교 학생 도우미입니다. "
+                    "사용자 질문과 답변을 바탕으로 학생이 자연스럽게 이어서 물어볼 만한 "
+                    "후속 질문을 제안하세요."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    "[사용자 질문]\n"
+                    f"{question}\n\n"
+                    "[어시스턴트 답변]\n"
+                    f"{answer}\n\n"
+                    f"정확히 {count}개의 간결하고 서로 다른 한국어 후속 질문을 제안하세요. "
+                    '반드시 문자열만 담긴 STRICT JSON 배열만 출력하세요. 예: ["...", "..."]'
+                )
+            ),
+        ]
+
+        primary = _primary_provider()
+        try:
+            response = await _invoke_with_provider(primary, messages)
+        except Exception as exc:
+            fallback = _fallback_provider(primary)
+            if fallback is None:
+                logger.warning("Follow-up question generation failed with provider '%s': %s", primary, exc)
+                return []
+            logger.warning(
+                "Follow-up provider '%s' failed (%s); falling back to '%s'.",
+                primary,
+                exc,
+                fallback,
+            )
+            response = await _invoke_with_provider(fallback, messages)
+
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines and lines[0].strip().startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+
+        parsed = json.loads(cleaned)
+        if not isinstance(parsed, list):
+            logger.debug("Follow-up response was not a JSON array: %s", cleaned)
+            return []
+
+        suggestions: list[str] = []
+        original = question.strip()
+        for item in parsed:
+            if not isinstance(item, str):
+                continue
+            text = item.strip()
+            if not text or text == original or text in suggestions:
+                continue
+            suggestions.append(text)
+            if len(suggestions) >= count:
+                break
+        return suggestions
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to generate follow-up questions: %s", exc)
+        return []
+
+
 async def generate_langchain_answer_stream(question: str, context: str, session_id: str | None = None, current_date: str = ""):
     """선택된 프로바이더로 답변을 스트리밍 생성합니다.
 
@@ -328,6 +399,7 @@ def append_manual_history(session_id: str | None, question: str, answer: str) ->
     history.add_ai_message(answer)
 
 __all__ = [
+    "generate_followup_questions",
     "generate_langchain_answer",
     "generate_langchain_answer_stream",
     "append_manual_history",

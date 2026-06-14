@@ -126,6 +126,9 @@ QUERY_ANALYSIS_MAX_QUERIES = int(os.getenv("QUERY_ANALYSIS_MAX_QUERIES", "1"))
 RAG_DECOMPOSE_ENABLED = os.getenv("RAG_DECOMPOSE_ENABLED", "1") == "1"
 # 복합 질문에서 사용할 분해 서브쿼리 최대 개수(라우트 데이터셋 수와 곱해져 검색 횟수가 되므로 과도하지 않게).
 RAG_MAX_SUBQUERIES = int(os.getenv("RAG_MAX_SUBQUERIES", "4"))
+# 답변 이후 사용자가 이어서 물어볼 만한 추천 후속질문 생성.
+RAG_SUGGEST_FOLLOWUPS = os.getenv("RAG_SUGGEST_FOLLOWUPS", "1") == "1"
+RAG_SUGGEST_FOLLOWUPS_COUNT = int(os.getenv("RAG_SUGGEST_FOLLOWUPS_COUNT", "3"))
 
 # 데이터 자동 갱신 스케줄러 (rag-service 프로세스 내 APScheduler).
 # 이미 로드된 임베딩 모델을 재사용하고 Chroma 클라이언트를 단일 프로세스가 소유하므로
@@ -215,6 +218,8 @@ __all__ = [
     "QUERY_ANALYSIS_MAX_QUERIES",
     "RAG_DECOMPOSE_ENABLED",
     "RAG_MAX_SUBQUERIES",
+    "RAG_SUGGEST_FOLLOWUPS",
+    "RAG_SUGGEST_FOLLOWUPS_COUNT",
     "RAG_SCHEDULER_ENABLED",
     "RAG_NOTICES_REFRESH_HOURS",
     "RAG_MEALS_REFRESH_HOURS",

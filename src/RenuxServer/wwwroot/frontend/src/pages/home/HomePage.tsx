@@ -7,6 +7,9 @@ import { apiFetch } from '../../api/client'
 import { useChatStream } from '../../hooks/useChatStream'
 import donggukLogo from '../../assets/images/dongguk-logo.png'
 import dongddokiLogo from '../../assets/images/dongddoki-logo.png'
+import CopyButton from '../../components/chat/CopyButton'
+import MessageFeedback from '../../components/chat/MessageFeedback'
+import SuggestedQuestions from '../../components/chat/SuggestedQuestions'
 import SourceCards, { type ChatSource } from '../../components/chat/SourceCards'
 import type { Department } from '../../types/organization'
 import type { ActiveChat } from '../../types/chat'
@@ -19,8 +22,10 @@ type ChatPageMessage = {
   content: string
   createdTime: string | number
   sources?: ChatSource[] | null
+  requestId?: string
   isFallback?: boolean
   fallbackReason?: string | null
+  suggestedQuestions?: string[]
 }
 
 const mapRoleNameToUserRole = (roleName?: string | null): UserRole => {
@@ -346,6 +351,103 @@ const HomePage = () => {
     loadMessages(selectedChatId)
   }, [selectedChatId])
 
+  const sendChatMessage = async (text: string, chatId: string | number) => {
+    const resolvedChatId = String(chatId)
+    const newMsg: ChatPageMessage = {
+      id: typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+      chatId: resolvedChatId,
+      isAsk: true,
+      content: text,
+      createdTime: new Date().toISOString(),
+    }
+
+    // 스트리밍 토큰을 채워 넣을 빈 봇 말풍선을 미리 추가(내용이 비면 타이핑 인디케이터로 렌더)
+    const botMessageId = typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `bot-${Date.now()}`
+    const botPlaceholder: ChatPageMessage = {
+      id: botMessageId,
+      chatId: resolvedChatId,
+      isAsk: false,
+      content: '',
+      createdTime: new Date().toISOString(),
+      sources: [],
+    }
+
+    // 내 메시지 + 빈 봇 말풍선을 함께 추가
+    setChatMessages((prev) => [...prev, newMsg, botPlaceholder])
+    setChatSending(true)
+    setChatError(null)
+
+    setTimeout(scrollToBottom, 0)
+
+    try {
+      const { receivedAny } = await streamMessage(
+        { id: newMsg.id, chatId: resolvedChatId, content: text, createdTime: newMsg.createdTime },
+        {
+          onText: (accumulated) => {
+            setChatMessages((prev) =>
+              prev.map((msg) => (msg.id === botMessageId ? { ...msg, content: accumulated } : msg)),
+            )
+            setTimeout(scrollToBottom, 0)
+          },
+          onMetadata: (meta) =>
+            setChatMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId
+                  ? {
+                      ...msg,
+                      sources: meta.sources,
+                      requestId: meta.requestId,
+                      isFallback: meta.isFallback,
+                      fallbackReason: meta.fallbackReason,
+                    }
+                  : msg,
+              ),
+            ),
+          onSuggestions: (questions) =>
+            setChatMessages((prev) =>
+              prev.map((msg) => (msg.id === botMessageId ? { ...msg, suggestedQuestions: questions } : msg)),
+            ),
+          onRetry: (attempt) => {
+            setChatError(`연결이 끊겨 재시도 중입니다. (${attempt}/2)`)
+            setChatMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId
+                  ? { ...msg, content: '응답 연결을 다시 시도하고 있습니다...', isFallback: true }
+                  : msg,
+              ),
+            )
+            setTimeout(scrollToBottom, 0)
+          },
+        },
+      )
+
+      // 토큰을 하나도 받지 못하면 빈 말풍선 대신 안내 문구로 대체
+      if (!receivedAny) {
+        setChatMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === botMessageId
+              ? { ...msg, content: '응답을 받지 못했습니다. 잠시 후 다시 시도해주세요.', isFallback: true }
+              : msg,
+          ),
+        )
+      }
+      setTimeout(scrollToBottom, 100)
+    } catch (err) {
+      console.error('Failed to send message', err)
+      setChatError('메시지를 전송하지 못했습니다.')
+      setChatMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === botMessageId
+            ? { ...msg, content: '응답 연결이 끊겼습니다. 입력창의 메시지로 다시 시도해주세요.', isFallback: true }
+            : msg,
+        ),
+      )
+      setChatInput(text)
+    } finally {
+      setChatSending(false)
+    }
+  }
+
   const handleChatSubmit = async (event: FormEvent<HTMLFormElement> | KeyboardEvent<HTMLTextAreaElement>) => {
     event.preventDefault()
     
@@ -409,91 +511,8 @@ const HomePage = () => {
       }
     }
 
-    // 여기부터는 currentChatId가 반드시 존재함
-    const newMsg: ChatPageMessage = {
-      id: typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
-      chatId: currentChatId,
-      isAsk: true,
-      content: trimmed,
-      createdTime: new Date().toISOString(),
-    }
-
-    // 스트리밍 토큰을 채워 넣을 빈 봇 말풍선을 미리 추가(내용이 비면 타이핑 인디케이터로 렌더)
-    const botMessageId = typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `bot-${Date.now()}`
-    const botPlaceholder: ChatPageMessage = {
-      id: botMessageId,
-      chatId: currentChatId,
-      isAsk: false,
-      content: '',
-      createdTime: new Date().toISOString(),
-      sources: [],
-    }
-
-    // 내 메시지 + 빈 봇 말풍선을 함께 추가
-    setChatMessages((prev) => [...prev, newMsg, botPlaceholder])
     setChatInput('')
-    setChatSending(true)
-    setChatError(null)
-
-    setTimeout(scrollToBottom, 0)
-
-    try {
-      const { receivedAny } = await streamMessage(
-        { id: newMsg.id, chatId: currentChatId, content: trimmed, createdTime: newMsg.createdTime },
-        {
-          onText: (accumulated) => {
-            setChatMessages((prev) =>
-              prev.map((msg) => (msg.id === botMessageId ? { ...msg, content: accumulated } : msg)),
-            )
-            setTimeout(scrollToBottom, 0)
-          },
-          onMetadata: (meta) =>
-            setChatMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === botMessageId
-                  ? { ...msg, sources: meta.sources, isFallback: meta.isFallback, fallbackReason: meta.fallbackReason }
-                  : msg,
-              ),
-            ),
-          onRetry: (attempt) => {
-            setChatError(`연결이 끊겨 재시도 중입니다. (${attempt}/2)`)
-            setChatMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === botMessageId
-                  ? { ...msg, content: '응답 연결을 다시 시도하고 있습니다...', isFallback: true }
-                  : msg,
-              ),
-            )
-            setTimeout(scrollToBottom, 0)
-          },
-        },
-      )
-
-      // 토큰을 하나도 받지 못하면 빈 말풍선 대신 안내 문구로 대체
-      if (!receivedAny) {
-        setChatMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === botMessageId
-              ? { ...msg, content: '응답을 받지 못했습니다. 잠시 후 다시 시도해주세요.', isFallback: true }
-              : msg,
-          ),
-        )
-      }
-      setTimeout(scrollToBottom, 100)
-    } catch (err) {
-      console.error('Failed to send message', err)
-      setChatError('메시지를 전송하지 못했습니다.')
-      setChatMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === botMessageId
-            ? { ...msg, content: '응답 연결이 끊겼습니다. 입력창의 메시지로 다시 시도해주세요.', isFallback: true }
-            : msg,
-        ),
-      )
-      setChatInput(trimmed)
-    } finally {
-      setChatSending(false)
-    }
+    await sendChatMessage(trimmed, currentChatId)
   }
 
   const isHeroPrimaryDisabled = isNewChatDisabled
@@ -774,6 +793,19 @@ const HomePage = () => {
                                 sources={message.sources}
                                 showScores={showRagScores}
                                 isFallback={message.isFallback}
+                              />
+                            )}
+                            {!message.isAsk && message.content.trim().length > 0 && <CopyButton text={message.content} />}
+                            {!message.isAsk && message.requestId && <MessageFeedback requestId={message.requestId} />}
+                            {!message.isAsk && (
+                              <SuggestedQuestions
+                                questions={message.suggestedQuestions ?? []}
+                                disabled={chatSending}
+                                onSelect={(question) => {
+                                  if (selectedChatId) {
+                                    sendChatMessage(question, selectedChatId)
+                                  }
+                                }}
                               />
                             )}
                             {messageTime && <time className="chat-bubble__time">{messageTime}</time>}
