@@ -719,11 +719,18 @@ def _has_notice_topic_alignment(merged: pd.DataFrame, query: str) -> bool:
 def _apply_date_filter(hits: pd.DataFrame, dataset: str, date_filter: QueryDateFilter | None) -> tuple[pd.DataFrame, bool]:
     if date_filter is None or hits.empty or dataset not in ["notices", "schedule", "rules", "meals"]:
         return hits, False
-    if "published_at" not in hits.columns:
+
+    date_column = "published_at"
+    if dataset == "notices" and getattr(date_filter, "kind", "published") == "deadline":
+        date_column = "apply_deadline"
+
+    if date_column not in hits.columns:
+        if date_column == "apply_deadline":
+            return hits.iloc[:0].copy(), len(hits) > 0
         return hits, False
 
     filtered = hits.copy()
-    filtered["_temp_date"] = pd.to_datetime(filtered["published_at"], errors="coerce")
+    filtered["_temp_date"] = pd.to_datetime(filtered[date_column], errors="coerce")
     mask = (
         (filtered["_temp_date"] >= pd.Timestamp(date_filter.start))
         & (filtered["_temp_date"] <= pd.Timestamp(date_filter.end))
@@ -2149,7 +2156,8 @@ async def ask_stream(req: AskRequest, request: Request):
             date_filter_relaxed = True
             relaxed_filter = QueryDateFilter(
                 start=date_filter.relaxed_start, end=date_filter.relaxed_end,
-                label=f"{date_filter.label}_relaxed", is_relative=date_filter.is_relative
+                label=f"{date_filter.label}_relaxed", is_relative=date_filter.is_relative,
+                kind=getattr(date_filter, "kind", "published"),
             )
             relaxed_frames, _, relaxed_unavailable = await _retrieve_frames_for_queries(
                 route=route, queries=retrieval_queries, final_where_filter=final_where_filter,
@@ -2459,6 +2467,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             end=date_filter.relaxed_end,
             label=f"{date_filter.label}_relaxed",
             is_relative=date_filter.is_relative,
+            kind=getattr(date_filter, "kind", "published"),
         )
         relaxed_frames, _, relaxed_unavailable = await _retrieve_frames_for_queries(
             route=route,
