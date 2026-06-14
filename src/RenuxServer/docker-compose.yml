@@ -71,7 +71,15 @@ services:
             - RAG_SCHEDULER_ENABLED=${RAG_SCHEDULER_ENABLED:-1}
             - RAG_NOTICES_REFRESH_HOURS=${RAG_NOTICES_REFRESH_HOURS:-6}
             - RAG_MEALS_REFRESH_HOURS=${RAG_MEALS_REFRESH_HOURS:-24}
+            - HF_HUB_OFFLINE=1
+            - TRANSFORMERS_OFFLINE=1
         restart: on-failure
+        healthcheck:
+            test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")'"]
+            interval: 15s
+            timeout: 10s
+            retries: 5
+            start_period: 180s
 
     ollama:
         container_name: renux_ollama

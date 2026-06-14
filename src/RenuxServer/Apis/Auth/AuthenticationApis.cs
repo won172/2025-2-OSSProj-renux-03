@@ -53,6 +53,36 @@ static public class AuthenticationApis
         return await next(context);
     }
 
+    private static async ValueTask<object?> EnforceAdminOnlyAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next)
+    {
+        var http = context.HttpContext;
+        if (http.User?.Identity?.IsAuthenticated != true)
+        {
+            return Results.Unauthorized();
+        }
+
+        var sub = http.User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+        if (!Guid.TryParse(sub, out Guid userId))
+        {
+            return Results.Unauthorized();
+        }
+
+        var db = http.RequestServices.GetRequiredService<ServerDbContext>();
+        var roleName = await db.Users
+            .Where(u => u.Id == userId)
+            .Select(u => u.Role!.Rolename)
+            .FirstOrDefaultAsync();
+
+        if (!string.Equals(roleName, "관리자", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Forbid();
+        }
+
+        return await next(context);
+    }
+
     static private CookieOptions BuildAuthCookieOptions(IConfiguration config)
     {
         bool secure = config.GetValue<bool?>("AuthCookie:Secure")
@@ -288,6 +318,198 @@ static public class AuthenticationApis
 
             await db.SaveChangesAsync();
             return Results.Ok(new { message = "학생회 가입 요청이 거절되었습니다." });
+        });
+
+        var userAdmin = app.MapGroup("/admin/users")
+            .RequireAuthorization();
+        userAdmin.AddEndpointFilter(EnforceAdminOnlyAsync);
+
+        userAdmin.MapGet("", async (ServerDbContext db) =>
+        {
+            var users = await db.Users
+                .Include(u => u.Major)
+                .Include(u => u.Role)
+                .OrderBy(u => u.Role == null ? "" : u.Role.Rolename)
+                .ThenBy(u => u.UserId)
+                .Select(u => new AdminUserDto
+                {
+                    Id = u.Id,
+                    UserId = u.UserId,
+                    Username = u.Username,
+                    MajorId = u.MajorId,
+                    MajorName = u.Major == null ? null : u.Major.Majorname,
+                    RoleId = u.RoleId,
+                    RoleName = u.Role == null ? null : u.Role.Rolename,
+                    CreatedTime = u.CreatedTime,
+                    UpdatedTime = u.UpdatedTime,
+                })
+                .ToListAsync();
+
+            return Results.Ok(users);
+        });
+
+        userAdmin.MapGet("/roles", async (ServerDbContext db) =>
+        {
+            var roles = await db.Roles
+                .OrderBy(r => r.Rolename)
+                .Select(r => new AdminRoleDto
+                {
+                    Id = r.Id,
+                    RoleName = r.Rolename,
+                })
+                .ToListAsync();
+
+            return Results.Ok(roles);
+        });
+
+        userAdmin.MapPatch("/{targetUserId:guid}", async (
+            Guid targetUserId,
+            ServerDbContext db,
+            HttpContext context,
+            AdminUserUpdateDto update) =>
+        {
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == targetUserId);
+            if (user == null) return Results.NotFound(new { message = "계정을 찾을 수 없습니다." });
+
+            var hasChange = false;
+
+            if (update.Username != null)
+            {
+                var trimmedName = update.Username.Trim();
+                if (trimmedName.Length < 2 || trimmedName.Length > 10)
+                {
+                    return Results.BadRequest(new { message = "이름은 2자 이상 10자 이하로 입력해주세요." });
+                }
+
+                user.Username = trimmedName;
+                hasChange = true;
+            }
+
+            if (update.MajorId.HasValue)
+            {
+                if (!await db.Majors.AnyAsync(m => m.Id == update.MajorId.Value))
+                {
+                    return Results.BadRequest(new { message = "유효하지 않은 전공입니다." });
+                }
+
+                user.MajorId = update.MajorId.Value;
+                hasChange = true;
+            }
+
+            if (update.RoleId.HasValue)
+            {
+                if (!await db.Roles.AnyAsync(r => r.Id == update.RoleId.Value))
+                {
+                    return Results.BadRequest(new { message = "유효하지 않은 역할입니다." });
+                }
+
+                var adminRoleId = await db.Roles
+                    .Where(r => r.Rolename == "관리자")
+                    .Select(r => (Guid?)r.Id)
+                    .FirstOrDefaultAsync();
+
+                if (!adminRoleId.HasValue)
+                {
+                    return Results.Problem("관리자 역할이 구성되지 않았습니다.", statusCode: 500);
+                }
+
+                var callerSub = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+                Guid.TryParse(callerSub, out Guid callerId);
+                var demotesSelf = callerId == targetUserId && update.RoleId.Value != adminRoleId.Value;
+                var demotesAdmin = user.RoleId == adminRoleId.Value && update.RoleId.Value != adminRoleId.Value;
+
+                if (demotesSelf)
+                {
+                    return Results.Conflict(new { message = "자기 자신의 관리자 권한은 변경할 수 없습니다." });
+                }
+
+                if (demotesAdmin)
+                {
+                    var adminCount = await db.Users.CountAsync(u => u.RoleId == adminRoleId.Value);
+                    if (adminCount <= 1)
+                    {
+                        return Results.Conflict(new { message = "마지막 관리자 계정은 강등할 수 없습니다." });
+                    }
+                }
+
+                user.RoleId = update.RoleId.Value;
+                hasChange = true;
+            }
+
+            if (!hasChange)
+            {
+                return Results.BadRequest(new { message = "변경할 항목이 없습니다." });
+            }
+
+            user.UpdatedTime = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+
+            return Results.Ok(new { message = "계정 정보가 수정되었습니다." });
+        });
+
+        userAdmin.MapPost("/{targetUserId:guid}/reset-password", async (
+            Guid targetUserId,
+            ServerDbContext db,
+            AdminUserPasswordResetDto reset) =>
+        {
+            var password = reset.Password?.Trim();
+            if (string.IsNullOrWhiteSpace(password) || password.Length < 10 || password.Length > 30)
+            {
+                return Results.BadRequest(new { message = "비밀번호는 10자 이상 30자 이하로 입력해주세요." });
+            }
+
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == targetUserId);
+            if (user == null) return Results.NotFound(new { message = "계정을 찾을 수 없습니다." });
+
+            user.HashPassword = BCrypt.Net.BCrypt.HashPassword(password);
+            user.UpdatedTime = DateTime.UtcNow;
+
+            await db.SaveChangesAsync();
+            return Results.Ok(new { message = "비밀번호가 재설정되었습니다." });
+        });
+
+        userAdmin.MapDelete("/{targetUserId:guid}", async (
+            Guid targetUserId,
+            ServerDbContext db,
+            HttpContext context) =>
+        {
+            var callerSub = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            if (!Guid.TryParse(callerSub, out Guid callerId))
+            {
+                return Results.Unauthorized();
+            }
+
+            if (callerId == targetUserId)
+            {
+                return Results.BadRequest(new { message = "자기 자신의 계정은 삭제할 수 없습니다." });
+            }
+
+            var user = await db.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Id == targetUserId);
+            if (user == null) return Results.NotFound(new { message = "계정을 찾을 수 없습니다." });
+
+            var roleName = user.Role?.Rolename;
+            if (!string.IsNullOrWhiteSpace(roleName) && UniversityLevelRoles.Contains(roleName))
+            {
+                return Results.BadRequest(new { message = "관리자 권한 계정은 삭제할 수 없습니다." });
+            }
+
+            var chatIds = await db.Chats
+                .Where(chat => chat.UserId == targetUserId)
+                .Select(chat => chat.Id)
+                .ToListAsync();
+
+            if (chatIds.Count > 0)
+            {
+                db.ChatMessages.RemoveRange(db.ChatMessages.Where(message => chatIds.Contains(message.ChatId)));
+                db.Chats.RemoveRange(db.Chats.Where(chat => chatIds.Contains(chat.Id)));
+            }
+
+            db.Users.Remove(user);
+            await db.SaveChangesAsync();
+
+            return Results.NoContent();
         });
 
         // 로그인

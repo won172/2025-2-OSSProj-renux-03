@@ -9,7 +9,7 @@ public class SignupUserValidator : AbstractValidator<SignupUserDto>
     {
         RuleFor(p => p.UserId)
             .NotNull().WithMessage("필수 입력")
-            .Length(8, 30).WithMessage("8글자 이상 30글자 이하");
+            .Length(4, 30).WithMessage("4글자 이상 30글자 이하");
         RuleFor(p => p.Password)
             .NotNull().WithMessage("필수 입력")
             .Length(10, 30).WithMessage("10글자 이상 30글자 이하")/*
