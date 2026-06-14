@@ -49,9 +49,7 @@ const SignInPage = () => {
       <div className="auth-container">
         <h2>로그인</h2>
         {signupSuccess && (
-          <div style={{ color: '#15803d', background: '#f0fdf4', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px' }}>
-            회원가입이 완료되었습니다. 로그인해주세요.
-          </div>
+          <div className="auth-success">회원가입이 완료되었습니다. 로그인해주세요.</div>
         )}
         <form className="auth-form" onSubmit={handleSubmit}>
           <div className="form-group">
