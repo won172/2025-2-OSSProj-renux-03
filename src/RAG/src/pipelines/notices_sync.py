@@ -12,7 +12,8 @@ from typing import Any, Iterable
 
 import pandas as pd
 
-from src.config import DATA_SOURCES, NORMALIZED_DIR, RAW_DIR
+from src.config import DATA_SOURCES, NORMALIZED_DIR, RAG_NOTICES_INCREMENTAL_EMBED, RAW_DIR
+from src.crawlers.dongguk_notices import BOARD_CODES
 from src.database import (
     Chunk,
     DocumentQualityCheck,
@@ -28,16 +29,16 @@ from src.pipelines.ingest import (
     _persist_chunks,
     build_notice_chunks,
     build_notice_index_frame_from_db,
+    persist_dataset_artifacts_only,
 )
 from src.utils.preprocess import standardize_date
-from src.vectorstore.chroma_client import delete_items, reset_collection, upsert_items
+from src.vectorstore.chroma_client import count_items, delete_items, reset_collection, upsert_items
 
 NOTICE_SCHEMA_VERSION = 1
 NOTICE_COLLECTION = DATASET_ARTIFACTS["notices"].collection
 AUTO_NOTICE_FILTER = (Notice.is_manual == 0) | (Notice.is_manual.is_(None))
 NOTICE_REQUIRED_FIELDS = {
     "title": "제목이 비어 있습니다.",
-    "content_text": "본문이 비어 있습니다.",
     "detail_url": "상세 URL이 비어 있습니다.",
     "board_name": "게시판명이 비어 있습니다.",
     "board_code": "게시판 코드가 비어 있습니다.",
@@ -184,7 +185,10 @@ def _build_quality_checks(record: dict[str, Any], attachments_parse_failed: bool
     if attachments_parse_failed:
         checks.append({"check_type": "attachments", "severity": "warning", "message": "첨부파일 파싱에 실패했습니다."})
 
-    if len(record.get("content_text", "").strip()) < 40:
+    content_text = record.get("content_text", "").strip()
+    if not content_text:
+        checks.append({"check_type": "content_text", "severity": "warning", "message": "본문이 비어 있어 제목과 링크만 색인합니다."})
+    elif len(content_text) < 40:
         checks.append({"check_type": "content_length", "severity": "warning", "message": "본문 길이가 매우 짧습니다."})
 
     return checks, "\n".join(parse_errors) if parse_errors else None
@@ -215,6 +219,41 @@ def _save_quality_checks(session, document_key: str, checks: Iterable[dict[str, 
                 message=check["message"],
             )
         )
+
+
+def load_known_article_ids_by_board() -> dict[str, set[int]]:
+    """이미 수집된 notices 원문 ID를 게시판명별로 로드합니다."""
+    session = None
+    try:
+        session = SessionLocal()
+        board_names_by_code = {code: name for name, code in BOARD_CODES.items()}
+        known_ids_by_board: dict[str, set[int]] = {}
+        rows = (
+            session.query(SourceDocument.source_id)
+            .filter(
+                SourceDocument.dataset == "notices",
+                SourceDocument.source_id.isnot(None),
+                SourceDocument.status.in_(["active", "updated"]),
+            )
+            .distinct()
+            .all()
+        )
+        for (source_id,) in rows:
+            try:
+                board_code, article_id_text = str(source_id).split(":", 1)
+                board_name = board_names_by_code.get(board_code)
+                if not board_name:
+                    continue
+                article_id = int(article_id_text)
+            except (TypeError, ValueError):
+                continue
+            known_ids_by_board.setdefault(board_name, set()).add(article_id)
+        return known_ids_by_board
+    except Exception:
+        return {}
+    finally:
+        if session is not None:
+            session.close()
 
 
 def _export_active_notices_csv(session) -> None:
@@ -566,12 +605,36 @@ def apply_notice_normalized_documents(
 
 
 def refresh_notice_artifacts() -> None:
-    """DB의 notice chunks를 기준으로 parquet, TF-IDF, Chroma를 함께 재생성합니다."""
+    """DB의 notice chunks를 기준으로 parquet, TF-IDF, (필요 시) Chroma를 재생성합니다.
+
+    Chroma 밀집 벡터는 _upsert_notice_chunks/_delete_notice_chunks가 변경분만 증분
+    upsert/삭제하므로, 매 갱신마다 전량 재임베딩할 필요가 없다. 따라서 기본적으로는
+    parquet/TF-IDF만 전체 재생성하고 Chroma는 손대지 않는다(전역 통계인 TF-IDF는
+    임베딩 비용이 없으므로 전체 재생성이 저렴하다).
+
+    단, Chroma 청크 수가 DB 청크 수와 어긋나면(중단된 빌드·과거 누락 등) 증분 유지가
+    깨진 것이므로 안전하게 1회 전량 재임베딩으로 자가복구한다.
+    RAG_NOTICES_INCREMENTAL_EMBED=0이면 종전대로 항상 전량 재임베딩한다.
+    """
     frame = build_notice_index_frame_from_db()
-    reset_collection(NOTICE_COLLECTION)
     if frame.empty:
+        reset_collection(NOTICE_COLLECTION)
         return
-    _persist_chunks("notices", NOTICE_COLLECTION, frame)
+
+    aligned = False
+    if RAG_NOTICES_INCREMENTAL_EMBED:
+        try:
+            aligned = count_items(NOTICE_COLLECTION) == len(frame)
+        except Exception:
+            aligned = False
+
+    if aligned:
+        # Chroma는 이미 증분 유지됨 → 임베딩 없이 parquet/TF-IDF만 전체 재생성.
+        persist_dataset_artifacts_only("notices", frame)
+    else:
+        # 토글 OFF 또는 Chroma 불일치(자가복구): 전량 초기화 후 재임베딩.
+        reset_collection(NOTICE_COLLECTION)
+        _persist_chunks("notices", NOTICE_COLLECTION, frame)
 
 
 def sync_notices(

@@ -271,6 +271,7 @@ def collect_board(
     max_pages: Optional[int] = None,
     delay: float = DEFAULT_REQUEST_DELAY,
     earliest_year: Optional[int] = 2023,
+    known_ids: set[int] | None = None,
 ) -> pd.DataFrame:
     records: List[Dict[str, Any]] = []
     seen_ids: set[int] = set()
@@ -300,15 +301,23 @@ def collect_board(
                 continue
             seen_ids.add(article_id)
 
+            if known_ids is not None and article_id in known_ids:
+                continue
+
             # 상세 파싱/네트워크 오류가 게시판 전체 수집을 중단시키지 않도록 격리
             try:
                 detail = fetch_notice_detail(board_code, article_id)
             except Exception as exc:  # noqa: BLE001
                 failed_articles += 1
-                print(f"⚠️ [{board_name}] 상세 수집 실패 (article_id={article_id}): {exc}")
-                if delay:
-                    time.sleep(delay)
-                continue
+                print(f"⚠️ [{board_name}] 상세 수집 실패 (article_id={article_id}) — 목록 정보로 색인합니다: {exc}")
+                detail = {
+                    "posted_at": meta.get("posted_at"),
+                    "views": meta.get("views"),
+                    "detail_url": f"{BASE_URL}/article/{board_code}/detail/{article_id}",
+                    "content_html": "",
+                    "content_text": "",
+                    "attachments": [],
+                }
 
             record = {
                 "board_name": board_name,
@@ -370,6 +379,7 @@ def crawl_notices(
     max_pages: Optional[int] = DEFAULT_MAX_PAGES,
     delay: float = DEFAULT_REQUEST_DELAY,
     earliest_year: Optional[int] = 2023,
+    known_ids_by_board: dict[str, set[int]] | None = None,
 ) -> pd.DataFrame:
     boards = list(boards) if boards is not None else TARGET_BOARDS
     dataframes: List[pd.DataFrame] = []
@@ -379,7 +389,15 @@ def crawl_notices(
         if not board_code:
             print(f"⚠️ 게시판 코드를 찾을 수 없습니다: {board_name}")
             continue
-        df = collect_board(board_name, board_code, max_pages=max_pages, delay=delay, earliest_year=earliest_year)
+        known_ids = known_ids_by_board.get(board_name) if known_ids_by_board is not None else None
+        df = collect_board(
+            board_name,
+            board_code,
+            max_pages=max_pages,
+            delay=delay,
+            earliest_year=earliest_year,
+            known_ids=known_ids,
+        )
         dataframes.append(df)
 
     if not dataframes:
