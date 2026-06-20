@@ -30,12 +30,20 @@ _scheduler = None  # 단일 인스턴스 보관(중복 시작 방지)
 def refresh_notices_job() -> None:
     """공지 게시판 최근 페이지를 크롤링해 증분 동기화 + 인덱스 갱신한다."""
     from src.crawlers.dongguk_notices import crawl_notices
-    from src.pipelines.notices_sync import sync_notices
+    from src.pipelines.notices_sync import load_known_article_ids_by_board, sync_notices
 
     start = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
     logger.info("[scheduler] 공지 갱신 시작 (%s)", start)
     try:
-        df = crawl_notices(max_pages=RAG_NOTICES_REFRESH_MAX_PAGES, delay=0.2)
+        try:
+            known_ids_by_board = load_known_article_ids_by_board()
+        except Exception:  # noqa: BLE001 — 기존 수집 ID 로드는 조기 중단 최적화일 뿐이다.
+            known_ids_by_board = None
+        df = crawl_notices(
+            known_ids_by_board=known_ids_by_board,
+            max_pages=RAG_NOTICES_REFRESH_MAX_PAGES,
+            delay=0.2,
+        )
         summary = sync_notices(df, allow_missing_detection=False, mode="full-sync")
         logger.info(
             "[scheduler] 공지 갱신 완료 seen=%s new=%s updated=%s deleted=%s failed=%s",

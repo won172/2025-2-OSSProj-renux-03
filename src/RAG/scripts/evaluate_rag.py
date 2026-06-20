@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 import os
 import pandas as pd
 import sys
@@ -34,6 +35,136 @@ JUDGE_SYSTEM_PROMPT = """당신은 대학 챗봇 답변을 채점하는 평가�
 JSON만 출력: {"verdict": "...", "grounded": true/false, "reason": "..."}"""
 
 
+DEFAULT_THRESHOLDS = {
+    "route_hit_rate": 0.80,
+    "context_recall_proxy": 0.70,
+    "answer_relevancy_proxy": 0.70,
+    "fallback_rate": 0.35,
+}
+
+
+def _mean_or_none(series: pd.Series) -> float | None:
+    clean = pd.to_numeric(series, errors="coerce").dropna()
+    if clean.empty:
+        return None
+    return float(clean.mean())
+
+
+def _bool_mean_or_none(series: pd.Series) -> float | None:
+    clean = series.dropna()
+    if clean.empty:
+        return None
+    return float(clean.astype(bool).mean())
+
+
+def _pct(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.2%}"
+
+
+def summarize_results(results_df: pd.DataFrame, thresholds: dict[str, float]) -> dict:
+    """RAGAS류 지표에 대응하는 최소 운영 지표를 계산한다.
+
+    - faithfulness_proxy: grounding 또는 judge 기반 근거 일치율
+    - context_recall_proxy: 기대 데이터셋이 실제 출처에 포함된 비율
+    - answer_relevancy_proxy: 평가셋 키워드 포함 점수 평균
+    """
+    summary: dict = {
+        "total_questions": int(len(results_df)),
+        "thresholds": thresholds,
+        "metrics": {},
+        "by_dataset": {},
+        "warnings": [],
+    }
+    if results_df.empty:
+        summary["warnings"].append("evaluation_set is empty")
+        return summary
+
+    metrics = summary["metrics"]
+    if "hit" in results_df.columns:
+        metrics["route_hit_rate"] = _bool_mean_or_none(results_df["hit"])
+    if "context_recall_proxy" in results_df.columns:
+        metrics["context_recall_proxy"] = _bool_mean_or_none(results_df["context_recall_proxy"])
+    if "keyword_score" in results_df.columns:
+        metrics["answer_relevancy_proxy"] = _mean_or_none(results_df["keyword_score"])
+    if "fallback" in results_df.columns:
+        metrics["fallback_rate"] = _bool_mean_or_none(results_df["fallback"])
+    if "judge_grounded" in results_df.columns and results_df["judge_grounded"].notna().any():
+        metrics["faithfulness_proxy"] = _bool_mean_or_none(results_df["judge_grounded"])
+    elif "grounding_grounded" in results_df.columns:
+        metrics["faithfulness_proxy"] = _bool_mean_or_none(results_df["grounding_grounded"])
+    if "grounding_score" in results_df.columns:
+        metrics["avg_grounding_score"] = _mean_or_none(results_df["grounding_score"])
+    if "top_hybrid_score" in results_df.columns:
+        metrics["avg_top_hybrid_score"] = _mean_or_none(results_df["top_hybrid_score"])
+
+    for dataset, group in results_df.groupby("expected_dataset", dropna=False):
+        dataset_key = str(dataset)
+        summary["by_dataset"][dataset_key] = {
+            "count": int(len(group)),
+            "route_hit_rate": _bool_mean_or_none(group["hit"]) if "hit" in group else None,
+            "context_recall_proxy": _bool_mean_or_none(group["context_recall_proxy"]) if "context_recall_proxy" in group else None,
+            "answer_relevancy_proxy": _mean_or_none(group["keyword_score"]) if "keyword_score" in group else None,
+            "fallback_rate": _bool_mean_or_none(group["fallback"]) if "fallback" in group else None,
+        }
+
+    for metric_name, threshold in thresholds.items():
+        value = metrics.get(metric_name)
+        if value is None:
+            continue
+        if metric_name == "fallback_rate":
+            if value > threshold:
+                summary["warnings"].append(f"{metric_name} {_pct(value)} exceeds threshold {_pct(threshold)}")
+        elif value < threshold:
+            summary["warnings"].append(f"{metric_name} {_pct(value)} below threshold {_pct(threshold)}")
+
+    return summary
+
+
+def write_markdown_report(summary: dict, results_df: pd.DataFrame, output_path: Path) -> None:
+    metrics = summary.get("metrics", {})
+    lines = [
+        "# RAG Evaluation Report",
+        "",
+        f"- Total questions: {summary.get('total_questions', 0)}",
+        f"- Route hit rate: {_pct(metrics.get('route_hit_rate'))}",
+        f"- Context recall proxy: {_pct(metrics.get('context_recall_proxy'))}",
+        f"- Answer relevancy proxy: {_pct(metrics.get('answer_relevancy_proxy'))}",
+        f"- Faithfulness proxy: {_pct(metrics.get('faithfulness_proxy'))}",
+        f"- Fallback rate: {_pct(metrics.get('fallback_rate'))}",
+        "",
+        "## Dataset Summary",
+        "",
+        "| Dataset | Count | Route Hit | Context Recall | Answer Relevancy | Fallback |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for dataset, row in summary.get("by_dataset", {}).items():
+        lines.append(
+            f"| {dataset} | {row.get('count', 0)} | {_pct(row.get('route_hit_rate'))} | "
+            f"{_pct(row.get('context_recall_proxy'))} | {_pct(row.get('answer_relevancy_proxy'))} | "
+            f"{_pct(row.get('fallback_rate'))} |"
+        )
+
+    warnings = summary.get("warnings", [])
+    lines.extend(["", "## Gate Warnings", ""])
+    if warnings:
+        lines.extend(f"- {warning}" for warning in warnings)
+    else:
+        lines.append("- None")
+
+    if not results_df.empty and "hit" in results_df.columns:
+        misses = results_df[(results_df["hit"] == False) | (results_df.get("context_recall_proxy", True) == False)]  # noqa: E712
+        if not misses.empty:
+            lines.extend(["", "## Miss Samples", ""])
+            for _, row in misses.head(10).iterrows():
+                lines.append(
+                    f"- `{row.get('expected_dataset', '')}` {row.get('question', '')} "
+                    f"(route={row.get('actual_route', '')}, sources={row.get('source_datasets', '')}, "
+                    f"fallback={row.get('fallback', '')})"
+                )
+
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 async def judge_answer(question: str, answer: str, sources_text: str, expected_answer: str = "") -> dict:
     """OpenAI로 답변을 채점합니다. 실패 시 빈 dict."""
     import json as _json
@@ -64,10 +195,18 @@ async def judge_answer(question: str, answer: str, sources_text: str, expected_a
         return {}
 
 
-async def run_evaluation(csv_path: str, use_query_analysis: bool, use_judge: bool = False):
+async def run_evaluation(
+    csv_path: str,
+    use_query_analysis: bool,
+    use_judge: bool = False,
+    output_dir: str | None = None,
+    thresholds: dict[str, float] | None = None,
+    fail_on_threshold: bool = False,
+):
     os.environ["RAG_USE_QUERY_ANALYSIS"] = "1" if use_query_analysis else "0"
     from api.rag_service import AskRequest, ask, _is_recent_notice_query
 
+    thresholds = thresholds or DEFAULT_THRESHOLDS
     df = pd.read_csv(csv_path)
     results = []
     
@@ -111,6 +250,17 @@ async def run_evaluation(csv_path: str, use_query_analysis: bool, use_judge: boo
             recent_notice_query = _is_recent_notice_query(question, resp.route)
             source_count = len(resp.sources)
             top_source = resp.sources[0] if resp.sources else None
+            source_datasets = sorted(
+                {
+                    str(getattr(source, "source", "") or "").strip()
+                    for source in (resp.sources or [])
+                    if str(getattr(source, "source", "") or "").strip()
+                }
+            )
+            context_recall_proxy = (
+                expected_ds == "smalltalk"
+                or expected_ds in source_datasets
+            )
 
             session = SessionLocal()
             try:
@@ -145,8 +295,13 @@ async def run_evaluation(csv_path: str, use_query_analysis: bool, use_judge: boo
                 "fallback": fallback,
                 "fallback_reason": resp.fallback_reason,
                 "source_count": source_count,
+                "source_datasets": ", ".join(source_datasets),
+                "context_recall_proxy": context_recall_proxy,
                 "top_hybrid_score": None if query_log is None else query_log.top_hybrid_score,
                 "final_score": None if top_source is None else top_source.final_score,
+                "grounding_checked": None if query_log is None else query_log.grounding_checked,
+                "grounding_grounded": None if query_log is None else query_log.grounding_grounded,
+                "grounding_score": None if query_log is None else query_log.grounding_score,
                 "date_filter_relaxed": None if query_log is None else query_log.date_filter_relaxed,
                 "recent_notice_query": recent_notice_query,
                 "analysis_intent": None if query_log is None else query_log.analysis_intent,
@@ -159,6 +314,7 @@ async def run_evaluation(csv_path: str, use_query_analysis: bool, use_judge: boo
             print(
                 "   - Hit: "
                 f"{'✅' if hit else '❌'} | Score: {keyword_score:.2f} | "
+                f"Context: {'✅' if context_recall_proxy else '❌'} | "
                 f"Fallback: {fallback} ({resp.fallback_reason}) | Sources: {source_count}"
             )
             
@@ -211,16 +367,68 @@ async def run_evaluation(csv_path: str, use_query_analysis: bool, use_judge: boo
                 if not grounded.empty:
                     print(f"  Grounded (출처 근거 일치): {grounded.mean():.2%}")
     
-    output_path = Path(csv_path).parent / f"evaluation_results_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    summary = summarize_results(results_df, thresholds)
+
+    timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+    output_root = Path(output_dir) if output_dir else Path(csv_path).parent
+    output_root.mkdir(parents=True, exist_ok=True)
+    output_path = output_root / f"evaluation_results_{timestamp}.csv"
+    summary_path = output_root / f"evaluation_summary_{timestamp}.json"
+    report_path = output_root / f"evaluation_report_{timestamp}.md"
+
     results_df.to_csv(output_path, index=False, encoding='utf-8-sig')
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_markdown_report(summary, results_df, report_path)
+
     print(f"\n✅ Detailed results saved to: {output_path}")
+    print(f"✅ Summary saved to: {summary_path}")
+    print(f"✅ Markdown report saved to: {report_path}")
+    if summary["warnings"]:
+        print("\n⚠️ Gate warnings:")
+        for warning in summary["warnings"]:
+            print(f"   - {warning}")
+        if fail_on_threshold:
+            raise SystemExit(2)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--disable-analysis", action="store_true")
+    parser.add_argument(
+        "--eval-set",
+        default=str(Path(__file__).resolve().parents[1] / "tests" / "evaluation_set.csv"),
+        help="평가셋 CSV 경로 (columns: question, expected_dataset, expected_keywords[, expected_answer])",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="결과 CSV/JSON/Markdown 리포트를 저장할 디렉터리 (기본: 평가셋 디렉터리)",
+    )
     parser.add_argument("--judge", action="store_true",
                         help="LLM-judge로 답변 정확도/근거 일치성 채점 (OPENAI_API_KEY 필요). "
                              "evaluation_set.csv에 expected_answer 컬럼이 있으면 정답 기준으로 채점")
+    parser.add_argument("--min-route-hit", type=float, default=DEFAULT_THRESHOLDS["route_hit_rate"])
+    parser.add_argument("--min-context-recall", type=float, default=DEFAULT_THRESHOLDS["context_recall_proxy"])
+    parser.add_argument("--min-answer-relevancy", type=float, default=DEFAULT_THRESHOLDS["answer_relevancy_proxy"])
+    parser.add_argument("--max-fallback-rate", type=float, default=DEFAULT_THRESHOLDS["fallback_rate"])
+    parser.add_argument(
+        "--fail-on-threshold",
+        action="store_true",
+        help="게이트 기준 미달/초과 경고가 있으면 종료 코드 2로 실패 처리",
+    )
     args = parser.parse_args()
-    eval_set_path = Path(__file__).resolve().parents[1] / "tests" / "evaluation_set.csv"
-    asyncio.run(run_evaluation(str(eval_set_path), use_query_analysis=not args.disable_analysis, use_judge=args.judge))
+    gate_thresholds = {
+        "route_hit_rate": args.min_route_hit,
+        "context_recall_proxy": args.min_context_recall,
+        "answer_relevancy_proxy": args.min_answer_relevancy,
+        "fallback_rate": args.max_fallback_rate,
+    }
+    asyncio.run(
+        run_evaluation(
+            str(args.eval_set),
+            use_query_analysis=not args.disable_analysis,
+            use_judge=args.judge,
+            output_dir=args.output_dir,
+            thresholds=gate_thresholds,
+            fail_on_threshold=args.fail_on_threshold,
+        )
+    )

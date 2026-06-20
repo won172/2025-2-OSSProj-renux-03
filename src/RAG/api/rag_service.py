@@ -35,8 +35,12 @@ from src.config import (
     MAX_CONTEXT_LENGTH,
     MIN_RETRIEVAL_SCORE,
     QUERY_ANALYSIS_MAX_QUERIES,
+    RAG_COLLEGE_SCOPE_ENABLED,
     RAG_DECOMPOSE_ENABLED,
+    RAG_GROUNDING_CHECK_ENABLED,
+    RAG_GROUNDING_MIN_SCORE,
     RAG_MAX_SUBQUERIES,
+    RAG_SEMANTIC_CACHE_ENABLED,
     RAG_SUGGEST_FOLLOWUPS,
     RAG_SUGGEST_FOLLOWUPS_COUNT,
     RECENCY_DECAY_DAYS_BY_DATASET,
@@ -65,6 +69,7 @@ from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
     build_notice_chunks,
     ingest_courses,
+    ingest_meals,
     ingest_notices,
     ingest_rules,
     ingest_schedule,
@@ -72,6 +77,7 @@ from src.pipelines.ingest import (
 )
 from src.search.hybrid import load_tfidf_with_ids, hybrid_search_with_meta
 from src.search.hybrid import read_tfidf_metadata
+from src.services import semantic_cache
 from src.services.answer import format_citations
 from src.services.langchain_chat import (
     append_manual_history,
@@ -80,12 +86,13 @@ from src.services.langchain_chat import (
     generate_langchain_answer_stream,
     get_recent_history_text,
 )
+from src.services.grounding import check_answer_grounding
 from src.services.query_analysis import QueryAnalysisResult, analyze_query
 from src.models.embedding import get_embedder, encode_texts
 from src.services.router import route_query
 from src.utils.date_parser import QueryDateFilter, extract_date_filter_from_query
 from src.utils.query_expansion import expand_query
-from src.utils.dept_college import college_grad_queries, personalized_grad_queries, user_scope_label
+from src.utils.dept_college import college_grad_queries, college_of, college_scope_queries, personalized_grad_queries, user_scope_label
 from src.utils.preprocess import make_doc_id
 from src.vectorstore.chroma_client import count_items, upsert_items, delete_items
 
@@ -98,6 +105,29 @@ app = FastAPI(
 def _log_event(level: int, event: str, exc_info: bool = False, **fields) -> None:
     payload = {"event": event, **fields}
     logging.log(level, json.dumps(payload, ensure_ascii=False, default=str), exc_info=exc_info)
+
+
+def _mark_stage(stage_timings: dict[str, float], stage: str, started_at: float) -> None:
+    stage_timings[stage] = round((time.perf_counter() - started_at) * 1000, 2)
+
+
+def _sum_estimated_llm_cost(llm_usage: list[dict] | None) -> float | None:
+    if not llm_usage:
+        return None
+    values = [
+        float(item["estimated_cost_usd"])
+        for item in llm_usage
+        if isinstance(item, dict) and item.get("estimated_cost_usd") is not None
+    ]
+    if not values:
+        return None
+    return round(sum(values), 8)
+
+
+def _json_or_none(value) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, default=str)
 
 
 def _safe_package_version(name: str) -> str | None:
@@ -193,6 +223,9 @@ _DATASET_LOADERS = {
     "schedule": ingest_schedule,
     "courses": ingest_courses,
     "staff": ingest_staff, # 추가
+    # meals는 SQLite가 아닌 CSV에서 재구성된다. 로더를 등록해 startup 워밍업(인메모리 캐시)·
+    # _ensure_dataset 폴백·reindex 검증에 포함시킨다(없으면 캐시가 비고 폴백 시 KeyError).
+    "meals": ingest_meals,
 }
 
 @dataclass
@@ -230,6 +263,34 @@ FALLBACK_REASON_DATASET_UNAVAILABLE = "dataset_unavailable"
 FALLBACK_REASON_SCORE_BELOW_THRESHOLD = "score_below_threshold"
 # 학과 필터를 적용하지 않는 sentinel 값들(백엔드는 보통 null을 보내지만 방어적으로 처리).
 _NO_MAJOR_SENTINELS = {"Default", "Unknown"}
+
+
+def _semantic_cache_namespace(major: str) -> str:
+    # 실제 학과명과 값 공간이 겹치지 않도록 접두사로 구분한다(가령 major=="__anon__" 같은
+    # 입력이 익명 버킷과 충돌하는 일을 막는다). 답변은 학과별로 달라지므로 네임스페이스는 학과 기준.
+    return f"major:{major}" if major and major not in _NO_MAJOR_SENTINELS else "anon"
+
+
+def _should_cache_answer(
+    route: List[str],
+    fallback_triggered: bool,
+    date_filter_applied: bool,
+    grounded: bool | None,
+    answer: str | None = None,
+) -> bool:
+    if fallback_triggered:
+        return False
+    if "meals" in route:
+        return False
+    if date_filter_applied is True:
+        return False
+    if grounded is False:
+        return False
+    if answer is not None and not answer.strip():
+        return False
+    return True
+
+
 DATASET_REASON_EMPTY_COLLECTION = "empty_collection"
 DATASET_REASON_ARTIFACT_MISSING = "artifact_missing"
 DATASET_REASON_VECTORIZER_MISSING = "vectorizer_missing"
@@ -323,6 +384,7 @@ class SourceChunk(BaseModel):
     source: str
     metadata: Dict
     snippet: str
+    citation_number: int | None = None
     chunk_id: str | None = None
     title: str | None = None
     url: str | None = None
@@ -342,6 +404,8 @@ class AskResponse(BaseModel):
     route: List[str]
     sources: List[SourceChunk]
     suggested_questions: list[str] = Field(default_factory=list)
+    grounded: bool | None = None
+    grounding_score: float | None = None
     fallback_triggered: bool = False
     fallback_reason: str | None = None
 
@@ -461,7 +525,9 @@ def _has_school_info_terms(raw_query: str) -> bool:
 
 def _calculate_recency_score(sort_date, dataset: str, now: pd.Timestamp) -> float:
     decay_days = RECENCY_DECAY_DAYS_BY_DATASET.get(dataset)
-    if not decay_days or pd.isna(sort_date):
+    if not decay_days:
+        return 1.0
+    if pd.isna(sort_date):
         return 0.0
 
     age_days = max((now - sort_date).total_seconds() / 86400, 0.0)
@@ -602,6 +668,20 @@ def _user_profile_prefix(user_major: str | None) -> str:
     if not major:
         return ""
     label = user_scope_label(major)
+    college = None
+    if RAG_COLLEGE_SCOPE_ENABLED:
+        try:
+            college = college_of(major)
+        except Exception:
+            college = None
+    if college:
+        return (
+            f"[질문자 정보] 소속 학과: {label}. "
+            "질문에 학과·단과대를 따로 밝히지 않았다면 이 소속을 기준으로 답하세요. "
+            f"이 학생은 {college}에 속하므로, 학과 자료가 없거나 부족하면 같은 {college}(단과대학) "
+            "공통 공지·규정·일정·행정 정보도 본인에게 해당되는 것으로 보고 답하라; "
+            "단, 명백히 다른 학과/단과대 전용 정보는 그쪽 기준을 따르라.\n\n"
+        )
     return (
         f"[질문자 정보] 소속 학과: {label}. "
         "질문에 학과·단과대를 따로 밝히지 않았다면 이 소속을 기준으로 답하세요. "
@@ -653,6 +733,8 @@ def _build_retrieval_queries(
     # 로그인 사용자가 학과를 안 밝히고 졸업요건을 물어도 본인 학과 기준 자료가 잡히도록 보강.
     valid_major = user_major if user_major and user_major not in _NO_MAJOR_SENTINELS else None
     extra_queries.extend(personalized_grad_queries(raw_query, valid_major))
+    if RAG_COLLEGE_SCOPE_ENABLED:
+        extra_queries.extend(college_scope_queries(raw_query, valid_major))
     for cq in extra_queries:
         if cq not in result:
             result.append(cq)
@@ -757,13 +839,25 @@ def _apply_date_filter(hits: pd.DataFrame, dataset: str, date_filter: QueryDateF
 
     filtered = hits.copy()
     filtered["_temp_date"] = pd.to_datetime(filtered[date_column], errors="coerce")
-    mask = (
+    dated_mask = filtered["_temp_date"].notna()
+    in_range_mask = (
         (filtered["_temp_date"] >= pd.Timestamp(date_filter.start))
         & (filtered["_temp_date"] <= pd.Timestamp(date_filter.end))
     )
-    filtered = filtered[mask].copy()
+    filtered["date_unknown_auxiliary"] = 0
+
+    in_range = filtered[in_range_mask].copy()
+    unknown_dates = filtered[~dated_mask].copy()
+    was_eliminated = len(hits) > 0 and in_range.empty
+
+    target_count = min(DEFAULT_TOP_K, len(hits))
+    if not unknown_dates.empty and len(in_range) < target_count:
+        unknown_dates["date_unknown_auxiliary"] = 1
+        filtered = pd.concat([in_range, unknown_dates.head(target_count - len(in_range))], ignore_index=True)
+    else:
+        filtered = in_range
+
     filtered.drop(columns=["_temp_date"], inplace=True, errors="ignore")
-    was_eliminated = len(hits) > 0 and filtered.empty
     return filtered, was_eliminated
 
 
@@ -965,6 +1059,30 @@ def _build_context_text(context_parts: List[str], limit: int, prefix: str = "") 
     return (prefix + sep.join(included))[:limit]
 
 
+def _build_grounding_confirmation_answer(result, sources: List[SourceChunk]) -> str:
+    reason = getattr(result, "reason", None)
+    score = getattr(result, "score", None)
+    score_text = f" 근거 일치도는 약 {round(score * 100)}%입니다." if isinstance(score, (int, float)) else ""
+    reason_text = f"\n\n검토 사유: {reason}" if isinstance(reason, str) and reason.strip() else ""
+
+    source_lines: List[str] = []
+    for index, source in enumerate(sources[:3], start=1):
+        citation = source.citation_number or index
+        title = source.title or source.metadata.get("title") or source.source
+        if source.url:
+            source_lines.append(f"- [문서{citation}] {title}: {source.url}")
+        else:
+            source_lines.append(f"- [문서{citation}] {title}")
+
+    source_text = "\n\n확인할 공식 출처:\n" + "\n".join(source_lines) if source_lines else ""
+    return (
+        "확인 필요: 검색된 공식 자료만으로는 방금 생성한 답변을 충분히 뒷받침하기 어렵습니다."
+        f"{score_text} 아래 출처에서 원문을 확인한 뒤 판단해 주세요."
+        f"{reason_text}"
+        f"{source_text}"
+    )
+
+
 async def _retrieve_frames(
     *,
     route: List[str],
@@ -997,6 +1115,7 @@ async def _retrieve_frames(
         current_dataset_filter = final_where_filter.copy()
         if dataset != "courses":
             current_dataset_filter.pop("major", None)
+            current_dataset_filter.pop("$or", None)
         if dataset == "notices" and notice_board_filter:
             current_dataset_filter["topics"] = {"$eq": notice_board_filter}
         final_filter = current_dataset_filter if current_dataset_filter else None
@@ -1148,6 +1267,7 @@ def _prepare_merged_results(
     policy: RetrievalPolicy,
     query: str,
     entry_year: int | None = None,
+    user_major: str | None = None,
 ) -> pd.DataFrame:
     if merged.empty or "hybrid_score" not in merged.columns:
         return merged
@@ -1170,7 +1290,7 @@ def _prepare_merged_results(
     if max_hybrid > min_hybrid:
         merged["norm_hybrid"] = (merged["hybrid_score"] - min_hybrid) / (max_hybrid - min_hybrid)
     else:
-        merged["norm_hybrid"] = 1.0
+        merged["norm_hybrid"] = merged["hybrid_score"].clip(lower=0.0, upper=1.0)
 
     now = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
     merged["norm_recency"] = merged.apply(
@@ -1181,6 +1301,10 @@ def _prepare_merged_results(
         lambda value: value.timestamp() if pd.notna(value) else float("-inf")
     )
     merged["final_score"] = (1 - RECENCY_WEIGHT) * merged["norm_hybrid"] + RECENCY_WEIGHT * merged["norm_recency"]
+    if "date_unknown_auxiliary" in merged.columns:
+        unknown_date_mask = pd.to_numeric(merged["date_unknown_auxiliary"], errors="coerce").fillna(0).astype(int).eq(1)
+        if unknown_date_mask.any():
+            merged.loc[unknown_date_mask, "final_score"] = merged.loc[unknown_date_mask, "final_score"] - 0.20
     if "matched_query_count" not in merged.columns:
         merged["matched_query_count"] = 1
     merged["query_match_bonus"] = (merged["matched_query_count"].clip(lower=1) - 1) * 0.03
@@ -1202,6 +1326,20 @@ def _prepare_merged_results(
                 if latest_year is not None:
                     latest_mask = guide_mask & merged["entry_year"].astype(str).eq(str(latest_year))
                     merged.loc[latest_mask, "final_score"] = merged.loc[latest_mask, "final_score"] + 0.06
+
+    # 개인 학과 우선(courses 한정): 단과대 확장($or)으로 같은 단과대 형제학과 과목이 후보에
+    # 섞이므로, 본인 학과(major==user_major) 과목 청크에 약한 가산점을 줘 형제학과 과목보다
+    # 위에 오게 한다. courses에만 적용해 다른 데이터셋 순위에는 영향을 주지 않는다.
+    if (
+        RAG_COLLEGE_SCOPE_ENABLED
+        and user_major
+        and user_major not in _NO_MAJOR_SENTINELS
+        and "major" in merged.columns
+        and "dataset" in merged.columns
+    ):
+        own_major_mask = merged["dataset"].astype(str).eq("courses") & merged["major"].astype(str).eq(str(user_major))
+        if own_major_mask.any():
+            merged.loc[own_major_mask, "final_score"] = merged.loc[own_major_mask, "final_score"] + 0.10
 
     if recent_notice_query and policy.prefer_notices_with_dates:
         focus_terms = _extract_notice_focus_terms(query)
@@ -1250,7 +1388,7 @@ def _apply_cross_encoder_rerank(merged: pd.DataFrame, query: str) -> pd.DataFram
 
     top["rerank_raw"] = scores
     lo, hi = min(scores), max(scores)
-    top["rerank_norm"] = (top["rerank_raw"] - lo) / (hi - lo) if hi > lo else 1.0
+    top["rerank_norm"] = (top["rerank_raw"] - lo) / (hi - lo) if hi > lo else 0.5
     recency = top["norm_recency"] if "norm_recency" in top.columns else 0.0
     top["final_score"] = (1 - RECENCY_WEIGHT) * top["rerank_norm"] + RECENCY_WEIGHT * recency
     top.sort_values(by=["final_score", "hybrid_score"], ascending=[False, False], inplace=True)
@@ -1291,6 +1429,8 @@ def _save_rag_evaluation_log(
     matched_queries_json: str | None,
     top_hybrid_score: float | None,
     sources: List[SourceChunk],
+    stage_timings: dict[str, float] | None = None,
+    llm_usage: list[dict] | None = None,
 ) -> None:
     session = SessionLocal()
     try:
@@ -1316,6 +1456,9 @@ def _save_rag_evaluation_log(
             matched_queries_json=matched_queries_json,
             top_hybrid_score=top_hybrid_score,
             source_count=len(sources),
+            stage_timings_json=_json_or_none(stage_timings),
+            llm_usage_json=_json_or_none(llm_usage),
+            estimated_llm_cost_usd=_sum_estimated_llm_cost(llm_usage),
         )
         session.add(query_log)
         session.flush()
@@ -1344,6 +1487,54 @@ def _save_rag_evaluation_log(
     except Exception:
         session.rollback()
         _log_event(logging.ERROR, "rag_evaluation_log_failed", exc_info=True, request_id=request_id)
+    finally:
+        session.close()
+
+
+def _update_grounding_log(request_id: str, result) -> None:
+    session = SessionLocal()
+    try:
+        query_log = (
+            session.query(RagQueryLog)
+            .filter(RagQueryLog.request_id == request_id)
+            .order_by(RagQueryLog.created_at.desc(), RagQueryLog.id.desc())
+            .first()
+        )
+        if query_log is None:
+            return
+        query_log.grounding_checked = bool(result.checked)
+        query_log.grounding_grounded = bool(result.grounded)
+        query_log.grounding_score = result.score
+        session.commit()
+    except Exception:
+        session.rollback()
+        _log_event(logging.WARNING, "grounding_log_update_failed", exc_info=True, request_id=request_id)
+    finally:
+        session.close()
+
+
+def _update_observability_log(
+    request_id: str,
+    stage_timings: dict[str, float] | None,
+    llm_usage: list[dict] | None,
+) -> None:
+    session = SessionLocal()
+    try:
+        query_log = (
+            session.query(RagQueryLog)
+            .filter(RagQueryLog.request_id == request_id)
+            .order_by(RagQueryLog.created_at.desc(), RagQueryLog.id.desc())
+            .first()
+        )
+        if query_log is None:
+            return
+        query_log.stage_timings_json = _json_or_none(stage_timings)
+        query_log.llm_usage_json = _json_or_none(llm_usage)
+        query_log.estimated_llm_cost_usd = _sum_estimated_llm_cost(llm_usage)
+        session.commit()
+    except Exception:
+        session.rollback()
+        _log_event(logging.WARNING, "observability_log_update_failed", exc_info=True, request_id=request_id)
     finally:
         session.close()
 
@@ -1760,6 +1951,9 @@ async def export_rag_logs(limit: int = 1000):
         "date_filter_relaxed",
         "top_hybrid_score",
         "source_count",
+        "stage_timings_json",
+        "llm_usage_json",
+        "estimated_llm_cost_usd",
         "rank",
         "dataset",
         "chunk_id",
@@ -1801,6 +1995,9 @@ async def export_rag_logs(limit: int = 1000):
                 "date_filter_relaxed": query_log.date_filter_relaxed,
                 "top_hybrid_score": query_log.top_hybrid_score,
                 "source_count": query_log.source_count,
+                "stage_timings_json": query_log.stage_timings_json,
+                "llm_usage_json": query_log.llm_usage_json,
+                "estimated_llm_cost_usd": query_log.estimated_llm_cost_usd,
             }
             retrievals = sorted(query_log.retrievals, key=lambda item: item.rank or 0)
             if not retrievals:
@@ -1858,6 +2055,9 @@ async def get_rag_logs(limit: int = 100):
                 "created_at": log.created_at.isoformat() if log.created_at else None,
                 "route": log.route,
                 "source_count": log.source_count,
+                "stage_timings": None if not log.stage_timings_json else json.loads(log.stage_timings_json),
+                "llm_usage": None if not log.llm_usage_json else json.loads(log.llm_usage_json),
+                "estimated_llm_cost_usd": log.estimated_llm_cost_usd,
             }
             for log in logs
         ]
@@ -1865,6 +2065,53 @@ async def get_rag_logs(limit: int = 100):
         return result
     except Exception as e:
         logging.error(f"❌ [Admin] Failed to fetch RAG logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+@app.get("/admin/feedback")
+async def get_admin_feedback(limit: int = 100, rating: int | None = None):
+    if rating is not None and rating not in (1, -1):
+        raise HTTPException(status_code=400, detail="rating must be 1 or -1")
+    safe_limit = min(max(limit, 1), 1000)
+    session = SessionLocal()
+    try:
+        query = session.query(RagFeedback)
+        if rating is not None:
+            query = query.filter(RagFeedback.rating == rating)
+        feedback_items = (
+            query.order_by(RagFeedback.created_at.desc(), RagFeedback.id.desc())
+            .limit(safe_limit)
+            .all()
+        )
+        result = []
+        for item in feedback_items:
+            query_log = (
+                session.query(RagQueryLog)
+                .filter(RagQueryLog.request_id == item.request_id)
+                .order_by(RagQueryLog.created_at.desc(), RagQueryLog.id.desc())
+                .first()
+            )
+            answer = None if query_log is None else query_log.answer
+            if answer is not None and len(answer) > 300:
+                answer = f"{answer[:300]}..."
+            result.append(
+                {
+                    "id": item.id,
+                    "rating": item.rating,
+                    "reason": item.reason,
+                    "comment": item.comment,
+                    "major": item.major,
+                    "created_at": item.created_at.isoformat() if item.created_at else None,
+                    "question": None if query_log is None else query_log.question,
+                    "answer": answer,
+                }
+            )
+        logging.info(f"📋 [Admin] Returning {len(result)} RAG feedback items.")
+        return result
+    except Exception as e:
+        logging.error(f"❌ [Admin] Failed to fetch RAG feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
@@ -1978,6 +2225,21 @@ async def rag_admin_status():
             "latest_query_at": None if latest_query is None else latest_query.created_at.isoformat(),
             "fallback_reasons": fallback_reason_counts,
         }
+        grounding = {
+            "checked": 0,
+            "ungrounded": 0,
+            "ungrounded_rate": None,
+        }
+        try:
+            grounding_checked = session.query(RagQueryLog).filter(RagQueryLog.grounding_checked.is_(True)).count()
+            grounding_ungrounded = session.query(RagQueryLog).filter(RagQueryLog.grounding_grounded.is_(False)).count()
+            grounding = {
+                "checked": grounding_checked,
+                "ungrounded": grounding_ungrounded,
+                "ungrounded_rate": None if grounding_checked == 0 else grounding_ungrounded / grounding_checked,
+            }
+        except Exception:
+            _log_event(logging.WARNING, "rag_grounding_status_failed", exc_info=True)
         feedback = {
             "total": 0,
             "up": 0,
@@ -2008,15 +2270,24 @@ async def rag_admin_status():
             _log_event(logging.WARNING, "rag_feedback_status_failed", exc_info=True)
         notices_ingestion = _build_notices_ingestion_status(session)
 
-        return {
+        status_dict = {
             "status": "degraded" if has_degraded_dataset else "ok",
             "generated_at": generated_at,
             "datasets": datasets,
             "pending_items": pending_items,
             "rag_logs": rag_logs,
+            "grounding": grounding,
             "feedback": feedback,
             "notices_ingestion": notices_ingestion,
         }
+        try:
+            status_dict["semantic_cache"] = {
+                "enabled": RAG_SEMANTIC_CACHE_ENABLED,
+                **semantic_cache.stats(),
+            }
+        except Exception:
+            pass
+        return status_dict
     except Exception as exc:
         _log_event(logging.ERROR, "rag_admin_status_failed", exc_info=True)
         return JSONResponse(
@@ -2027,6 +2298,7 @@ async def rag_admin_status():
                 "datasets": [],
                 "pending_items": {"pending": 0, "approved": 0, "rejected": 0},
                 "rag_logs": {"total_queries": 0, "fallback_count": 0, "latest_query_at": None},
+                "grounding": {"checked": 0, "ungrounded": 0, "ungrounded_rate": None},
                 "feedback": {
                     "total": 0,
                     "up": 0,
@@ -2306,14 +2578,43 @@ async def ask_stream(req: AskRequest, request: Request):
         raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
 
     session_id = req.session_id or str(uuid.uuid4())
+    stage_timings: dict[str, float] = {}
+    llm_usage: list[dict] = []
+    request_started_at = time.perf_counter()
 
     async def _stream_body():
+        user_major = req.major
+        semantic_cache_ns = _semantic_cache_namespace(user_major)
+        # 후속질문은 대화 이력으로 해소되므로(맥락 의존) 이력이 있으면 시맨틱 캐시를 건너뛴다.
+        # raw_query만으로는 직전 맥락이 달라 잘못된 캐시 답을 줄 수 있기 때문(첫 턴만 캐시 대상).
+        history_text = ""
+        if USE_QUERY_ANALYSIS or RAG_SEMANTIC_CACHE_ENABLED:
+            stage_started_at = time.perf_counter()
+            history_text = await run_in_threadpool(get_recent_history_text, session_id)
+            _mark_stage(stage_timings, "history_load", stage_started_at)
+        if RAG_SEMANTIC_CACHE_ENABLED and not (history_text or "").strip():
+            stage_started_at = time.perf_counter()
+            hit = await run_in_threadpool(semantic_cache.get, raw_query, semantic_cache_ns)
+            _mark_stage(stage_timings, "semantic_cache_lookup", stage_started_at)
+            if hit is not None:
+                _mark_stage(stage_timings, "total", request_started_at)
+                yield "data: " + json.dumps({"type": "metadata", "request_id": request_id, "sources": hit.get("sources", []), "citations": hit.get("citations", ""), "route": hit.get("route", []), "fallback_triggered": False}, ensure_ascii=False) + "\n\n"
+                yield "data: " + json.dumps({"type": "text", "content": hit["answer"]}, ensure_ascii=False) + "\n\n"
+                if hit.get("suggested_questions"):
+                    yield "data: " + json.dumps({"type": "suggestions", "questions": hit["suggested_questions"]}, ensure_ascii=False) + "\n\n"
+                if hit.get("grounded") is False:
+                    yield "data: " + json.dumps({"type": "grounding", "grounded": False, "score": hit.get("grounding_score"), "reason": None}, ensure_ascii=False) + "\n\n"
+                await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"])
+                _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
+                return
+
         analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
         if USE_QUERY_ANALYSIS:
             # 후속 질문("그럼 신청 기간은?")의 대명사/생략을 해소하기 위해
-            # 최근 대화 이력을 함께 전달해 독립형 질문으로 재작성하게 한다.
-            history_text = await run_in_threadpool(get_recent_history_text, session_id)
+            # 위에서 받아둔 최근 대화 이력을 함께 전달해 독립형 질문으로 재작성하게 한다.
+            stage_started_at = time.perf_counter()
             analysis_result = await analyze_query(raw_query, history_text)
+            _mark_stage(stage_timings, "query_analysis", stage_started_at)
             analysis_meta = _analysis_to_meta(analysis_result, failed=analysis_result is None)
 
         # 1. 일반 대화 처리 (검색 불필요한 경우)
@@ -2329,14 +2630,18 @@ async def ask_stream(req: AskRequest, request: Request):
             yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
             
             full_answer = []
+            stage_started_at = time.perf_counter()
             async for chunk in generate_langchain_answer_stream(
                 question=raw_query,
                 context=context_text,
                 session_id=session_id,
-                current_date=current_date
+                current_date=current_date,
+                usage_collector=llm_usage,
             ):
                 full_answer.append(chunk)
                 yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+            _mark_stage(stage_timings, "generation_stream", stage_started_at)
+            _mark_stage(stage_timings, "total", request_started_at)
             
             # 로깅은 스트림 종료 후 수행 (별도 태스크로 처리하거나 여기서 대략 수행)
             await run_in_threadpool(
@@ -2347,37 +2652,53 @@ async def ask_stream(req: AskRequest, request: Request):
                 analysis_meta.result.time_focus,
                 json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
                 analysis_meta.result.needs_clarification, analysis_meta.result.clarification_reason,
-                analysis_meta.used, analysis_meta.failed, None, None, []
+                analysis_meta.used, analysis_meta.failed, None, None, [],
+                stage_timings, llm_usage,
             )
             return
 
         # 2. RAG 검색 프로세스
+        stage_started_at = time.perf_counter()
         query_for_retrieval = raw_query
         expanded_query = expand_query(query_for_retrieval)
         retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta, req.major)
         if raw_query not in retrieval_queries:
             retrieval_queries.insert(0, raw_query)
         semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
+        _mark_stage(stage_timings, "query_expansion", stage_started_at)
 
-        user_major = req.major
         final_where_filter = {}
         # 백엔드는 학과 미지정 시 null을 보낸다("Unknown"/"Default"는 보내지 않지만 방어적으로 함께 제외).
         if user_major and user_major not in _NO_MAJOR_SENTINELS:
-            final_where_filter["major"] = {"$eq": user_major}
+            college = None
+            if RAG_COLLEGE_SCOPE_ENABLED:
+                try:
+                    college = college_of(user_major)
+                except Exception:
+                    college = None
+            if college:
+                final_where_filter["$or"] = [{"major": {"$eq": user_major}}, {"college_name": {"$eq": college}}]
+            else:
+                final_where_filter["major"] = {"$eq": user_major}
 
+        stage_started_at = time.perf_counter()
         routed = await route_query(semantic_query)
+        _mark_stage(stage_timings, "routing", stage_started_at)
         route = _merge_routes(analysis_meta, routed)
         if _should_append_rules_route(semantic_query, route):
             route.append("rules")
         
         entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
+        stage_started_at = time.perf_counter()
         date_filter = await run_in_threadpool(extract_date_filter_from_query, semantic_query)
+        _mark_stage(stage_timings, "date_filter_parse", stage_started_at)
         date_filter_applied = date_filter is not None
         date_filter_relaxed = False
         recent_notice_query = _is_recent_notice_query(semantic_query, route)
         notice_board_filter = _extract_notice_board_filter(semantic_query, route)
         retrieval_policy = _resolve_retrieval_policy(semantic_query, route)
 
+        stage_started_at = time.perf_counter()
         frames, date_filter_eliminated_any, unavailable_datasets = await _retrieve_frames_for_queries(
             route=route, queries=retrieval_queries, final_where_filter=final_where_filter,
             notice_board_filter=notice_board_filter, date_filter=date_filter, entry_year=entry_year, request_id=request_id
@@ -2403,8 +2724,9 @@ async def ask_stream(req: AskRequest, request: Request):
         else:
             merged = _merge_query_hits(frames)
 
-        merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query, entry_year=entry_year)
+        merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query, entry_year=entry_year, user_major=req.major)
         merged = merged.head(DEFAULT_TOP_K).reset_index(drop=True)
+        _mark_stage(stage_timings, "retrieval_and_rerank", stage_started_at)
 
         # 3. Fallback 체크
         top_hybrid_score = None
@@ -2454,15 +2776,20 @@ async def ask_stream(req: AskRequest, request: Request):
                 None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
                 False if analysis_meta.result is None else analysis_meta.result.needs_clarification,
                 None if analysis_meta.result is None else analysis_meta.result.clarification_reason,
-                analysis_meta.used, analysis_meta.failed, None, top_hybrid_score, []
+                analysis_meta.used, analysis_meta.failed, None, top_hybrid_score, [],
+                {**stage_timings, "total": round((time.perf_counter() - request_started_at) * 1000, 2)},
+                llm_usage,
             )
             await run_in_threadpool(append_manual_history, session_id, raw_query, fallback_answer)
             return
 
         # 4. 컨텍스트 구성 및 스트리밍 시작
+        stage_started_at = time.perf_counter()
         context_parts = []
-        for idx, row in merged.iterrows():
-            part = f"문서 {idx+1} [출처: {row.get('source', '알 수 없음')}]:\n"
+        citation_numbers: dict[object, int] = {}
+        for citation_number, (row_index, row) in enumerate(merged.iterrows(), start=1):
+            citation_numbers[row_index] = citation_number
+            part = f"문서 {citation_number} [출처: {row.get('source', '알 수 없음')}]:\n"
             if row.get('title'): part += f"제목: {row.get('title')}\n"
             if row.get('published_at'): part += f"게시일: {row.get('published_at')}\n"
             if row.get('url'): part += f"URL: {row.get('url')}\n"
@@ -2485,16 +2812,18 @@ async def ask_stream(req: AskRequest, request: Request):
         context_prefix = _user_profile_prefix(req.major) + guide_prefix
         # 문서 경계를 존중하며 MAX_CONTEXT_LENGTH 이내로 구성(마지막 문서 중간 절단 방지)
         context_text = _build_context_text(context_parts, MAX_CONTEXT_LENGTH, prefix=context_prefix)
+        _mark_stage(stage_timings, "context_build", stage_started_at)
         current_date = _get_current_kst_string()
 
         # 소스 데이터 정리
         score_cols = {"vector_score", "sparse_score", "hybrid_score", "norm_recency", "final_score"}
-        internal_cols = {"chunk_text", "dataset", "sort_date", "sort_timestamp", "norm_hybrid", "recent_notice_priority", "matched_query_count", "query_match_bonus"} | score_cols
+        internal_cols = {"chunk_text", "dataset", "sort_date", "sort_timestamp", "norm_hybrid", "recent_notice_priority", "matched_query_count", "query_match_bonus", "date_unknown_auxiliary"} | score_cols
         sources = [
             SourceChunk(
                 source=_clean_response_str(row.get("dataset")) or "",
                 metadata={col: _clean_response_value(row.get(col)) for col in row.index if col not in internal_cols},
                 snippet=_clean_response_str(row.get("chunk_text")) or "",
+                citation_number=citation_numbers.get(row_index),
                 chunk_id=_clean_response_str(row.get("chunk_id")),
                 title=_clean_response_str(row.get("title")),
                 url=_clean_response_str(row.get("url")),
@@ -2506,7 +2835,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 final_score=_clean_response_float(row.get("final_score")),
                 sort_date=_clean_response_str(row.get("sort_date")),
             ).dict()
-            for _, row in merged.iterrows()
+            for row_index, row in merged.iterrows()
         ]
         
         citations_raw = await run_in_threadpool(format_citations, merged)
@@ -2522,26 +2851,33 @@ async def ask_stream(req: AskRequest, request: Request):
             full_answer.append(guide_ans_prefix)
             yield f"data: {json.dumps({'type': 'text', 'content': guide_ans_prefix}, ensure_ascii=False)}\n\n"
 
+        stage_started_at = time.perf_counter()
         async for chunk in generate_langchain_answer_stream(
             question=semantic_query,
             context=context_text,
             session_id=session_id,
-            current_date=current_date
+            current_date=current_date,
+            usage_collector=llm_usage,
         ):
             full_answer.append(chunk)
             yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+        _mark_stage(stage_timings, "generation_stream", stage_started_at)
 
         # 최종 로깅
         final_answer = "".join(full_answer)
+        suggested_questions: list[str] = []
         if RAG_SUGGEST_FOLLOWUPS:
             try:
-                suggestions = await generate_followup_questions(
+                stage_started_at = time.perf_counter()
+                suggested_questions = await generate_followup_questions(
                     raw_query,
                     final_answer,
                     RAG_SUGGEST_FOLLOWUPS_COUNT,
+                    usage_collector=llm_usage,
                 )
-                if suggestions:
-                    yield f"data: {json.dumps({'type': 'suggestions', 'questions': suggestions}, ensure_ascii=False)}\n\n"
+                _mark_stage(stage_timings, "followup_generation", stage_started_at)
+                if suggested_questions:
+                    yield f"data: {json.dumps({'type': 'suggestions', 'questions': suggested_questions}, ensure_ascii=False)}\n\n"
             except Exception as exc:  # noqa: BLE001
                 _log_event(
                     logging.WARNING,
@@ -2549,6 +2885,41 @@ async def ask_stream(req: AskRequest, request: Request):
                     request_id=request_id,
                     error=str(exc),
                 )
+        grounding_result = None
+        grounded_flag: bool | None = None
+        grounding_score: float | None = None
+        if RAG_GROUNDING_CHECK_ENABLED and len(sources) > 0:
+            try:
+                stage_started_at = time.perf_counter()
+                grounding_result = await check_answer_grounding(
+                    raw_query,
+                    final_answer,
+                    context_text,
+                    min_score=RAG_GROUNDING_MIN_SCORE,
+                    usage_collector=llm_usage,
+                )
+                _mark_stage(stage_timings, "grounding_check", stage_started_at)
+                if grounding_result.checked:
+                    grounded_flag = grounding_result.grounded
+                    grounding_score = grounding_result.score
+                if grounding_result.checked and not grounding_result.grounded:
+                    yield f"data: {json.dumps({'type': 'grounding', 'grounded': False, 'score': grounding_result.score, 'reason': grounding_result.reason}, ensure_ascii=False)}\n\n"
+                    guard_text = "\n\n" + _build_grounding_confirmation_answer(
+                        grounding_result,
+                        [SourceChunk(**s) for s in sources],
+                    )
+                    full_answer.append(guard_text)
+                    suggested_questions = []
+                    yield f"data: {json.dumps({'type': 'text', 'content': guard_text}, ensure_ascii=False)}\n\n"
+            except Exception as exc:  # noqa: BLE001
+                _log_event(
+                    logging.WARNING,
+                    "grounding_check_failed",
+                    request_id=request_id,
+                    error=str(exc),
+                )
+        final_answer = "".join(full_answer)
+        _mark_stage(stage_timings, "total", request_started_at)
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id, session_id, raw_query, expanded_query, route, final_answer,
@@ -2562,8 +2933,27 @@ async def ask_stream(req: AskRequest, request: Request):
             analysis_meta.used, analysis_meta.failed, 
             json.dumps(_collect_matched_queries(merged), ensure_ascii=False),
             top_hybrid_score, 
-            [SourceChunk(**s) for s in sources]
+            [SourceChunk(**s) for s in sources],
+            stage_timings,
+            llm_usage,
         )
+        if grounding_result is not None and grounding_result.checked:
+            await run_in_threadpool(_update_grounding_log, request_id, grounding_result)
+        if RAG_SEMANTIC_CACHE_ENABLED and _should_cache_answer(route, False, date_filter_applied, grounded_flag, final_answer):
+            await run_in_threadpool(
+                semantic_cache.put,
+                raw_query,
+                semantic_cache_ns,
+                {
+                    "answer": final_answer,
+                    "citations": citations,
+                    "route": route,
+                    "sources": sources,
+                    "suggested_questions": suggested_questions,
+                    "grounded": grounded_flag,
+                    "grounding_score": grounding_score,
+                },
+            )
 
     async def stream_generator():
         """본문 스트림을 감싸 중간 예외(OpenAI 5xx·타임아웃·Chroma 오류 등)를
@@ -2592,12 +2982,44 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
 
     session_id = req.session_id or str(uuid.uuid4())
+    stage_timings: dict[str, float] = {}
+    llm_usage: list[dict] = []
+    request_started_at = time.perf_counter()
+    user_major = req.major
+    semantic_cache_ns = _semantic_cache_namespace(user_major)
+    # 후속질문은 대화 이력으로 해소되므로(맥락 의존) 이력이 있으면 시맨틱 캐시를 건너뛴다(첫 턴만 대상).
+    history_text = ""
+    if USE_QUERY_ANALYSIS or RAG_SEMANTIC_CACHE_ENABLED:
+        stage_started_at = time.perf_counter()
+        history_text = await run_in_threadpool(get_recent_history_text, session_id)
+        _mark_stage(stage_timings, "history_load", stage_started_at)
+    if RAG_SEMANTIC_CACHE_ENABLED and not (history_text or "").strip():
+        stage_started_at = time.perf_counter()
+        hit = await run_in_threadpool(semantic_cache.get, raw_query, semantic_cache_ns)
+        _mark_stage(stage_timings, "semantic_cache_lookup", stage_started_at)
+        if hit is not None:
+            _mark_stage(stage_timings, "total", request_started_at)
+            _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
+            await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"])
+            return AskResponse(
+                request_id=request_id,
+                answer=hit["answer"],
+                citations=hit.get("citations", ""),
+                route=hit.get("route", []),
+                sources=[SourceChunk(**s) for s in hit.get("sources", [])],
+                suggested_questions=hit.get("suggested_questions", []),
+                grounded=hit.get("grounded"),
+                grounding_score=hit.get("grounding_score"),
+                fallback_triggered=False,
+                fallback_reason=None,
+            )
 
     analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
     if USE_QUERY_ANALYSIS:
-        # 후속 질문의 대명사/생략 해소를 위해 최근 대화 이력을 함께 전달(스트리밍 경로와 동일)
-        history_text = await run_in_threadpool(get_recent_history_text, session_id)
+        # 후속 질문의 대명사/생략 해소를 위해 위에서 받아둔 최근 대화 이력을 함께 전달(스트리밍 경로와 동일)
+        stage_started_at = time.perf_counter()
         analysis_result = await analyze_query(raw_query, history_text)
+        _mark_stage(stage_timings, "query_analysis", stage_started_at)
         analysis_meta = _analysis_to_meta(analysis_result, failed=analysis_result is None)
 
     if (
@@ -2608,15 +3030,19 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         current_date = _get_current_kst_string()
         context_text = "일반 대화입니다. 학교 자료 검색이 필요한 질문이 아니면 자연스럽고 짧게 답하세요."
         try:
+            stage_started_at = time.perf_counter()
             answer = await generate_langchain_answer(
                 question=raw_query,
                 context=context_text,
                 session_id=session_id,
                 current_date=current_date,
+                usage_collector=llm_usage,
             )
+            _mark_stage(stage_timings, "generation", stage_started_at)
         except Exception:
             _log_event(logging.ERROR, "llm_generation_failed", exc_info=True, request_id=request_id)
             answer = "저는 동똑이에요. 지금 응답이 잠깐 매끄럽지 않았지만, 계속 편하게 물어보셔도 됩니다."
+        _mark_stage(stage_timings, "total", request_started_at)
 
         await run_in_threadpool(
             _save_rag_evaluation_log,
@@ -2641,6 +3067,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             None,
             None,
             [],
+            stage_timings,
+            llm_usage,
         )
         return AskResponse(
             request_id=request_id,
@@ -2652,12 +3080,14 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=None,
         )
 
+    stage_started_at = time.perf_counter()
     query_for_retrieval = raw_query
     expanded_query = expand_query(query_for_retrieval)
     retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta, req.major)
     if raw_query not in retrieval_queries:
         retrieval_queries.insert(0, raw_query)
     semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
+    _mark_stage(stage_timings, "query_expansion", stage_started_at)
     _log_event(
         logging.INFO,
         "ask_started",
@@ -2672,32 +3102,45 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     # 로그에 처리된 질문과 세션 ID를 출력하여 디버깅을 돕습니다.
     _log_event(logging.INFO, "ask_session", request_id=request_id, session_id=session_id)
 
-    user_major = req.major
     final_where_filter: Dict = {}
     # 백엔드는 학과 미지정 시 null을 보낸다("Unknown"/"Default"는 보내지 않지만 방어적으로 함께 제외).
     if user_major and user_major not in _NO_MAJOR_SENTINELS:
-        final_where_filter["major"] = {"$eq": user_major}
+        college = None
+        if RAG_COLLEGE_SCOPE_ENABLED:
+            try:
+                college = college_of(user_major)
+            except Exception:
+                college = None
+        if college:
+            final_where_filter["$or"] = [{"major": {"$eq": user_major}}, {"college_name": {"$eq": college}}]
+        else:
+            final_where_filter["major"] = {"$eq": user_major}
 
     _log_event(logging.INFO, "ask_filters", request_id=request_id, filters=final_where_filter)
+    stage_started_at = time.perf_counter()
     routed = await route_query(
         analysis_meta.result.normalized_question
         if analysis_meta.result is not None
         else expanded_query
     )
+    _mark_stage(stage_timings, "routing", stage_started_at)
     route = _merge_routes(analysis_meta, routed)
     if _should_append_rules_route(semantic_query, route):
         route.append("rules")
     entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
+    stage_started_at = time.perf_counter()
     date_filter = await run_in_threadpool(
         extract_date_filter_from_query,
         semantic_query,
     )
+    _mark_stage(stage_timings, "date_filter_parse", stage_started_at)
     date_filter_applied = date_filter is not None
     date_filter_relaxed = False
     recent_notice_query = _is_recent_notice_query(semantic_query, route)
     notice_board_filter = _extract_notice_board_filter(semantic_query, route)
     retrieval_policy = _resolve_retrieval_policy(semantic_query, route)
 
+    stage_started_at = time.perf_counter()
     frames, date_filter_eliminated_any, unavailable_datasets = await _retrieve_frames_for_queries(
         route=route,
         queries=retrieval_queries,
@@ -2736,7 +3179,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     else:
         merged = _merge_query_hits(frames)
 
-    merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query, entry_year=entry_year)
+    merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query, entry_year=entry_year, user_major=req.major)
     merged = merged.head(DEFAULT_TOP_K).reset_index(drop=True)
 
     def _evaluate_fallback(current_merged: pd.DataFrame) -> tuple[float | None, bool, float, str | None]:
@@ -2786,9 +3229,10 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             frames.extend(guide_frames)
             route.append("rules")
             merged = _merge_query_hits(frames)
-            merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query, entry_year=entry_year)
+            merged = _prepare_merged_results(merged, recent_notice_query, retrieval_policy, semantic_query, entry_year=entry_year, user_major=req.major)
             merged = merged.head(DEFAULT_TOP_K).reset_index(drop=True)
             top_hybrid_score, notice_topic_aligned, effective_min_score, fallback_reason = _evaluate_fallback(merged)
+    _mark_stage(stage_timings, "retrieval_and_rerank", stage_started_at)
 
     matched_queries = _collect_matched_queries(merged)
 
@@ -2845,6 +3289,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             json.dumps(matched_queries, ensure_ascii=False),
             top_hybrid_score,
             [],
+            {**stage_timings, "total": round((time.perf_counter() - request_started_at) * 1000, 2)},
+            llm_usage,
         )
         await run_in_threadpool(append_manual_history, session_id, raw_query, fallback_answer)
         return AskResponse(
@@ -2857,9 +3303,12 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=fallback_reason,
         )
 
+    stage_started_at = time.perf_counter()
     context_parts = []
-    for idx, row in merged.iterrows():
-        part = f"문서 {idx+1} [출처: {row.get('source', '알 수 없음')}]:\n"
+    citation_numbers: dict[object, int] = {}
+    for citation_number, (row_index, row) in enumerate(merged.iterrows(), start=1):
+        citation_numbers[row_index] = citation_number
+        part = f"문서 {citation_number} [출처: {row.get('source', '알 수 없음')}]:\n"
         if row.get('title'):
             part += f"제목: {row.get('title')}\n"
         if row.get('published_at'): # 공지사항, 일정 등 날짜 정보가 있는 경우
@@ -2899,16 +3348,20 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         context_text = _build_context_text(context_parts, MAX_CONTEXT_LENGTH, prefix=guide_context_prefix)
     else:
         context_text = (guide_context_prefix + "검색된 관련 문서가 없습니다. 일반적인 대화로 응답해주세요.")[:MAX_CONTEXT_LENGTH]
+    _mark_stage(stage_timings, "context_build", stage_started_at)
     # LLM에게 현재 날짜를 전달하여 "오늘", "이번 학기" 등의 표현을 해석하도록 돕습니다.
     current_date = _get_current_kst_string()
 
     try:
+        stage_started_at = time.perf_counter()
         answer = await generate_langchain_answer(
             question=semantic_query,
             context=context_text,
             session_id=session_id,
-            current_date=current_date
+            current_date=current_date,
+            usage_collector=llm_usage,
         )
+        _mark_stage(stage_timings, "generation", stage_started_at)
     except Exception as e:
         _log_event(logging.ERROR, "llm_generation_failed", exc_info=True, request_id=request_id)
         answer = "죄송합니다. 답변을 생성하는 도중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
@@ -2924,12 +3377,13 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     citations = re.sub(r'<[^>]+>', '', citations_raw)
 
     score_columns = {"vector_score", "sparse_score", "hybrid_score", "norm_recency", "final_score"}
-    internal_columns = {"chunk_text", "dataset", "sort_date", "sort_timestamp", "norm_hybrid", "recent_notice_priority", "matched_query_count", "query_match_bonus"} | score_columns
+    internal_columns = {"chunk_text", "dataset", "sort_date", "sort_timestamp", "norm_hybrid", "recent_notice_priority", "matched_query_count", "query_match_bonus", "date_unknown_auxiliary"} | score_columns
     sources = [
         SourceChunk(
             source=_clean_response_str(row.get("dataset")) or "",
             metadata={col: _clean_response_value(row.get(col)) for col in row.index if col not in internal_columns},
             snippet=_clean_response_str(row.get("chunk_text")) or "",
+            citation_number=citation_numbers.get(row_index),
             chunk_id=_clean_response_str(row.get("chunk_id")),
             title=_clean_response_str(row.get("title")),
             url=_clean_response_str(row.get("url")),
@@ -2941,17 +3395,20 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             final_score=_clean_response_float(row.get("final_score")),
             sort_date=_clean_response_str(row.get("sort_date")),
         )
-        for _, row in merged.iterrows()
+        for row_index, row in merged.iterrows()
     ]
 
     suggested_questions: list[str] = []
     if RAG_SUGGEST_FOLLOWUPS:
         try:
+            stage_started_at = time.perf_counter()
             suggested_questions = await generate_followup_questions(
                 raw_query,
                 answer,
                 RAG_SUGGEST_FOLLOWUPS_COUNT,
+                usage_collector=llm_usage,
             )
+            _mark_stage(stage_timings, "followup_generation", stage_started_at)
         except Exception as exc:  # noqa: BLE001
             _log_event(
                 logging.WARNING,
@@ -2960,6 +3417,34 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 error=str(exc),
             )
 
+    grounding_result = None
+    grounded: bool | None = None
+    grounding_score: float | None = None
+    if RAG_GROUNDING_CHECK_ENABLED and len(sources) > 0:
+        try:
+            stage_started_at = time.perf_counter()
+            grounding_result = await check_answer_grounding(
+                raw_query,
+                answer,
+                context_text,
+                min_score=RAG_GROUNDING_MIN_SCORE,
+                usage_collector=llm_usage,
+            )
+            _mark_stage(stage_timings, "grounding_check", stage_started_at)
+            if grounding_result.checked:
+                grounded = grounding_result.grounded
+                grounding_score = grounding_result.score
+                if not grounding_result.grounded:
+                    answer = answer + "\n\n" + _build_grounding_confirmation_answer(grounding_result, sources)
+                    suggested_questions = []
+        except Exception as exc:  # noqa: BLE001
+            _log_event(
+                logging.WARNING,
+                "grounding_check_failed",
+                request_id=request_id,
+                error=str(exc),
+            )
+    _mark_stage(stage_timings, "total", request_started_at)
     await run_in_threadpool(
         _save_rag_evaluation_log,
         request_id,
@@ -2983,7 +3468,12 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         json.dumps(matched_queries, ensure_ascii=False),
         top_hybrid_score,
         sources,
+        stage_timings,
+        llm_usage,
     )
+    if grounding_result is not None and grounding_result.checked:
+        await run_in_threadpool(_update_grounding_log, request_id, grounding_result)
+    await run_in_threadpool(_update_observability_log, request_id, stage_timings, llm_usage)
 
     _log_event(
         logging.INFO,
@@ -3002,6 +3492,22 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         notice_board_filter=notice_board_filter,
     )
 
+    if RAG_SEMANTIC_CACHE_ENABLED and _should_cache_answer(route, False, date_filter_applied, grounded, answer):
+        await run_in_threadpool(
+            semantic_cache.put,
+            raw_query,
+            semantic_cache_ns,
+            {
+                "answer": answer,
+                "citations": citations,
+                "route": route,
+                "sources": [s.dict() if hasattr(s, "dict") else s for s in sources],
+                "suggested_questions": suggested_questions,
+                "grounded": grounded,
+                "grounding_score": grounding_score,
+            },
+        )
+
     return AskResponse(
         request_id=request_id,
         answer=answer,
@@ -3009,6 +3515,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         route=route,
         sources=sources,
         suggested_questions=suggested_questions,
+        grounded=grounded,
+        grounding_score=grounding_score,
         fallback_triggered=False,
         fallback_reason=None,
     )
@@ -3039,6 +3547,11 @@ async def reindex_dataset(target: str):
         target_param = None if target == "all" else target
         # run_in_threadpool because reindexing can be slow and blocking
         results = await run_in_threadpool(reindex_from_db, target_param)
+
+        # meals는 SQLite가 아닌 CSV 기반이라 reindex_from_db가 다루지 않는다.
+        # meals/all 대상이면 CSV에서 직접 재빌드한다.
+        if target in ("meals", "all"):
+            results["meals"] = await run_in_threadpool(ingest_meals)
 
         # Clear cache to force reload
         if target == "all":

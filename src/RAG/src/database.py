@@ -220,6 +220,9 @@ class RagQueryLog(Base):
     answer = Column(Text)
     fallback_triggered = Column(Boolean, default=False)
     fallback_reason = Column(String, nullable=True)
+    grounding_checked = Column(Boolean, default=False)
+    grounding_grounded = Column(Boolean, nullable=True)
+    grounding_score = Column(Float, nullable=True)
     date_filter_applied = Column(Boolean, default=False)
     date_filter_relaxed = Column(Boolean, default=False)
     analysis_intent = Column(String, nullable=True)
@@ -233,6 +236,9 @@ class RagQueryLog(Base):
     matched_queries_json = Column(Text, nullable=True)
     top_hybrid_score = Column(Float, nullable=True)
     source_count = Column(Integer, default=0)
+    stage_timings_json = Column(Text, nullable=True)
+    llm_usage_json = Column(Text, nullable=True)
+    estimated_llm_cost_usd = Column(Float, nullable=True)
     created_at = Column(DateTime, default=kst_now, index=True)
 
     retrievals = relationship("RagRetrievalLog", back_populates="query_log")
@@ -296,6 +302,9 @@ def ensure_runtime_schema() -> None:
         "rag_query_logs",
         {
             "fallback_reason": "VARCHAR",
+            "grounding_checked": "BOOLEAN DEFAULT 0",
+            "grounding_grounded": "BOOLEAN",
+            "grounding_score": "FLOAT",
             "date_filter_applied": "BOOLEAN DEFAULT 0",
             "date_filter_relaxed": "BOOLEAN DEFAULT 0",
             "analysis_intent": "VARCHAR",
@@ -307,6 +316,11 @@ def ensure_runtime_schema() -> None:
             "analysis_used": "BOOLEAN DEFAULT 0",
             "analysis_failed": "BOOLEAN DEFAULT 0",
             "matched_queries_json": "TEXT",
+            "top_hybrid_score": "FLOAT",
+            "source_count": "INTEGER DEFAULT 0",
+            "stage_timings_json": "TEXT",
+            "llm_usage_json": "TEXT",
+            "estimated_llm_cost_usd": "FLOAT",
         },
     )
     _ensure_sqlite_columns(
