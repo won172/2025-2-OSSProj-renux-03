@@ -16,6 +16,11 @@ export interface ChatStreamMetadata {
   fallbackReason?: string | null
 }
 
+export interface ChatStreamGrounding {
+  grounded: boolean
+  groundingScore?: number
+}
+
 export interface ChatStreamHandlers {
   /** 토큰이 누적될 때마다 호출(누적된 전체 답변 문자열 전달) */
   onText: (accumulated: string) => void
@@ -23,6 +28,8 @@ export interface ChatStreamHandlers {
   onMetadata?: (meta: ChatStreamMetadata) => void
   /** 추천 후속질문 수신 시 호출 */
   onSuggestions?: (questions: string[]) => void
+  /** 답변 근거성 경고 수신 시 호출 */
+  onGrounding?: (grounding: ChatStreamGrounding) => void
   /** 첫 토큰 수신 전 연결 실패가 발생해 같은 payload로 재연결할 때 호출 */
   onRetry?: (attempt: number, delayMs: number) => void
 }
@@ -97,6 +104,8 @@ export const useChatStream = () => {
             content?: string
             message?: string
             questions?: string[]
+            grounded?: boolean
+            score?: number
           }
           try {
             data = JSON.parse(line.substring(6))
@@ -117,6 +126,11 @@ export const useChatStream = () => {
             handlers.onText(accumulatedAnswer)
           } else if (data.type === 'suggestions') {
             handlers.onSuggestions?.(data.questions ?? [])
+          } else if (data.type === 'grounding') {
+            handlers.onGrounding?.({
+              grounded: data.grounded ?? true,
+              groundingScore: typeof data.score === 'number' ? data.score : undefined,
+            })
           } else if (data.type === 'error') {
             throw new Error(data.message ?? 'Streaming error')
           }

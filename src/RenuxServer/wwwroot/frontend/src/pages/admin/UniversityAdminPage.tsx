@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { CouncilOrganization, PendingAnswerReview } from '../../types/admin'
+import type { CouncilOrganization, PendingAnswerReview, RagFeedbackItem } from '../../types/admin'
 import { apiFetch } from '../../api/client'
 
 // Interfaces for API responses
@@ -62,6 +62,17 @@ interface AdminUserAccount {
   updatedTime: string
 }
 
+interface ApiRagFeedbackItem {
+  id: number
+  rating: number
+  reason: string | null
+  comment: string | null
+  major: string | null
+  created_at: string | null
+  question: string | null
+  answer: string | null
+}
+
 interface RagDatasetStatus {
   key: string
   collection: string
@@ -92,6 +103,14 @@ interface RagAdminStatus {
     fallback_count: number
     latest_query_at: string | null
     fallback_reasons?: Record<string, number>
+  }
+  feedback?: {
+    total: number
+    up: number
+    down: number
+    satisfaction: number | null
+    downReasons?: Record<string, number>
+    down_reasons?: Record<string, number>
   }
   notices_ingestion?: {
     last_collection_at: string | null
@@ -176,6 +195,19 @@ const formatDateTime = (value?: string | null) => {
   }).format(date)
 }
 
+const feedbackReasonLabels: Record<string, string> = {
+  inaccurate: '부정확',
+  outdated: '오래된 정보',
+  no_source: '출처 없음',
+  irrelevant: '관련 없음',
+  other: '기타',
+}
+
+const getFeedbackReasonLabel = (reason?: string | null) => {
+  if (!reason) return '미지정'
+  return feedbackReasonLabels[reason] ?? reason
+}
+
 const UniversityAdminPage = () => {
   const navigate = useNavigate()
   const [organizations, setOrganizations] = useState<CouncilOrganization[]>([])
@@ -196,6 +228,9 @@ const UniversityAdminPage = () => {
   const [error, setError] = useState<string | null>(null)
   const [ragStatus, setRagStatus] = useState<RagAdminStatus | null>(null)
   const [ragStatusError, setRagStatusError] = useState<string | null>(null)
+  const [negativeFeedback, setNegativeFeedback] = useState<RagFeedbackItem[]>([])
+  const [feedbackLoading, setFeedbackLoading] = useState(false)
+  const [feedbackError, setFeedbackError] = useState<string | null>(null)
 
   const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -217,6 +252,7 @@ const UniversityAdminPage = () => {
   // Fetch Data — 새로고침 버튼에서도 재사용할 수 있도록 useEffect 밖으로 분리
   const fetchData = useCallback(async () => {
         setLoading(true)
+        setFeedbackLoading(true)
         setError(null)
         try {
             // 1. Fetch Organizations
@@ -353,11 +389,37 @@ const UniversityAdminPage = () => {
                 setRagStatusError('RAG 운영 상태를 불러오지 못했습니다.')
             }
 
+            // 6. Fetch recent negative RAG feedback
+            try {
+                const feedbackData = await apiFetch<ApiRagFeedbackItem[]>(`/admin/rag-feedback?rating=-1&limit=50&t=${new Date().getTime()}`)
+                const mappedFeedback: RagFeedbackItem[] = Array.isArray(feedbackData)
+                    ? feedbackData.map((item) => ({
+                        id: item.id,
+                        rating: item.rating,
+                        reason: item.reason,
+                        comment: item.comment,
+                        major: item.major,
+                        createdAt: item.created_at,
+                        question: item.question,
+                        answer: item.answer,
+                    }))
+                    : []
+                setNegativeFeedback(mappedFeedback)
+                setFeedbackError(null)
+            } catch (e) {
+                console.error('Failed to fetch RAG feedback:', e)
+                setNegativeFeedback([])
+                setFeedbackError('사용자 피드백을 불러오지 못했습니다.')
+            } finally {
+                setFeedbackLoading(false)
+            }
+
         } catch (e) { 
             console.error('An unexpected error occurred during admin data fetch:', e);
             setError('관리자 데이터를 불러오는 중 예상치 못한 오류가 발생했습니다.');
         } finally {
             setLoading(false)
+            setFeedbackLoading(false)
         }
   }, [])
 
@@ -404,6 +466,11 @@ const UniversityAdminPage = () => {
   const fallbackRate = ragStatus && ragStatus.rag_logs.total_queries > 0
     ? Math.round((ragStatus.rag_logs.fallback_count / ragStatus.rag_logs.total_queries) * 100)
     : 0
+  const feedbackSummary = ragStatus?.feedback
+  const satisfactionPercent = feedbackSummary?.satisfaction == null
+    ? null
+    : Math.round(feedbackSummary.satisfaction * 100)
+  const downReasons = feedbackSummary?.down_reasons ?? feedbackSummary?.downReasons ?? {}
 
   const handleNavigateHome = () => navigate('/')
 
@@ -1207,6 +1274,83 @@ const UniversityAdminPage = () => {
             </>
           ) : (
             <div className="admin-table__empty">RAG 운영 상태를 확인하는 중입니다.</div>
+          )}
+        </section>
+
+        <section className="admin-panel glass-panel" style={{ marginTop: '16px' }}>
+          <header className="admin-panel__header">
+            <div>
+              <h2 className="admin-panel__title">사용자 피드백</h2>
+              <p className="admin-panel__subtitle">RAG 답변 평가와 최근 부정 피드백</p>
+            </div>
+            <span className="status-pill status-pill--pending">
+              부정 {feedbackSummary?.down ?? 0}
+            </span>
+          </header>
+
+          <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '16px' }}>
+            <article className="admin-card admin-card--compact">
+              <p className="admin-card__label">만족도</p>
+              <strong className="admin-card__value">
+                {satisfactionPercent == null ? '-' : `${satisfactionPercent}%`}
+              </strong>
+            </article>
+            <article className="admin-card admin-card--compact">
+              <p className="admin-card__label">좋아요</p>
+              <strong className="admin-card__value">👍 {feedbackSummary?.up ?? 0}</strong>
+            </article>
+            <article className="admin-card admin-card--compact">
+              <p className="admin-card__label">싫어요</p>
+              <strong className="admin-card__value">👎 {feedbackSummary?.down ?? 0}</strong>
+            </article>
+          </div>
+
+          {Object.keys(downReasons).length > 0 && (
+            <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: '16px' }}>
+              {Object.entries(downReasons).map(([reason, count]) => (
+                <article key={reason} className="admin-card admin-card--compact">
+                  <p className="admin-card__label">{getFeedbackReasonLabel(reason)}</p>
+                  <strong className="admin-card__value">{count}</strong>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {feedbackLoading ? (
+            <div className="admin-table__empty">사용자 피드백을 불러오는 중입니다.</div>
+          ) : feedbackError ? (
+            <div className="admin-alert admin-alert--danger">{feedbackError}</div>
+          ) : negativeFeedback.length > 0 ? (
+            <div className="admin-table" style={{ overflowX: 'auto' }}>
+              <div style={{ minWidth: '760px' }}>
+                <div className="admin-table__head" style={{ gridTemplateColumns: '0.8fr 1.4fr 2fr 0.9fr' }}>
+                  <span>사유</span>
+                  <span>코멘트</span>
+                  <span>질문</span>
+                  <span>시각</span>
+                </div>
+                <ul className="admin-table__body">
+                  {negativeFeedback.map((item) => (
+                    <li
+                      key={item.id}
+                      className="admin-table__row"
+                      style={{ gridTemplateColumns: '0.8fr 1.4fr 2fr 0.9fr' }}
+                    >
+                      <span>
+                        <span className="status-pill status-pill--danger">
+                          {getFeedbackReasonLabel(item.reason)}
+                        </span>
+                      </span>
+                      <span title={item.comment ?? ''}>{item.comment?.trim() || '-'}</span>
+                      <span title={item.question ?? ''}>{item.question?.trim() || '-'}</span>
+                      <span title={formatDateTime(item.createdAt)}>{formatDateTime(item.createdAt)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <div className="admin-table__empty">최근 부정 피드백이 없습니다.</div>
           )}
         </section>
 

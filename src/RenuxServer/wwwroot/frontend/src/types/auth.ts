@@ -7,4 +7,5 @@ export interface AuthNameResponse {
   majorName?: string
   departmentName?: string
   departmentId?: string
+  entryYear?: number | string
 }

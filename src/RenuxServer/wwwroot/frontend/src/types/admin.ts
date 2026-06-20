@@ -54,3 +54,26 @@ export interface RagChatLog {
   route: string
   source_count: number
 }
+
+export interface RagFeedbackItem {
+  id: number
+  rating: number
+  reason: string | null
+  comment: string | null
+  major: string | null
+  createdAt: string | null
+  question: string | null
+  answer: string | null
+}
+
+export interface RagAdminFeedbackSummary {
+  total: number
+  up: number
+  down: number
+  satisfaction: number | null
+  downReasons?: Record<string, number>
+}
+
+export interface RagAdminStatus {
+  feedback?: RagAdminFeedbackSummary
+}

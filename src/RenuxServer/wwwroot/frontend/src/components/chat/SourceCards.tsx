@@ -1,23 +1,33 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 export type ChatSource = {
   source?: string | null
+  citationNumber?: number | null
+  citation_number?: number | null
   chunkId?: string | null
+  chunk_id?: string | null
   title?: string | null
   url?: string | null
   publishedAt?: string | null
+  published_at?: string | null
   snippet?: string | null
   vectorScore?: number | null
+  vector_score?: number | null
   sparseScore?: number | null
+  sparse_score?: number | null
   hybridScore?: number | null
+  hybrid_score?: number | null
   recencyScore?: number | null
+  recency_score?: number | null
   finalScore?: number | null
+  final_score?: number | null
 }
 
 type SourceCardsProps = {
   sources?: ChatSource[] | null
   showScores: boolean
   isFallback?: boolean
+  activeCitationNumber?: number | null
 }
 
 const datasetLabels: Record<string, string> = {
@@ -49,6 +59,15 @@ const getDatasetLabel = (source?: string | null) => {
   return datasetLabels[source] ?? source
 }
 
+const getCitationNumber = (source: ChatSource) => source.citationNumber ?? source.citation_number ?? null
+const getChunkId = (source: ChatSource) => source.chunkId ?? source.chunk_id ?? null
+const getPublishedAt = (source: ChatSource) => source.publishedAt ?? source.published_at ?? null
+const getVectorScore = (source: ChatSource) => source.vectorScore ?? source.vector_score ?? null
+const getSparseScore = (source: ChatSource) => source.sparseScore ?? source.sparse_score ?? null
+const getHybridScore = (source: ChatSource) => source.hybridScore ?? source.hybrid_score ?? null
+const getRecencyScore = (source: ChatSource) => source.recencyScore ?? source.recency_score ?? null
+const getFinalScore = (source: ChatSource) => source.finalScore ?? source.final_score ?? null
+
 const buildSourceKey = (source: ChatSource) => {
   const url = source.url?.trim()
   if (url) return url
@@ -56,7 +75,7 @@ const buildSourceKey = (source: ChatSource) => {
   return [
     source.source?.trim() ?? '',
     source.title?.trim() ?? '',
-    source.publishedAt?.trim() ?? '',
+    getPublishedAt(source)?.trim() ?? '',
   ].join('::')
 }
 
@@ -77,36 +96,54 @@ const mergeSources = (sources: ChatSource[]) => {
 
     grouped.set(key, {
       ...existing,
-      chunkId: existing.chunkId ?? source.chunkId,
+      citationNumber: getCitationNumber(existing) ?? getCitationNumber(source),
+      chunkId: getChunkId(existing) ?? getChunkId(source),
       title: existing.title ?? source.title,
       url: existing.url ?? source.url,
-      publishedAt: existing.publishedAt ?? source.publishedAt,
+      publishedAt: getPublishedAt(existing) ?? getPublishedAt(source),
       snippet: nextSnippetLength > currentSnippetLength ? source.snippet : existing.snippet,
-      vectorScore: Math.max(existing.vectorScore ?? Number.NEGATIVE_INFINITY, source.vectorScore ?? Number.NEGATIVE_INFINITY),
-      sparseScore: Math.max(existing.sparseScore ?? Number.NEGATIVE_INFINITY, source.sparseScore ?? Number.NEGATIVE_INFINITY),
-      hybridScore: Math.max(existing.hybridScore ?? Number.NEGATIVE_INFINITY, source.hybridScore ?? Number.NEGATIVE_INFINITY),
-      recencyScore: Math.max(existing.recencyScore ?? Number.NEGATIVE_INFINITY, source.recencyScore ?? Number.NEGATIVE_INFINITY),
-      finalScore: Math.max(existing.finalScore ?? Number.NEGATIVE_INFINITY, source.finalScore ?? Number.NEGATIVE_INFINITY),
+      vectorScore: Math.max(getVectorScore(existing) ?? Number.NEGATIVE_INFINITY, getVectorScore(source) ?? Number.NEGATIVE_INFINITY),
+      sparseScore: Math.max(getSparseScore(existing) ?? Number.NEGATIVE_INFINITY, getSparseScore(source) ?? Number.NEGATIVE_INFINITY),
+      hybridScore: Math.max(getHybridScore(existing) ?? Number.NEGATIVE_INFINITY, getHybridScore(source) ?? Number.NEGATIVE_INFINITY),
+      recencyScore: Math.max(getRecencyScore(existing) ?? Number.NEGATIVE_INFINITY, getRecencyScore(source) ?? Number.NEGATIVE_INFINITY),
+      finalScore: Math.max(getFinalScore(existing) ?? Number.NEGATIVE_INFINITY, getFinalScore(source) ?? Number.NEGATIVE_INFINITY),
     })
   })
 
   return Array.from(grouped.values()).map((source) => ({
     ...source,
-    vectorScore: Number.isFinite(source.vectorScore ?? Number.NaN) ? source.vectorScore : null,
-    sparseScore: Number.isFinite(source.sparseScore ?? Number.NaN) ? source.sparseScore : null,
-    hybridScore: Number.isFinite(source.hybridScore ?? Number.NaN) ? source.hybridScore : null,
-    recencyScore: Number.isFinite(source.recencyScore ?? Number.NaN) ? source.recencyScore : null,
-    finalScore: Number.isFinite(source.finalScore ?? Number.NaN) ? source.finalScore : null,
+    citationNumber: getCitationNumber(source),
+    chunkId: getChunkId(source),
+    publishedAt: getPublishedAt(source),
+    vectorScore: Number.isFinite(getVectorScore(source) ?? Number.NaN) ? getVectorScore(source) : null,
+    sparseScore: Number.isFinite(getSparseScore(source) ?? Number.NaN) ? getSparseScore(source) : null,
+    hybridScore: Number.isFinite(getHybridScore(source) ?? Number.NaN) ? getHybridScore(source) : null,
+    recencyScore: Number.isFinite(getRecencyScore(source) ?? Number.NaN) ? getRecencyScore(source) : null,
+    finalScore: Number.isFinite(getFinalScore(source) ?? Number.NaN) ? getFinalScore(source) : null,
   }))
 }
 
-const SourceCards = ({ sources, showScores, isFallback = false }: SourceCardsProps) => {
+const SourceCards = ({ sources, showScores, isFallback = false, activeCitationNumber = null }: SourceCardsProps) => {
+  const detailsRef = useRef<HTMLDetailsElement | null>(null)
+  const [isOpen, setIsOpen] = useState(false)
   const normalizedSources = useMemo(() => {
     if (!Array.isArray(sources) || sources.length === 0) return []
     return mergeSources(sources)
   }, [sources])
 
   const hasSources = normalizedSources.length > 0
+
+  useEffect(() => {
+    if (!activeCitationNumber || !hasSources) return
+    setIsOpen(true)
+
+    window.setTimeout(() => {
+      const activeCard = detailsRef.current?.querySelector<HTMLElement>(
+        `[data-citation-number="${activeCitationNumber}"]`,
+      )
+      activeCard?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 0)
+  }, [activeCitationNumber, hasSources])
 
   if (!hasSources) {
     if (!isFallback) return null
@@ -120,7 +157,13 @@ const SourceCards = ({ sources, showScores, isFallback = false }: SourceCardsPro
   }
 
   return (
-    <details className="source-cards" aria-label="답변 출처">
+    <details
+      className="source-cards"
+      aria-label="답변 출처"
+      open={isOpen}
+      ref={detailsRef}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+    >
       <summary className="source-cards__header">
         <span className="source-cards__title">사용 출처</span>
         <span className="source-cards__count">{normalizedSources.length}개</span>
@@ -128,11 +171,20 @@ const SourceCards = ({ sources, showScores, isFallback = false }: SourceCardsPro
       <div className="source-cards__list">
         {normalizedSources.map((source, index) => {
           const title = source.title?.trim() || source.snippet?.trim().slice(0, 42) || `출처 ${index + 1}`
+          const citationNumber = getCitationNumber(source) ?? index + 1
+          const isActive = citationNumber === activeCitationNumber
           return (
-            <article className="source-card" key={`${buildSourceKey(source)}-${index}`}>
+            <article
+              className={`source-card${isActive ? ' source-card--active' : ''}`}
+              data-citation-number={citationNumber}
+              key={`${buildSourceKey(source)}-${index}`}
+            >
               <div className="source-card__meta">
-                <span className="source-card__dataset">{getDatasetLabel(source.source)}</span>
-                <span className="source-card__date">{formatDate(source.publishedAt)}</span>
+                <div className="source-card__badges">
+                  <span className="source-card__citation">문서{citationNumber}</span>
+                  <span className="source-card__dataset">{getDatasetLabel(source.source)}</span>
+                </div>
+                <span className="source-card__date">{formatDate(getPublishedAt(source))}</span>
               </div>
               <h4 className="source-card__title">{title}</h4>
               {source.snippet && <p className="source-card__snippet">{source.snippet}</p>}
