@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.search.hybrid import (  # noqa: E402
     _matches_where,
+    build_tfidf_vectorizer,
     hybrid_search,
     load_tfidf,
     load_tfidf_with_ids,
@@ -67,6 +68,17 @@ def test_train_tfidf_persists_chunk_ids(tmp_path):
         _, matrix, loaded_ids = load_tfidf_with_ids("testset")
         assert loaded_ids == ids
         assert matrix.shape[0] == 3
+
+
+def test_korean_tfidf_tokenizer_handles_particle_and_spacing_variants():
+    with patch("src.search.hybrid.TFIDF_TOKENIZER", "korean"):
+        vectorizer = build_tfidf_vectorizer()
+        matrix = vectorizer.fit_transform(["졸업 요건 변경 안내", "장학금 신청 안내"])
+
+        scores = (vectorizer.transform(["졸업요건은"]) @ matrix.T).toarray().ravel()
+
+    assert scores[0] > 0
+    assert scores[0] > scores[1]
 
 
 def test_train_tfidf_rejects_mismatched_ids(tmp_path):

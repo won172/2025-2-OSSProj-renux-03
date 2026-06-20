@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Dict # Dict 추가
@@ -18,6 +19,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from src.config import (
     DEFAULT_TOP_K,
     HYBRID_ALPHA,
+    TFIDF_TOKENIZER,
     TFIDF_REQUIRE_MANIFEST,
     TFIDF_VERIFY_INTEGRITY,
     VECTORIZER_DIR,
@@ -30,6 +32,23 @@ logger = logging.getLogger(__name__)
 # TF-IDF pkl 무결성 매니페스트: {파일명: sha256}. 학습 시 갱신하고 로드 전 대조한다.
 # 경로는 호출 시점에 VECTORIZER_DIR에서 파생한다(테스트의 VECTORIZER_DIR 패치가 함께 적용되도록).
 _MANIFEST_NAME = "manifest.json"
+_KIWI = None
+_KIWI_UNAVAILABLE = False
+_TOKEN_PATTERN = re.compile(r"[가-힣A-Za-z0-9]+")
+_KOREAN_SUFFIXES = tuple(
+    sorted(
+        {
+            "으로부터", "에서부터", "에게서", "께서는", "으로는", "으로서", "으로써",
+            "까지", "부터", "에게", "한테", "께서", "처럼", "보다", "마다", "조차",
+            "마저", "밖에", "에서", "으로", "로서", "로써", "이며", "이고", "하고",
+            "은", "는", "이", "가", "을", "를", "에", "의", "와", "과", "도", "만",
+            "로", "란", "나", "이나", "라도", "이라도", "든지", "인지",
+            "입니다", "합니다", "된다", "된다면", "되는", "되어", "하며", "하여", "하고",
+        },
+        key=len,
+        reverse=True,
+    )
+)
 
 
 def _vectorizer_path(identifier: str) -> Path:
@@ -38,6 +57,113 @@ def _vectorizer_path(identifier: str) -> Path:
 
 def _manifest_path() -> Path:
     return VECTORIZER_DIR / _MANIFEST_NAME
+
+
+def _load_kiwi():
+    global _KIWI, _KIWI_UNAVAILABLE
+    if _KIWI is not None or _KIWI_UNAVAILABLE:
+        return _KIWI
+    try:
+        from kiwipiepy import Kiwi  # type: ignore
+
+        _KIWI = Kiwi()
+    except Exception as exc:  # noqa: BLE001 - optional dependency
+        _KIWI_UNAVAILABLE = True
+        logger.info("Kiwi tokenizer is unavailable; falling back to lightweight Korean tokenizer: %s", exc)
+        return None
+    return _KIWI
+
+
+def _strip_korean_suffix(token: str) -> str:
+    for suffix in _KOREAN_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= 2:
+            return token[: -len(suffix)]
+    return token
+
+
+def _hangul_ngrams(token: str) -> list[str]:
+    if not re.fullmatch(r"[가-힣]+", token) or len(token) < 4:
+        return []
+    grams: list[str] = []
+    for size in (2, 3):
+        grams.extend(token[idx : idx + size] for idx in range(0, len(token) - size + 1))
+    return grams
+
+
+def _light_korean_tokenize(text: str) -> list[str]:
+    tokens: list[str] = []
+    seen: set[str] = set()
+
+    def add(token: str) -> None:
+        token = token.strip().lower()
+        if len(token) < 2 or token in seen:
+            return
+        seen.add(token)
+        tokens.append(token)
+
+    for raw in _TOKEN_PATTERN.findall(str(text)):
+        normalized = raw.lower()
+        add(normalized)
+        stripped = _strip_korean_suffix(normalized)
+        add(stripped)
+        for gram in _hangul_ngrams(stripped):
+            add(gram)
+
+    return tokens
+
+
+def _kiwi_or_light_korean_tokenize(text: str) -> list[str]:
+    kiwi = _load_kiwi()
+    if kiwi is None:
+        return _light_korean_tokenize(text)
+
+    tokens: list[str] = []
+    seen: set[str] = set()
+
+    def add(token: str) -> None:
+        token = token.strip().lower()
+        if len(token) < 2 or token in seen:
+            return
+        seen.add(token)
+        tokens.append(token)
+
+    try:
+        for token in kiwi.tokenize(str(text)):
+            form = getattr(token, "form", "")
+            tag = getattr(token, "tag", "")
+            if tag.startswith(("N", "V", "M", "SL", "SN")):
+                add(form)
+                add(_strip_korean_suffix(form))
+                for gram in _hangul_ngrams(form):
+                    add(gram)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Kiwi tokenization failed; using lightweight tokenizer: %s", exc)
+        return _light_korean_tokenize(text)
+
+    return tokens or _light_korean_tokenize(text)
+
+
+def _resolve_tfidf_tokenizer_name() -> str:
+    name = (TFIDF_TOKENIZER or "korean").strip().lower()
+    if name in {"default", "sklearn", "word"}:
+        return "default"
+    if name in {"korean", "ko", "kiwi", "morph", "morpheme"}:
+        return "korean"
+    logger.warning("Unknown TFIDF_TOKENIZER=%r; using korean tokenizer.", TFIDF_TOKENIZER)
+    return "korean"
+
+
+def build_tfidf_vectorizer() -> TfidfVectorizer:
+    tokenizer_name = _resolve_tfidf_tokenizer_name()
+    if tokenizer_name == "default":
+        return TfidfVectorizer(max_features=10000)
+
+    return TfidfVectorizer(
+        max_features=10000,
+        tokenizer=_kiwi_or_light_korean_tokenize,
+        token_pattern=None,
+        lowercase=False,
+    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -119,7 +245,8 @@ def train_tfidf(
         raise ValueError(
             f"chunk_ids length ({len(ids)}) does not match corpus length ({len(texts)})."
         )
-    vectorizer = TfidfVectorizer(max_features=10000)
+    tokenizer_name = _resolve_tfidf_tokenizer_name()
+    vectorizer = build_tfidf_vectorizer()
     matrix = vectorizer.fit_transform(texts)
     path = _vectorizer_path(identifier)
     joblib.dump(
@@ -132,6 +259,13 @@ def train_tfidf(
                 "document_count": len(texts),
                 "created_at": datetime.now(timezone(timedelta(hours=9))).isoformat(),
                 "sklearn_version": sklearn.__version__,
+                "tokenizer": tokenizer_name,
+                "tokenizer_backend": (
+                    "kiwi"
+                    if tokenizer_name == "korean" and _load_kiwi() is not None
+                    else "light_korean" if tokenizer_name == "korean"
+                    else tokenizer_name
+                ),
             },
         },
         path,
@@ -388,12 +522,12 @@ def hybrid_search_with_meta(
             out[column] = ""
         else:
             out[column] = out[column].fillna("")
-    # major/entry_year/source_type/attachments는 후속 학과 필터·entry_year 가산점·첨부 링크
+    # major/college_name/entry_year/source_type/attachments는 후속 학과 필터·entry_year 가산점·첨부 링크
     # 로직이 사용하므로 존재하면 반드시 함께 반환한다(누락 시 해당 기능이 조용히 비활성).
     desired = [
         "chunk_id", "title", "chunk_text", "hybrid_score", "vector_score", "sparse_score",
         "topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id",
-        "major", "entry_year", "source_type", "attachments",
+        "major", "college_name", "entry_year", "source_type", "attachments",
         "doc_id", "position",  # parent-document 확장(이웃 청크 결합)에 사용
         "is_closed", "restaurant", "meal_date",  # 학식: 휴무 패널티·식당/날짜 표시에 사용
     ]
@@ -415,6 +549,7 @@ __all__ = [
     "load_tfidf",
     "load_tfidf_with_ids",
     "read_tfidf_metadata",
+    "build_tfidf_vectorizer",
     "hybrid_search",
     "hybrid_search_with_meta",
 ]
