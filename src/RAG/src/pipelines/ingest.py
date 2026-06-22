@@ -211,7 +211,7 @@ _BODY_FULL_DATE_END_PATTERN = re.compile(
     r"(?P<day>\d{1,2})"
 )
 _BODY_MONTH_DAY_END_PATTERN = re.compile(
-    r"(?:~|-|–|—|∼|〜)\s*(?P<month>\d{1,2})\s*[.\-/월]\s*(?P<day>\d{1,2})"
+    r"(?:~|-|–|—|∼|〜)\s*(?P<month>\d{1,2})\s*[\-/월]\s*(?P<day>\d{1,2})"
 )
 _BODY_FULL_DATE_SINGLE_PATTERN = re.compile(
     r"(?P<year>\d{4})\s*[.\-/년]\s*"
@@ -1289,7 +1289,7 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
             for chunk, course in query.all():
                 try:
                     raw_data = json.loads(course.raw_data) if course.raw_data else {}
-                except:
+                except (json.JSONDecodeError, TypeError, ValueError):
                     raw_data = {}
                 
                 data.append({
@@ -1303,7 +1303,8 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
                     "url": "",
                     "published_at": "",
                     "course_id": course.id,
-                    "major": raw_data.get("major", "")
+                    "major": raw_data.get("major", ""),
+                    "college_name": raw_data.get("college_name", "")
                 })
             if data:
                 df = pd.DataFrame(data)
