@@ -1,7 +1,7 @@
 {
   "courses_tfidf.pkl": "51d583f7c6858147a2cb0f74bb3d54d495c440a97ce98ba55ede832afd6af75e",
   "meals_tfidf.pkl": "a85bf4e69aad1f94911b683a3657a74f470e76f69f9f922d396ac8d0d699eb35",
-  "notices_tfidf.pkl": "1b0ed05e68f3ef9aad57fbc053b1f1dd7b476f1a6f51cfb0d3ab1e6ffe9354b9",
+  "notices_tfidf.pkl": "d49a4839330fab278e283390d587b5b2b64b8ac76873b4b51406076cd7fa6f92",
   "rules_tfidf.pkl": "05e9e9326a67751b4ef2693f8600f732e9de9579526c594357b2e542d0045034",
   "schedule_tfidf.pkl": "00bd5511c3b72e2b45db1768dbb43e4827525c386ae61b47e8a297fd2c108f0b",
   "staff_tfidf.pkl": "6dd9f540578f702b2164abbc31104f734b780eb1c7792d374ac34065ad746fcb"
