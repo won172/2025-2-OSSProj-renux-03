@@ -11,6 +11,7 @@ primary_region = 'nrt'
 [env]
   HF_HOME = "/app/artifacts/huggingface_cache"
   HUGGINGFACE_HUB_CACHE = "/app/artifacts/huggingface_cache"
+  RAG_SCHEDULER_ENABLED = "1"
   RAG_REQUIRE_OPENAI_API_KEY = "1"
   SENTENCE_TRANSFORMERS_HOME = "/app/artifacts/huggingface_cache"
 

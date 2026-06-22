@@ -53,3 +53,25 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m py_compile api/rag_service.py src/services/router.py src/services/langchain_chat.py src/config.py
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - secret-scan
+      - frontend
+      - backend
+      - rag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy RAG
+        run: flyctl deploy --remote-only --app rag-cinder-harborbird-7558
+        working-directory: src/RAG
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: Deploy RenuxServer
+        run: flyctl deploy --remote-only --app dongttok-api
+        working-directory: src/RenuxServer
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
