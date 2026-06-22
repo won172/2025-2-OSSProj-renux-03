@@ -166,6 +166,27 @@ static public class AdminProxyApis
             }
         }));
 
+        RequireUniversityLevel(app.MapGet("rag-feedback", async (HttpRequest request, HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
+        {
+            string url = $"{RagServiceUrl}/admin/feedback{request.QueryString}";
+            logger.LogInformation("Proxying /admin/rag-feedback to {Url}", url);
+            try
+            {
+                var client = httpClientFactory.CreateClient();
+                var proxyRes = await client.GetAsync(url);
+                logger.LogInformation("RAG service response: {Status}", proxyRes.StatusCode);
+                response.StatusCode = (int)proxyRes.StatusCode;
+                var contentStream = await proxyRes.Content.ReadAsStreamAsync();
+                return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error proxying to RAG service at {Url}", url);
+                // 내부 URL/예외 메시지는 응답에 노출하지 않는다 (GlobalExceptionHandler 정책과 동일)
+                return Results.Problem(detail: "RAG 서비스 연결에 실패했습니다.", statusCode: 500);
+            }
+        }));
+
         RequireUniversityLevel(app.MapGet("rag-logs/export", async (HttpRequest request, HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
         {
             logger.LogInformation("Proxying /admin/rag-logs/export to {Url}/admin/rag-logs/export", RagServiceUrl);

@@ -1,12 +1,11 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
-import rehypeExternalLinks from 'rehype-external-links'
-import remarkGfm from 'remark-gfm'
 import { apiFetch } from '../../api/client'
 import { useChatStream } from '../../hooks/useChatStream'
+import ChatMarkdown from '../../components/chat/ChatMarkdown'
 import CopyButton from '../../components/chat/CopyButton'
 import MessageFeedback from '../../components/chat/MessageFeedback'
+import RegenerateButton from '../../components/chat/RegenerateButton'
 import SuggestedQuestions from '../../components/chat/SuggestedQuestions'
 import SourceCards, { type ChatSource } from '../../components/chat/SourceCards'
 import type { ActiveChat } from '../../types/chat'
@@ -22,6 +21,8 @@ interface ChatPageMessage {
   isFallback?: boolean
   fallbackReason?: string | null
   suggestedQuestions?: string[]
+  grounded?: boolean
+  groundingScore?: number
 }
 
 const epochTicks = 621355968000000000 // .NET DateTime epoch ticks
@@ -54,6 +55,7 @@ const ChatPage = () => {
   const [inputValue, setInputValue] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [activeCitation, setActiveCitation] = useState<{ messageId: string; citationNumber: number } | null>(null)
   const { streamMessage } = useChatStream()
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const showRagScores = useMemo(() => {
@@ -180,6 +182,10 @@ const ChatPage = () => {
             setMessages((prev) =>
               prev.map((msg) => (msg.id === botMessageId ? { ...msg, suggestedQuestions: questions } : msg)),
             ),
+          onGrounding: ({ grounded, groundingScore }) =>
+            setMessages((prev) =>
+              prev.map((msg) => (msg.id === botMessageId ? { ...msg, grounded, groundingScore } : msg)),
+            ),
           onRetry: (attempt) => {
             setSendError(`연결이 끊겨 재시도 중입니다. (${attempt}/2)`)
             setMessages((prev) =>
@@ -272,40 +278,44 @@ const ChatPage = () => {
             </div>
           ) : (
             <ul className="chat-bubbles">
-              {messages.map((message) => {
+              {messages.map((message, index) => {
                 const messageTime = formatMessageTime(message.createdTime)
+                const previousUserMessage = !message.isAsk
+                  ? [...messages.slice(0, index)].reverse().find((candidate) => candidate.isAsk && candidate.content.trim().length > 0)
+                  : null
                 return (
                   <li
                     key={message.id}
                     className={`chat-bubble ${message.isAsk ? 'chat-bubble--user' : 'chat-bubble--bot'} ${!message.isAsk && message.isFallback ? 'chat-bubble--fallback' : ''}`}
                   >
                     {!message.isAsk && message.isFallback && <span className="chat-fallback-badge">{getFallbackLabel(message.fallbackReason)}</span>}
-                    <ReactMarkdown
-                      className="chat-bubble__text"
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[[rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }]]}
-                      components={{
-                        a: ({ node, ...props }) => (
-                          <a
-                            {...props}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ color: '#0d6efd', textDecoration: 'underline', pointerEvents: 'auto', cursor: 'pointer' }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        ),
-                      }}
-                    >
-                      {message.content}
-                    </ReactMarkdown>
+                    <ChatMarkdown
+                      content={message.content}
+                      onCitationClick={(citationNumber) => setActiveCitation({ messageId: message.id, citationNumber })}
+                    />
+                    {!message.isAsk && message.grounded === false && (
+                      <span
+                        className="chat-fallback-badge"
+                        title={typeof message.groundingScore === 'number' ? `근거 일치도 약 ${Math.round(message.groundingScore * 100)}%` : undefined}
+                      >
+                        ⚠️ 제공된 자료로 충분히 확인되지 않은 내용이 포함될 수 있어요.
+                      </span>
+                    )}
                     {!message.isAsk && (
                       <SourceCards
                         sources={message.sources}
                         showScores={showRagScores}
                         isFallback={message.isFallback}
+                        activeCitationNumber={activeCitation?.messageId === message.id ? activeCitation.citationNumber : null}
                       />
                     )}
                     {!message.isAsk && message.content.trim().length > 0 && <CopyButton text={message.content} />}
+                    {!message.isAsk && message.content.trim().length > 0 && previousUserMessage && (
+                      <RegenerateButton
+                        disabled={isSending}
+                        onRegenerate={() => sendMessage(previousUserMessage.content)}
+                      />
+                    )}
                     {!message.isAsk && message.requestId && <MessageFeedback requestId={message.requestId} />}
                     {!message.isAsk && (
                       <SuggestedQuestions

@@ -1,8 +1,8 @@
 {
-  "courses_tfidf.pkl": "53269765ce1e8b6d5b9040be4208151a554e2b5e0c4426139757483a7ef52959",
-  "meals_tfidf.pkl": "e2d1ada754707f32b55addaddfccfdd780b96d436ae707b6ed081fdc7d995aed",
-  "notices_tfidf.pkl": "08969bf52a2d897fb914c6860c1ee5b4282dd2788ea8348b6187c1143c5f166f",
-  "rules_tfidf.pkl": "b041552570745fb1b6a29ba39bfc5ed74544c6e80e6514a61c8c2355d71d4980",
-  "schedule_tfidf.pkl": "4e6a01287911f4a94de887817824a6cd84c8590996fb724d4fe2a2d37770e28c",
-  "staff_tfidf.pkl": "d352abfc63de3f05fcfe4d51d92b21e773d45c84bcd347e7492816fc13f11453"
+  "courses_tfidf.pkl": "51d583f7c6858147a2cb0f74bb3d54d495c440a97ce98ba55ede832afd6af75e",
+  "meals_tfidf.pkl": "a85bf4e69aad1f94911b683a3657a74f470e76f69f9f922d396ac8d0d699eb35",
+  "notices_tfidf.pkl": "1b0ed05e68f3ef9aad57fbc053b1f1dd7b476f1a6f51cfb0d3ab1e6ffe9354b9",
+  "rules_tfidf.pkl": "05e9e9326a67751b4ef2693f8600f732e9de9579526c594357b2e542d0045034",
+  "schedule_tfidf.pkl": "00bd5511c3b72e2b45db1768dbb43e4827525c386ae61b47e8a297fd2c108f0b",
+  "staff_tfidf.pkl": "6dd9f540578f702b2164abbc31104f734b780eb1c7792d374ac34065ad746fcb"
 }

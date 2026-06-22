@@ -188,8 +188,22 @@ def _first_nonempty(row, keys: Iterable[str]) -> str:
     return ""
 
 
-_TITLE_DEADLINE_PATTERN = re.compile(r"~\s*(?P<month>\d{1,2})\s*/\s*(?P<day>\d{1,2})")
-_BODY_PERIOD_KEYWORD_PATTERN = re.compile(r"(신청\s*기간|접수\s*기간|신청기간|접수기간)")
+_TITLE_DEADLINE_PATTERN = re.compile(
+    r"(?:~|마감|기한|까지)\s*"
+    r"(?:(?P<year>\d{4})\s*[.\-/년]\s*)?"
+    r"(?P<month>\d{1,2})\s*(?:[.\-/월])\s*"
+    r"(?P<day>\d{1,2})"
+)
+_BODY_DEADLINE_KEYWORD_PATTERN = re.compile(
+    r"("
+    r"신청\s*기간|신청기간|접수\s*기간|접수기간|"
+    r"제출\s*기간|제출기간|서류\s*제출|서류제출|"
+    r"등록\s*기간|등록기간|납부\s*기간|납부기간|"
+    r"수강\s*신청|수강신청|수강\s*취소|수강취소|"
+    r"신청\s*마감|접수\s*마감|제출\s*마감|마감\s*일|마감일|"
+    r"신청\s*기한|접수\s*기한|제출\s*기한|기한"
+    r")"
+)
 _BODY_FULL_DATE_END_PATTERN = re.compile(
     r"(?:~|-|–|—|∼|〜)\s*"
     r"(?P<year>\d{4})\s*[.\-/년]\s*"
@@ -197,7 +211,15 @@ _BODY_FULL_DATE_END_PATTERN = re.compile(
     r"(?P<day>\d{1,2})"
 )
 _BODY_MONTH_DAY_END_PATTERN = re.compile(
-    r"(?:~|-|–|—|∼|〜)\s*(?P<month>\d{1,2})\s*/\s*(?P<day>\d{1,2})"
+    r"(?:~|-|–|—|∼|〜)\s*(?P<month>\d{1,2})\s*[.\-/월]\s*(?P<day>\d{1,2})"
+)
+_BODY_FULL_DATE_SINGLE_PATTERN = re.compile(
+    r"(?P<year>\d{4})\s*[.\-/년]\s*"
+    r"(?P<month>\d{1,2})\s*[.\-/월]\s*"
+    r"(?P<day>\d{1,2})"
+)
+_BODY_MONTH_DAY_SINGLE_PATTERN = re.compile(
+    r"(?P<month>\d{1,2})\s*[\-/월]\s*(?P<day>\d{1,2})"
 )
 
 
@@ -221,7 +243,7 @@ def _parse_notice_deadline_from_title(title: object, published_date: str | None)
         return None
 
     deadline = _parse_date_parts(
-        int(published.year),
+        int(match.group("year") or published.year),
         int(match.group("month")),
         int(match.group("day")),
     )
@@ -243,7 +265,7 @@ def _parse_notice_deadline_from_body(content: object, published_date: str | None
     published = pd.to_datetime(published_date, errors="coerce") if published_date else pd.NaT
     published_year = None if pd.isna(published) else int(published.year)
 
-    keyword_match = _BODY_PERIOD_KEYWORD_PATTERN.search(content)
+    keyword_match = _BODY_DEADLINE_KEYWORD_PATTERN.search(content)
     if not keyword_match:
         return None
 
@@ -265,6 +287,31 @@ def _parse_notice_deadline_from_body(content: object, published_date: str | None
             published_year,
             int(month_day_match.group("month")),
             int(month_day_match.group("day")),
+        )
+        if deadline is None:
+            return None
+        published_day = published.date()
+        if deadline < published_day:
+            deadline = _parse_date_parts(deadline.year + 1, deadline.month, deadline.day)
+            if deadline is None:
+                return None
+        return deadline.strftime("%Y-%m-%d")
+
+    full_single_match = _BODY_FULL_DATE_SINGLE_PATTERN.search(window)
+    if full_single_match:
+        deadline = _parse_date_parts(
+            int(full_single_match.group("year")),
+            int(full_single_match.group("month")),
+            int(full_single_match.group("day")),
+        )
+        return None if deadline is None else deadline.strftime("%Y-%m-%d")
+
+    month_day_single_match = _BODY_MONTH_DAY_SINGLE_PATTERN.search(window)
+    if month_day_single_match and published_year is not None:
+        deadline = _parse_date_parts(
+            published_year,
+            int(month_day_single_match.group("month")),
+            int(month_day_single_match.group("day")),
         )
         if deadline is None:
             return None
@@ -301,14 +348,33 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
 
     docs: List[dict] = []
     for _, row in cleaned.iterrows():
+        raw_title = row.get(column["title"], "")
+        title = "" if pd.isna(raw_title) else str(raw_title).strip()
+        raw_url = row.get(column["url"], "")
+        url = "" if pd.isna(raw_url) else str(raw_url).strip()
+
         text_content = row.get("clean_text", "")
-        if not isinstance(text_content, str) or not text_content.strip():
+        if not isinstance(text_content, str):
+            text_content = ""
+        text_content = text_content.strip()
+
+        if not text_content:
+            fallback_parts = []
+            if title:
+                fallback_parts.append(f"공지 제목: {title}")
+            if url:
+                fallback_parts.append(f"본문이 비어 있어 상세 내용은 공지 링크를 확인하세요: {url}")
+            if not fallback_parts:
+                continue
+            text_content = "\n".join(fallback_parts)
+
+        if not text_content.strip():
             continue
         
         topic_type = row.get(column["topic"], "")
         published_date = row.get("clean_date", "")
         apply_deadline = _extract_notice_apply_deadline(
-            row.get(column["title"], ""),
+            title,
             text_content,
             published_date,
         )
@@ -341,13 +407,13 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
         docs.append(
             {
                 "doc_id": doc_id,
-                "title": row.get(column["title"], ""),
+                "title": title,
                 "text": text_content,
                 "topics": row.get(column["topic"], ""),
                 "category": row.get("카테고리", ""),
                 "published_at": published_date or "",
                 "apply_deadline": apply_deadline,
-                "url": row.get(column["url"], ""),
+                "url": url,
                 "attachments": attachments_str,
                 "source": "notices",
                 "notice_id": row.get("db_id"),

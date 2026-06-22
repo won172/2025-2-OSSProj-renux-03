@@ -151,6 +151,11 @@ static public class AuthenticationApis
             async (ServerDbContext db, SignupUserDto signup, IValidator<SignupUserDto> validator,
             IMapper mapper) =>
         {
+            if (signup.HasForbiddenRoleInput())
+            {
+                return Results.BadRequest("회원가입 요청에서 역할을 지정할 수 없습니다.");
+            }
+
             var results = validator.Validate(signup);
 
             if (!results.IsValid) return Results.ValidationProblem(results.ToDictionary());
@@ -186,6 +191,11 @@ static public class AuthenticationApis
         app.MapPost("/council-signup-requests",
             async (ServerDbContext db, SignupUserDto signup, IValidator<SignupUserDto> validator) =>
         {
+            if (signup.HasForbiddenRoleInput())
+            {
+                return Results.BadRequest(new { message = "회원가입 요청에서 역할을 지정할 수 없습니다." });
+            }
+
             var results = validator.Validate(signup);
             if (!results.IsValid) return Results.ValidationProblem(results.ToDictionary());
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import json
 import time
+from typing import Any
 from functools import lru_cache
 
 import httpx
@@ -31,7 +32,9 @@ from src.config import (
     OLLAMA_CHAT_TEMPERATURE,
     OLLAMA_TIMEOUT_SECONDS,
     OPENAI_CHAT_MAX_RETRIES,
+    OPENAI_CHAT_INPUT_COST_PER_1M,
     OPENAI_CHAT_MODEL,
+    OPENAI_CHAT_OUTPUT_COST_PER_1M,
     OPENAI_CHAT_TEMPERATURE,
     OPENAI_CHAT_TIMEOUT_SECONDS,
     REDIS_HISTORY_TTL_SECONDS,
@@ -53,6 +56,7 @@ def _build_openai_llm() -> BaseChatModel:
         temperature=OPENAI_CHAT_TEMPERATURE,
         timeout=OPENAI_CHAT_TIMEOUT_SECONDS,
         max_retries=OPENAI_CHAT_MAX_RETRIES,
+        stream_usage=True,
     )
 
 
@@ -138,7 +142,7 @@ def _get_system_prompt(mode: str = "rag") -> str:
 3. 학교 정보 질문에 답할 충분한 근거가 [참고 자료]에 없으면 "제공된 학교 자료에서 확인되지 않습니다"라고 말하고, 학교 공식 홈페이지나 담당 부서 확인을 안내하세요. 일부만 확인되면 확인된 부분만 [문서N]과 함께 답하고 나머지는 확인되지 않는다고 명시하세요.
 4. 서로 다른 자료가 충돌하면 게시일이 더 최신인 자료를 우선하고, 충돌 사실을 함께 설명하세요.
 5. 답변에서 특정 정보를 언급할 때, 그 정보의 출처 URL이 [참고 자료]에 있다면 해당 설명 바로 아래에 '[사이트로 이동하기](URL)' 형식으로 적어주세요. 첨부파일은 본문 중에 '[파일명](URL)' 형식으로 포함하세요.
-6. 친절한 한국어(해요체)로 답변하세요.
+6. 사용자가 영어로 질문하면 영어로 답하고, 그 외에는 친절한 한국어(해요체)로 답변하세요. 영어 답변에서도 학교명, 부서명, 공지 제목, URL, 첨부파일명은 원문 표기를 유지하세요.
 7. 절차나 방법을 설명할 때는 반드시 번호를 매겨 단계별로 작성하세요.
 8. {current_date} 기준 최신 정보를 우선하여 답변하세요.
 9. 가독성을 위해 불필요한 마크다운(과도한 볼드체 등)은 피하고, 링크는 반드시 마크다운 형식으로 작성하세요.
@@ -208,16 +212,120 @@ def _extract_text(content) -> str:
     return content if isinstance(content, str) else str(content)
 
 
-async def _invoke_with_provider(provider: str, messages: list[BaseMessage]) -> str:
+def _usage_value(usage: dict[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = usage.get(key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+    return None
+
+
+def _extract_usage_metadata(message: BaseMessage) -> dict[str, int] | None:
+    raw_usage = getattr(message, "usage_metadata", None)
+    if not isinstance(raw_usage, dict):
+        raw_usage = None
+
+    response_metadata = getattr(message, "response_metadata", None)
+    token_usage = None
+    if isinstance(response_metadata, dict):
+        candidate = response_metadata.get("token_usage") or response_metadata.get("usage")
+        if isinstance(candidate, dict):
+            token_usage = candidate
+
+    usage = raw_usage or token_usage
+    if not isinstance(usage, dict):
+        return None
+
+    input_tokens = _usage_value(usage, "input_tokens", "prompt_tokens")
+    output_tokens = _usage_value(usage, "output_tokens", "completion_tokens")
+    total_tokens = _usage_value(usage, "total_tokens")
+    if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+        total_tokens = (input_tokens or 0) + (output_tokens or 0)
+
+    if input_tokens is None and output_tokens is None and total_tokens is None:
+        return None
+
+    return {
+        "input_tokens": input_tokens or 0,
+        "output_tokens": output_tokens or 0,
+        "total_tokens": total_tokens or 0,
+    }
+
+
+def _estimate_openai_cost_usd(input_tokens: int, output_tokens: int) -> float | None:
+    if OPENAI_CHAT_INPUT_COST_PER_1M <= 0 and OPENAI_CHAT_OUTPUT_COST_PER_1M <= 0:
+        return None
+    return round(
+        (input_tokens / 1_000_000) * OPENAI_CHAT_INPUT_COST_PER_1M
+        + (output_tokens / 1_000_000) * OPENAI_CHAT_OUTPUT_COST_PER_1M,
+        8,
+    )
+
+
+def _append_usage_record(
+    usage_collector: list[dict[str, Any]] | None,
+    *,
+    stage: str,
+    provider: str,
+    model: str,
+    usage: dict[str, int] | None,
+    latency_ms: float,
+) -> None:
+    if usage_collector is None:
+        return
+    record: dict[str, Any] = {
+        "stage": stage,
+        "provider": provider,
+        "model": model,
+        "latency_ms": round(latency_ms, 2),
+    }
+    if usage is not None:
+        record.update(usage)
+        if provider == "openai":
+            estimated = _estimate_openai_cost_usd(
+                usage.get("input_tokens", 0),
+                usage.get("output_tokens", 0),
+            )
+            if estimated is not None:
+                record["estimated_cost_usd"] = estimated
+    usage_collector.append(record)
+
+
+async def _invoke_with_provider(
+    provider: str,
+    messages: list[BaseMessage],
+    *,
+    usage_collector: list[dict[str, Any]] | None = None,
+    usage_stage: str = "generation",
+) -> str:
     llm = _get_chat_llm(provider)
+    started_at = time.perf_counter()
     response = await llm.ainvoke(messages)
+    latency_ms = (time.perf_counter() - started_at) * 1000
+    model = OPENAI_CHAT_MODEL if provider == "openai" else OLLAMA_CHAT_MODEL
+    _append_usage_record(
+        usage_collector,
+        stage=usage_stage,
+        provider=provider,
+        model=model,
+        usage=_extract_usage_metadata(response),
+        latency_ms=latency_ms,
+    )
     answer = _extract_text(response.content).strip()
     if not answer:
         raise RuntimeError(f"LLM provider '{provider}' returned an empty response.")
     return answer
 
 
-async def generate_langchain_answer(question: str, context: str, session_id: str | None = None, current_date: str = "") -> str:
+async def generate_langchain_answer(
+    question: str,
+    context: str,
+    session_id: str | None = None,
+    current_date: str = "",
+    usage_collector: list[dict[str, Any]] | None = None,
+) -> str:
     """선택된 프로바이더로 답변을 생성합니다. 실패 시 반대 프로바이더로 폴백합니다."""
     actual_session_id = session_id or "default_session"
     primary = _primary_provider()
@@ -227,20 +335,25 @@ async def generate_langchain_answer(question: str, context: str, session_id: str
     messages = _build_messages(question, context, history, current_date)
 
     try:
-        answer = await _invoke_with_provider(primary, messages)
+        answer = await _invoke_with_provider(primary, messages, usage_collector=usage_collector, usage_stage="generation")
     except Exception as exc:
         fallback = _fallback_provider(primary)
         if fallback is None:
             raise
         logger.warning("Provider '%s' failed (%s); falling back to '%s'.", primary, exc, fallback)
-        answer = await _invoke_with_provider(fallback, messages)
+        answer = await _invoke_with_provider(fallback, messages, usage_collector=usage_collector, usage_stage="generation")
 
     history.add_user_message(question)
     history.add_ai_message(answer)
     return answer
 
 
-async def generate_followup_questions(question: str, answer: str, count: int = 3) -> list[str]:
+async def generate_followup_questions(
+    question: str,
+    answer: str,
+    count: int = 3,
+    usage_collector: list[dict[str, Any]] | None = None,
+) -> list[str]:
     """답변 이후 이어서 물어볼 만한 후속 질문을 생성합니다. 실패해도 호출자를 깨지 않습니다."""
     try:
         messages: list[BaseMessage] = [
@@ -265,7 +378,7 @@ async def generate_followup_questions(question: str, answer: str, count: int = 3
 
         primary = _primary_provider()
         try:
-            response = await _invoke_with_provider(primary, messages)
+            response = await _invoke_with_provider(primary, messages, usage_collector=usage_collector, usage_stage="followup_questions")
         except Exception as exc:
             fallback = _fallback_provider(primary)
             if fallback is None:
@@ -277,7 +390,7 @@ async def generate_followup_questions(question: str, answer: str, count: int = 3
                 exc,
                 fallback,
             )
-            response = await _invoke_with_provider(fallback, messages)
+            response = await _invoke_with_provider(fallback, messages, usage_collector=usage_collector, usage_stage="followup_questions")
 
         cleaned = response.strip()
         if cleaned.startswith("```"):
@@ -310,7 +423,13 @@ async def generate_followup_questions(question: str, answer: str, count: int = 3
         return []
 
 
-async def generate_langchain_answer_stream(question: str, context: str, session_id: str | None = None, current_date: str = ""):
+async def generate_langchain_answer_stream(
+    question: str,
+    context: str,
+    session_id: str | None = None,
+    current_date: str = "",
+    usage_collector: list[dict[str, Any]] | None = None,
+):
     """선택된 프로바이더로 답변을 스트리밍 생성합니다.
 
     스트리밍은 토큰이 이미 전송되기 시작하면 중간 폴백이 불가능하므로, 첫 토큰을
@@ -325,10 +444,24 @@ async def generate_langchain_answer_stream(question: str, context: str, session_
 
     async def _stream(provider: str):
         llm = _get_chat_llm(provider)
+        started_at = time.perf_counter()
+        final_usage: dict[str, int] | None = None
         async for chunk in llm.astream(messages):
+            chunk_usage = _extract_usage_metadata(chunk)
+            if chunk_usage is not None:
+                final_usage = chunk_usage
             text = _extract_text(chunk.content)
             if text:
                 yield text
+        model = OPENAI_CHAT_MODEL if provider == "openai" else OLLAMA_CHAT_MODEL
+        _append_usage_record(
+            usage_collector,
+            stage="generation_stream",
+            provider=provider,
+            model=model,
+            usage=final_usage,
+            latency_ms=(time.perf_counter() - started_at) * 1000,
+        )
 
     full_answer: list[str] = []
     started = False

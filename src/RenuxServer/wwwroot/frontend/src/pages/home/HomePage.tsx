@@ -1,14 +1,13 @@
-import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
-import rehypeExternalLinks from 'rehype-external-links'
-import remarkGfm from 'remark-gfm'
 import { apiFetch } from '../../api/client'
 import { useChatStream } from '../../hooks/useChatStream'
 import donggukLogo from '../../assets/images/dongguk-logo.png'
 import dongddokiLogo from '../../assets/images/dongddoki-logo.png'
+import ChatMarkdown from '../../components/chat/ChatMarkdown'
 import CopyButton from '../../components/chat/CopyButton'
 import MessageFeedback from '../../components/chat/MessageFeedback'
+import RegenerateButton from '../../components/chat/RegenerateButton'
 import SuggestedQuestions from '../../components/chat/SuggestedQuestions'
 import SourceCards, { type ChatSource } from '../../components/chat/SourceCards'
 import type { Department } from '../../types/organization'
@@ -26,6 +25,8 @@ type ChatPageMessage = {
   isFallback?: boolean
   fallbackReason?: string | null
   suggestedQuestions?: string[]
+  grounded?: boolean
+  groundingScore?: number
 }
 
 const mapRoleNameToUserRole = (roleName?: string | null): UserRole => {
@@ -68,6 +69,7 @@ const HomePage = () => {
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [chatInput, setChatInput] = useState('')
   const [chatSending, setChatSending] = useState(false)
+  const [activeCitation, setActiveCitation] = useState<{ messageId: string; citationNumber: number } | null>(null)
   const [userRole, setUserRole] = useState<UserRole>(() => {
     if (typeof window === 'undefined') return 'STUDENT'
     const stored = window.localStorage.getItem('renux-user-role')
@@ -75,6 +77,8 @@ const HomePage = () => {
     return 'STUDENT'
   })
   const [departmentName, setDepartmentName] = useState<string | null>(null)
+  const [entryYear, setEntryYear] = useState<string | null>(null)
+  const chatInputRef = useRef<HTMLTextAreaElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const skipLoadOnSelectRef = useRef(false)
   const isLoadingMoreRef = useRef(false)
@@ -83,9 +87,9 @@ const HomePage = () => {
   // Mobile sidebar state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+  }, [])
 
   // Removed useEffect for auto-scrolling to bottom on chatMessages change
   // to prevent scrolling to bottom when loading older messages.
@@ -139,11 +143,18 @@ const HomePage = () => {
           if (data.majorName) {
             setDepartmentName(data.majorName)
           }
+          if (data.entryYear) {
+            setEntryYear(String(data.entryYear))
+          }
         }
       } catch (error) {
         console.log('User is not logged in', error)
         setIsAuthenticated(false)
         setUserName(null)
+        setDepartmentName(null)
+        setEntryYear(null)
+        setUserRole('STUDENT')
+        window.localStorage.removeItem('renux-user-role')
       }
     }
     checkLoginStatus()
@@ -170,7 +181,7 @@ const HomePage = () => {
       }
     }
     fetchActiveChats()
-  }, [isAuthenticated])
+  }, [isAuthenticated, selectedChatId])
 
   useEffect(() => {
     document.body.classList.toggle('modal-open', isModalOpen)
@@ -276,7 +287,7 @@ const HomePage = () => {
     setChatError(null)
   }
 
-  const loadMessages = async (chatIdToLoad: string) => {
+  const loadMessages = useCallback(async (chatIdToLoad: string) => {
     try {
       setChatLoading(true)
       setChatError(null)
@@ -300,7 +311,7 @@ const HomePage = () => {
     } finally {
       setChatLoading(false)
     }
-  }
+  }, [scrollToBottom])
 
   const loadMoreMessages = async () => {
     if (!selectedChatId || isLoadingMoreRef.current || !hasMoreMessages || chatMessages.length === 0) return
@@ -349,7 +360,7 @@ const HomePage = () => {
       return
     }
     loadMessages(selectedChatId)
-  }, [selectedChatId])
+  }, [loadMessages, selectedChatId])
 
   const sendChatMessage = async (text: string, chatId: string | number) => {
     const resolvedChatId = String(chatId)
@@ -406,6 +417,10 @@ const HomePage = () => {
           onSuggestions: (questions) =>
             setChatMessages((prev) =>
               prev.map((msg) => (msg.id === botMessageId ? { ...msg, suggestedQuestions: questions } : msg)),
+            ),
+          onGrounding: ({ grounded, groundingScore }) =>
+            setChatMessages((prev) =>
+              prev.map((msg) => (msg.id === botMessageId ? { ...msg, grounded, groundingScore } : msg)),
             ),
           onRetry: (attempt) => {
             setChatError(`연결이 끊겨 재시도 중입니다. (${attempt}/2)`)
@@ -517,8 +532,9 @@ const HomePage = () => {
 
   const isHeroPrimaryDisabled = isNewChatDisabled
   const displayName = isAuthenticated ? userName ?? '로그인 사용자' : '게스트'
-  const fallbackDept = departments[0]?.major?.majorname ?? (userRole === 'UNIVERSITY_COUNCIL' ? '총학생회' : null) // 우선 디폴트로 총학생회.
-  const displayDept = departmentName ?? fallbackDept 
+  const displayDept = isAuthenticated
+    ? departmentName ?? (userRole === 'UNIVERSITY_COUNCIL' ? '총학생회' : '동국대학교')
+    : '동국대학교'
   const roleLabelMap: Record<UserRole, string> = {
     STUDENT: '일반학생',
     DEPARTMENT_COUNCIL: '학생회',
@@ -527,7 +543,7 @@ const HomePage = () => {
   const roleLabel = roleLabelMap[userRole] // '일반학생'
   const showDeptAdminButton = isAuthenticated && userRole === 'DEPARTMENT_COUNCIL' // '학생회'
   const showUnivAdminButton = isAuthenticated && userRole === 'UNIVERSITY_COUNCIL' // '총학생회'
-  const showRagScores = userRole === 'UNIVERSITY_COUNCIL'
+  const showRagScores = isAuthenticated && userRole === 'UNIVERSITY_COUNCIL'
   const visibleChats = activeChats.length > 0 ? activeChats : [] 
 
   const formatMessageTime = (value?: string | number) => {
@@ -559,6 +575,41 @@ const HomePage = () => {
     } catch (e) {
       console.error('Failed to save guest chat', e)
     }
+  }
+
+  const starterQuestions = useMemo(() => {
+    const dept = isAuthenticated ? (departmentName ?? '').trim() : ''
+    const year = isAuthenticated ? (entryYear ?? '').trim() : ''
+    const questions: string[] = []
+
+    if (dept && year) {
+      questions.push(`${year}학번 ${dept} 졸업기준 알려줘`)
+    }
+    if (dept) {
+      questions.push(`${dept} 전공필수 과목 알려줘`)
+      questions.push(`${dept} 사무실 연락처 알려줘`)
+    }
+
+    if (isAuthenticated && userRole === 'DEPARTMENT_COUNCIL') {
+      questions.push('최근 학과 관련 공지 보여줘')
+      questions.push('이번 달 학사일정 알려줘')
+    } else if (isAuthenticated && userRole === 'UNIVERSITY_COUNCIL') {
+      questions.push('오늘 올라온 공지 요약해줘')
+      questions.push('최근 장학 공지 보여줘')
+    } else {
+      questions.push('최근 장학 공지 보여줘')
+      questions.push('이번 달 학사일정 알려줘')
+      questions.push('오늘 학식 뭐 나와?')
+    }
+
+    return Array.from(new Set(questions)).slice(0, 6)
+  }, [departmentName, entryYear, isAuthenticated, userRole])
+
+  const handleStarterQuestionSelect = (question: string) => {
+    setChatInput(question)
+    window.requestAnimationFrame(() => {
+      chatInputRef.current?.focus()
+    })
   }
 
   return (
@@ -730,6 +781,28 @@ const HomePage = () => {
                 <p className="home-chat__status home-chat__status--error">{chatError}</p>
               ) : !selectedChatId ? (
                 <div className="home-guide">
+                  <div className="home-guide__starters">
+                    <div className="home-guide__context">
+                      <span>{displayDept ?? '동국대학교'}</span>
+                      <strong>{isAuthenticated ? `${roleLabel} 맞춤 질문` : '바로 물어볼 질문'}</strong>
+                    </div>
+                    <div className="suggested-questions" aria-label="추천 질문">
+                      <div className="suggested-questions__heading">추천 질문</div>
+                      <div className="suggested-questions__list">
+                        {starterQuestions.map((question) => (
+                          <button
+                            key={question}
+                            type="button"
+                            className="suggested-questions__chip"
+                            disabled={chatSending}
+                            onClick={() => handleStarterQuestionSelect(question)}
+                          >
+                            {question}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                   <h3>동똑이 사용 가이드</h3>
                   <ol>
                     <li>
@@ -752,10 +825,13 @@ const HomePage = () => {
                 <ul className="chat-bubbles">
                   {isLoadingMore && <li className="home-chat__status"><small>이전 대화 불러오는 중...</small></li>}
 
-                  {chatMessages.map((message) => {
+                  {chatMessages.map((message, index) => {
                     const messageTime = formatMessageTime(message.createdTime)
                     // 스트리밍 대기 중인 빈 봇 말풍선은 타이핑 인디케이터로 렌더
                     const isStreamingPlaceholder = !message.isAsk && !message.content
+                    const previousUserMessage = !message.isAsk
+                      ? [...chatMessages.slice(0, index)].reverse().find((candidate) => candidate.isAsk && candidate.content.trim().length > 0)
+                      : null
                     return (
                       <li
                         key={message.id}
@@ -770,32 +846,33 @@ const HomePage = () => {
                         ) : (
                           <>
                             {!message.isAsk && message.isFallback && <span className="chat-fallback-badge">{getFallbackLabel(message.fallbackReason)}</span>}
-                            <ReactMarkdown
-                              className="chat-bubble__text"
-                              remarkPlugins={[remarkGfm]}
-                              rehypePlugins={[[rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }]]}
-                              components={{
-                                a: ({ node, ...props }) => (
-                                  <a
-                                    {...props}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    style={{ color: '#0d6efd', textDecoration: 'underline', pointerEvents: 'auto', cursor: 'pointer' }}
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
-                                ),
-                              }}
-                            >
-                              {message.content}
-                            </ReactMarkdown>
+                            <ChatMarkdown
+                              content={message.content}
+                              onCitationClick={(citationNumber) => setActiveCitation({ messageId: message.id, citationNumber })}
+                            />
+                            {!message.isAsk && message.grounded === false && (
+                              <span
+                                className="chat-fallback-badge"
+                                title={typeof message.groundingScore === 'number' ? `근거 일치도 약 ${Math.round(message.groundingScore * 100)}%` : undefined}
+                              >
+                                ⚠️ 제공된 자료로 충분히 확인되지 않은 내용이 포함될 수 있어요.
+                              </span>
+                            )}
                             {!message.isAsk && (
                               <SourceCards
                                 sources={message.sources}
                                 showScores={showRagScores}
                                 isFallback={message.isFallback}
+                                activeCitationNumber={activeCitation?.messageId === message.id ? activeCitation.citationNumber : null}
                               />
                             )}
                             {!message.isAsk && message.content.trim().length > 0 && <CopyButton text={message.content} />}
+                            {!message.isAsk && message.content.trim().length > 0 && previousUserMessage && selectedChatId && (
+                              <RegenerateButton
+                                disabled={chatSending}
+                                onRegenerate={() => sendChatMessage(previousUserMessage.content, selectedChatId)}
+                              />
+                            )}
                             {!message.isAsk && message.requestId && <MessageFeedback requestId={message.requestId} />}
                             {!message.isAsk && (
                               <SuggestedQuestions
@@ -822,6 +899,7 @@ const HomePage = () => {
             <form className="home-chat__composer" onSubmit={handleChatSubmit}>
               <div className="home-chat__input-wrapper">
                 <textarea
+                  ref={chatInputRef}
                   aria-label="채팅 메시지"
                   className="home-chat__input"
                   placeholder={selectedChatId ? '무엇이든 물어보세요' : '무엇이든 물어보세요 (새 대화가 자동으로 시작됩니다)'}

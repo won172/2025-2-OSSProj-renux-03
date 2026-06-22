@@ -35,6 +35,7 @@ APScheduler>=3.10.0    # 공지/학식 데이터 주기적 자동 갱신(in-proc
 # === Utility / reranking / fuzzy matching ===
 rapidfuzz>=3.9.0
 tqdm>=4.66.4
+# Optional: install kiwipiepy>=0.21.0 to use Kiwi for Korean TF-IDF tokenization.
 
 # === Optional (for local dev) ===
 requests>=2.31.0

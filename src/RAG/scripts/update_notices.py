@@ -12,6 +12,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from src.crawlers.dongguk_notices import TARGET_BOARDS, crawl_notices
 from src.pipelines.notices_sync import (
     apply_notice_normalized_documents,
+    load_known_article_ids_by_board,
     normalize_existing_notice_documents,
     refresh_notice_artifacts,
     sync_notices,
@@ -26,6 +27,7 @@ def _run_once(
     delay: float,
     earliest_year: int | None,
     mode: str,
+    full_backfill: bool = False,
 ) -> None:
     start_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{start_ts}] 🕐 notices 작업 시작 (mode={mode})")
@@ -48,7 +50,19 @@ def _run_once(
         return
 
     try:
-        notices_df = crawl_notices(boards=boards, max_pages=max_pages, delay=delay, earliest_year=earliest_year)
+        known_ids_by_board = None
+        if not full_backfill:
+            try:
+                known_ids_by_board = load_known_article_ids_by_board()
+            except Exception as exc:  # noqa: BLE001 — known-id 로드는 조기 중단 최적화이므로 실패해도 수집한다.
+                print(f"⚠️ 기존 공지 ID 로드 실패: {exc}")
+        notices_df = crawl_notices(
+            boards=boards,
+            max_pages=max_pages,
+            delay=delay,
+            earliest_year=earliest_year,
+            known_ids_by_board=known_ids_by_board,
+        )
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️ 크롤링 실패: {exc}")
         return
@@ -117,13 +131,13 @@ def main() -> None:
     earliest_year = args.earliest_year
 
     if args.interval <= 0:
-        _run_once(boards, max_pages, args.delay, earliest_year, args.mode)
+        _run_once(boards, max_pages, args.delay, earliest_year, args.mode, full_backfill=args.full)
         return
 
     interval_seconds = args.interval * 60
     try:
         while True:
-            _run_once(boards, max_pages, args.delay, earliest_year, args.mode)
+            _run_once(boards, max_pages, args.delay, earliest_year, args.mode, full_backfill=args.full)
             print(f"⏳ {args.interval}분 후 다음 작업을 실행합니다. (종료: Ctrl+C)")
             time.sleep(interval_seconds)
     except KeyboardInterrupt:
