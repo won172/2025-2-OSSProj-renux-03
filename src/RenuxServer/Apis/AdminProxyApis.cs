@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RenuxServer.DbContexts;
+using RenuxServer.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
@@ -145,7 +146,7 @@ static public class AdminProxyApis
             return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
         }));
 
-        RequireUniversityLevel(app.MapGet("rag-logs-list", async (HttpRequest request, HttpResponse response, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
+        RequireUniversityLevel(app.MapGet("rag-logs-list", async (HttpRequest request, HttpResponse response, ServerDbContext db, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
         {
             string url = $"{RagServiceUrl}/admin/rag/logs{request.QueryString}";
             logger.LogInformation("Proxying /admin/rag-logs-list to {Url}", url);
@@ -155,8 +156,61 @@ static public class AdminProxyApis
                 var proxyRes = await client.GetAsync(url);
                 logger.LogInformation("RAG service response: {Status}", proxyRes.StatusCode);
                 response.StatusCode = (int)proxyRes.StatusCode;
-                var contentStream = await proxyRes.Content.ReadAsStreamAsync();
-                return Results.Stream(contentStream, contentType: proxyRes.Content.Headers.ContentType?.ToString() ?? "application/json");
+                var body = await proxyRes.Content.ReadAsStringAsync();
+                var logs = JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(body) ?? [];
+
+                static string? ReadStringValue(Dictionary<string, object?> item, string key)
+                {
+                    if (!item.TryGetValue(key, out var value) || value is null)
+                    {
+                        return null;
+                    }
+
+                    return value switch
+                    {
+                        string text => text,
+                        JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+                        JsonElement { ValueKind: JsonValueKind.Null } => null,
+                        JsonElement { ValueKind: JsonValueKind.Undefined } => null,
+                        JsonElement element => element.ToString(),
+                        _ => value.ToString(),
+                    };
+                }
+
+                var sessionIds = logs
+                    .Select(log => ReadStringValue(log, "session_id"))
+                    .Where(sessionId => !string.IsNullOrWhiteSpace(sessionId))
+                    .Distinct()
+                    .ToList();
+
+                var usernameByChatId = new Dictionary<string, string>();
+                var parsedIds = sessionIds
+                    .Select(id => Guid.TryParse(id, out var g) ? (Guid?)g : null)
+                    .Where(g => g.HasValue)
+                    .Select(g => g!.Value)
+                    .ToList();
+
+                if (parsedIds.Count > 0)
+                {
+                    var chats = await db.Chats
+                        .Where(c => parsedIds.Contains(c.Id))
+                        .Include(c => c.User)
+                        .ToListAsync();
+
+                    usernameByChatId = chats
+                        .Where(chat => chat.User != null)
+                        .ToDictionary(chat => chat.Id.ToString(), chat => chat.User!.Username);
+                }
+
+                foreach (var log in logs)
+                {
+                    var sessionId = ReadStringValue(log, "session_id");
+                    log["username"] = sessionId != null && usernameByChatId.TryGetValue(sessionId, out var username)
+                        ? username
+                        : "게스트";
+                }
+
+                return Results.Json(logs, statusCode: (int)proxyRes.StatusCode);
             }
             catch (Exception ex)
             {

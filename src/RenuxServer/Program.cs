@@ -2,6 +2,7 @@ using AutoMapper;
 using Microsoft.EntityFrameworkCore;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 
 using RenuxServer.DbContexts;
 using RenuxServer.Dtos.AuthDtos;
@@ -129,16 +130,32 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
-    // 채팅(RAG) 경로 IP 단위 제한 — LLM 토큰 비용 폭주·남용 방어.
+    // 채팅(RAG) 경로 제한 — 인증 사용자는 JWT sub, 게스트는 IP 단위로 집계.
     options.AddPolicy("chat", httpContext =>
-        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+    {
+        var userId = httpContext.User.FindFirstValue("sub");
+        if (httpContext.User.Identity?.IsAuthenticated == true && !string.IsNullOrWhiteSpace(userId))
+        {
+            return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: $"user:{userId}",
+                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 20,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                });
+        }
+
+        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: $"ip:{ip}",
             factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
-                PermitLimit = 30,
+                PermitLimit = 10,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
-            }));
+            });
+    });
 });
 
 // CORS is credentialed (cookies), so the origin allowlist must be tight.
@@ -219,10 +236,9 @@ using (var scope = app.Services.CreateScope())
 }
 
 
-app.UseRateLimiter();
-
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.UseStaticFiles();
 

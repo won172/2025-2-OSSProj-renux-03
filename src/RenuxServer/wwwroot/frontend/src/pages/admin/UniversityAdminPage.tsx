@@ -104,6 +104,10 @@ interface RagAdminStatus {
     latest_query_at: string | null
     fallback_reasons?: Record<string, number>
   }
+  visitor_stats?: {
+    today: number | null
+    total: number | null
+  }
   feedback?: {
     total: number
     up: number
@@ -1104,17 +1108,31 @@ const UniversityAdminPage = () => {
                 <article className="admin-card admin-card--compact">
                   <p className="admin-card__label">승인 대기</p>
                   <strong className="admin-card__value">{ragStatus.pending_items.pending}</strong>
-                </article>
-                <article className="admin-card admin-card--compact">
-                  <p className="admin-card__label">최근 질문</p>
-                  <strong className="admin-card__value" style={{ fontSize: '1rem' }}>
-                    {formatDateTime(ragStatus.rag_logs.latest_query_at)}
-                  </strong>
-                </article>
-              </div>
+	                </article>
+	                <article className="admin-card admin-card--compact">
+	                  <p className="admin-card__label">최근 질문</p>
+	                  <strong className="admin-card__value" style={{ fontSize: '1rem' }}>
+	                    {formatDateTime(ragStatus.rag_logs.latest_query_at)}
+	                  </strong>
+	                </article>
+	              </div>
+	              <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '16px' }}>
+	                <article className="admin-card admin-card--compact">
+	                  <p className="admin-card__label">오늘 접속자</p>
+	                  <strong className="admin-card__value">
+	                    {ragStatus?.visitor_stats?.today != null ? ragStatus.visitor_stats.today.toLocaleString('ko-KR') + '명' : '—'}
+	                  </strong>
+	                </article>
+	                <article className="admin-card admin-card--compact">
+	                  <p className="admin-card__label">누적 접속자</p>
+	                  <strong className="admin-card__value">
+	                    {ragStatus?.visitor_stats?.total != null ? ragStatus.visitor_stats.total.toLocaleString('ko-KR') + '명' : '—'}
+	                  </strong>
+	                </article>
+	              </div>
 
-              {!!ragStatus.rag_logs.fallback_reasons && Object.keys(ragStatus.rag_logs.fallback_reasons).length > 0 && (
-                <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '16px' }}>
+	              {!!ragStatus.rag_logs.fallback_reasons && Object.keys(ragStatus.rag_logs.fallback_reasons).length > 0 && (
+	                <div className="admin-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '16px' }}>
                   {Object.entries(ragStatus.rag_logs.fallback_reasons).map(([reason, count]) => (
                     <article key={reason} className="admin-card admin-card--compact">
                       <p className="admin-card__label">{reason}</p>

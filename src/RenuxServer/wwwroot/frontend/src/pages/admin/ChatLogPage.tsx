@@ -23,17 +23,29 @@ const ChatLogPage = () => {
   const [refreshing, setRefreshing] = useState(false)
   // 200건 일괄 렌더링 방지: 검색 필터 + 점진 표시
   const [searchTerm, setSearchTerm] = useState('')
+  const [selectedUser, setSelectedUser] = useState<string>('')
   const [visibleCount, setVisibleCount] = useState(25)
+
+  const userOptions = useMemo(
+    () => Array.from(new Set(logs.map((log) => log.username).filter((username): username is string => Boolean(username)))),
+    [logs],
+  )
 
   const filteredLogs = useMemo(() => {
     const term = searchTerm.trim().toLowerCase()
-    if (!term) return logs
-    return logs.filter(
-      (log) =>
+    let result = logs
+    if (term) {
+      result = result.filter(
+        (log) =>
         (log.question ?? '').toLowerCase().includes(term) ||
         (log.answer ?? '').toLowerCase().includes(term),
-    )
-  }, [logs, searchTerm])
+      )
+    }
+    if (selectedUser) {
+      result = result.filter((log) => (log.username ?? '게스트') === selectedUser)
+    }
+    return result
+  }, [logs, searchTerm, selectedUser])
   const visibleLogs = filteredLogs.slice(0, visibleCount)
 
   const fetchLogs = useCallback(async () => {
@@ -94,17 +106,33 @@ const ChatLogPage = () => {
         </header>
 
         <section className="admin-content glass-panel" style={{ marginTop: '20px', padding: '20px', maxHeight: 'calc(100vh - 150px)', overflowY: 'auto' }}>
-          <input
-            type="search"
-            className="admin-input"
-            placeholder="질문/답변 내용 검색"
-            value={searchTerm}
-            onChange={(e) => {
-              setSearchTerm(e.target.value)
-              setVisibleCount(25)
-            }}
-            style={{ marginBottom: '16px', width: '100%', maxWidth: '420px' }}
-          />
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
+            <input
+              type="search"
+              className="admin-input"
+              placeholder="질문/답변 내용 검색"
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value)
+                setVisibleCount(25)
+              }}
+              style={{ width: '100%', maxWidth: '420px' }}
+            />
+            <select
+              className="admin-input"
+              value={selectedUser}
+              onChange={(e) => {
+                setSelectedUser(e.target.value)
+                setVisibleCount(25)
+              }}
+              style={{ width: '180px' }}
+            >
+              <option value="">전체 사용자</option>
+              {userOptions.map((username) => (
+                <option key={username} value={username}>{username}</option>
+              ))}
+            </select>
+          </div>
           {loading ? (
             <div className="admin-table__empty">로딩 중...</div>
           ) : error ? (
@@ -113,16 +141,18 @@ const ChatLogPage = () => {
             <div className="admin-table__empty">{searchTerm ? '검색 결과가 없습니다.' : '기록된 질문 로그가 없습니다.'}</div>
           ) : (
             <div className="admin-table">
-              <div className="admin-table__head" style={{ gridTemplateColumns: '0.7fr 1fr 3fr 0.5fr' }}>
+              <div className="admin-table__head" style={{ gridTemplateColumns: '0.7fr 0.8fr 1fr 3fr 0.5fr' }}>
                 <span>일시</span>
+                <span>사용자</span>
                 <span>분류 / 상태</span>
                 <span>대화 내용</span>
                 <span style={{ textAlign: 'center' }}>참조</span>
               </div>
               <ul className="admin-table__body">
                 {visibleLogs.map((log) => (
-                  <li key={log.id} className="admin-table__row" style={{ gridTemplateColumns: '0.7fr 1fr 3fr 0.5fr', alignItems: 'start', padding: '16px 12px' }}>
+                  <li key={log.id} className="admin-table__row" style={{ gridTemplateColumns: '0.7fr 0.8fr 1fr 3fr 0.5fr', alignItems: 'start', padding: '16px 12px' }}>
                     <span style={{ opacity: 0.8, fontSize: '0.9rem' }}>{formatDateTime(log.created_at)}</span>
+                    <span style={{ fontSize: '0.9rem', opacity: 0.85 }}>{log.username ?? '게스트'}</span>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                       <span className="status-pill status-pill--pending" style={{ alignSelf: 'flex-start' }}>{log.route}</span>
                       {log.fallback_triggered && (

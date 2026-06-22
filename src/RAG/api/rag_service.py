@@ -64,6 +64,7 @@ from src.database import (
     RagFeedback,
     SourceDocument,
     init_db,
+    kst_now,
 )
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
@@ -1736,41 +1737,6 @@ def _ensure_dataset_locked(key: str) -> Tuple[pd.DataFrame, object, object, list
     )
     return chunks_df, vectorizer, matrix, tfidf_chunk_ids
 
-
-def _add_to_dataset_cache(key: str, doc_id: str, text: str, metadata: Dict) -> None:
-    """캐시된 데이터셋에 새 항목을 점진적으로 추가합니다 (전체 리로드 방지)."""
-    if key not in _datasets:
-        # 캐시에 없으면 로드 (이 시점에 로드하는 것은 어쩔 수 없음, 하지만 이후에는 캐시됨)
-        _ensure_dataset(key)
-    
-    cache = _datasets[key]
-    
-    # 1. DataFrame에 행 추가
-    new_row = metadata.copy()
-    new_row["chunk_id"] = doc_id
-    new_row["chunk_text"] = text
-    # ensure all columns exist
-    for col in cache.chunks.columns:
-        if col not in new_row:
-            new_row[col] = None
-            
-    # pd.concat is better than append
-    new_df = pd.DataFrame([new_row])
-    # 기존 컬럼 순서 유지를 위해 reindex
-    new_df = new_df.reindex(columns=cache.chunks.columns)
-    
-    cache.chunks = pd.concat([cache.chunks, new_df], ignore_index=True)
-    
-    # 2. TF-IDF 매트릭스 업데이트 (기존 어휘 사전 사용)
-    # 신규 단어는 반영되지 않지만, 전체 리로드보다 월등히 빠름
-    new_vec = cache.vectorizer.transform([text])
-    cache.matrix = vstack([cache.matrix, new_vec])
-    if cache.tfidf_chunk_ids is not None:
-        cache.tfidf_chunk_ids.append(str(doc_id))
-    
-    logging.info(f"⚡ Incremental update for '{key}': Added 1 item. New size: {len(cache.chunks)}")
-
-
 @app.on_event("startup")
 def bootstrap_artifacts() -> None:
     """애플리케이션 시작 시 데이터셋과 분류기 등 주요 아티팩트를 미리 로드합니다."""
@@ -2052,6 +2018,7 @@ async def get_rag_logs(limit: int = 100):
                 "answer": log.answer,
                 "fallback_triggered": log.fallback_triggered,
                 "fallback_reason": log.fallback_reason,
+                "session_id": log.session_id,
                 "created_at": log.created_at.isoformat() if log.created_at else None,
                 "route": log.route,
                 "source_count": log.source_count,
@@ -2269,6 +2236,22 @@ async def rag_admin_status():
         except Exception:
             _log_event(logging.WARNING, "rag_feedback_status_failed", exc_info=True)
         notices_ingestion = _build_notices_ingestion_status(session)
+        try:
+            today_kst = kst_now().date()
+            today_visitors = (
+                session.query(RagQueryLog.session_id)
+                .filter(func.date(RagQueryLog.created_at) == today_kst)
+                .distinct()
+                .count()
+            )
+            total_visitors = (
+                session.query(RagQueryLog.session_id)
+                .distinct()
+                .count()
+            )
+            visitor_stats = {"today": today_visitors, "total": total_visitors}
+        except Exception:
+            visitor_stats = {"today": None, "total": None}
 
         status_dict = {
             "status": "degraded" if has_degraded_dataset else "ok",
@@ -2276,6 +2259,7 @@ async def rag_admin_status():
             "datasets": datasets,
             "pending_items": pending_items,
             "rag_logs": rag_logs,
+            "visitor_stats": visitor_stats,
             "grounding": grounding,
             "feedback": feedback,
             "notices_ingestion": notices_ingestion,
@@ -2514,14 +2498,13 @@ async def reject_pending(item_id: int):
             raise HTTPException(status_code=404, detail="Item not found")
 
         was_approved = item.status == "approved"
-        reload_needed = False
+        removed_chunk_ids: List[str] = []
 
         # K4: 이미 승인·색인된 항목을 반려하면 색인을 되돌린다.
         if was_approved:
             data = json.loads(item.data)
             notice_obj = _build_notice_from_pending(item.source_type, data)
             # 승인 시 생성된 Notice를 title+source 기준으로 찾는다(수동 공지만 대상).
-            removed_chunk_ids: List[str] = []
             if notice_obj is not None and notice_obj.title:
                 matched_notices = (
                     session.query(Notice)
@@ -2542,14 +2525,13 @@ async def reject_pending(item_id: int):
             if removed_chunk_ids:
                 try:
                     delete_items(target_collection, removed_chunk_ids)
-                    reload_needed = True
                 except Exception:
                     logging.error("⚠️ [Admin] Failed to delete chunks from Chroma on reject.", exc_info=True)
 
         item.status = "rejected"
         session.commit()
 
-        if reload_needed:
+        if removed_chunk_ids:
             try:
                 with _datasets_lock:
                     if "notices" in _datasets:
@@ -3557,7 +3539,7 @@ async def reindex_dataset(target: str):
         if target == "all":
             with _datasets_lock:
                 _datasets.clear()
-        elif target in _datasets:
+        else:
             with _datasets_lock:
                 _datasets.pop(target, None)
 

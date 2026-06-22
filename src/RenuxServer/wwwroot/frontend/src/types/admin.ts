@@ -50,6 +50,8 @@ export interface RagChatLog {
   answer: string
   fallback_triggered: boolean
   fallback_reason: string | null
+  session_id?: string | null
+  username?: string | null
   created_at: string
   route: string
   source_count: number
