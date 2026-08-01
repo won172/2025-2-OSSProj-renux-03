@@ -6,6 +6,7 @@ import type { ActiveChat } from '../types/chat'
 import type { Department } from '../types/organization'
 import type {
   DeadlineItem,
+  NotificationPreferenceResponse,
   NotificationSyncResult,
   UserNotification,
 } from '../types/notification'
@@ -27,6 +28,13 @@ export const loadChatMessages = (chatId: string, lastTime: string) =>
   apiFetch<ChatViewMessage[]>('/chat/load', {
     method: 'POST',
     json: { chatId, lastTime },
+  })
+
+export const fetchFollowups = (requestId: string, guestToken?: string) =>
+  apiFetch<{ questions: string[] }>('/chat/followups', {
+    method: 'POST',
+    headers: withGuestTokenHeader({}, guestToken),
+    json: { requestId },
   })
 
 export const deleteChat = (chatId: string) =>
@@ -51,12 +59,25 @@ export const claimGuestChats = (chatIds: string[], guestToken: string) =>
 
 export const fetchHomeBriefing = () => apiFetch<HomeBriefing>('/home/briefing', { method: 'GET' })
 
-export const fetchNotifications = () => apiFetch<UserNotification[]>('/notifications')
+export const fetchNotifications = (includePast = false) =>
+  apiFetch<UserNotification[]>(`/notifications?limit=100${includePast ? '&includePast=true' : ''}`)
 
 export const fetchDeadlines = () => apiFetch<DeadlineItem[]>('/notifications/deadlines')
+
+export const fetchNotificationPreferences = () =>
+  apiFetch<NotificationPreferenceResponse>('/notifications/preferences')
 
 export const syncNotifications = () =>
   apiFetch<NotificationSyncResult>('/notifications/sync', { method: 'POST' })
 
 export const markNotificationRead = (notificationId: string) =>
   apiFetch<UserNotification>(`/notifications/${notificationId}/read`, { method: 'POST' })
+
+export const markAllNotificationsRead = () =>
+  apiFetch<{ updated: number }>('/notifications/read-all', { method: 'POST' })
+
+export const deleteNotification = (notificationId: string) =>
+  apiFetch<{ deleted: number }>(`/notifications/${notificationId}`, { method: 'DELETE' })
+
+export const deleteReadNotifications = () =>
+  apiFetch<{ deleted: number }>('/notifications/read', { method: 'DELETE' })

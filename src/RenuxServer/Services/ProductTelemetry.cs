@@ -395,6 +395,30 @@ public static class ProductTelemetry
             cancellationToken);
     }
 
+    public static async Task<bool> UpdateAnswerSuggestionCountAsync(
+        ServerDbContext db,
+        IConfiguration configuration,
+        ProductEventContext eventContext,
+        string requestId,
+        int suggestionCount,
+        CancellationToken cancellationToken = default)
+    {
+        if (eventContext.SubjectKey is null || suggestionCount is < 0 or > 10)
+        {
+            return false;
+        }
+        string answerKey = BuildPseudonymousKey(configuration, "answer", requestId);
+        ProductEvent? completion = await db.ProductEvents.SingleOrDefaultAsync(
+            productEvent => productEvent.EventType == ProductEventTypes.AnswerCompleted
+                            && productEvent.AnswerKey == answerKey
+                            && productEvent.SubjectKey == eventContext.SubjectKey,
+            cancellationToken);
+        if (completion is null) return false;
+        completion.SuggestionCount = suggestionCount;
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     public static async Task<int?> FindFeedbackRatingAsync(
         ServerDbContext db,
         IConfiguration configuration,

@@ -33,7 +33,9 @@ public class ProductEvent
 
     public int? SuggestionIndex { get; init; }
 
-    public int? SuggestionCount { get; init; }
+    // 추천질문은 답변 완료 후 별도 요청으로 생성되므로 완료 이벤트의 최종 개수만
+    // 사후 갱신할 수 있다. 그 외 식별·품질 필드는 계속 init-only로 유지한다.
+    public int? SuggestionCount { get; set; }
 
     public bool? IsFallback { get; init; }
 

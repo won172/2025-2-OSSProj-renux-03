@@ -1755,6 +1755,28 @@
     line-height: 1.4;
 }
 
+/* 관심 주제를 켜면 무엇이 오는지 미리 보여주는 건수 배지 */
+.settings-topic__count {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: rgba(249, 115, 22, 0.12);
+    color: var(--buddy-primary-dark);
+    font-size: 0.72rem;
+    font-style: normal;
+    font-weight: 700;
+    vertical-align: 1px;
+}
+
+/* 전체 켜기·끄기·저장 / 모두 읽음·정리처럼 패널 헤더에 모이는 버튼들 */
+.settings-topic-bulk {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .settings-topic__reminders {
     display: flex;
     gap: 8px;
