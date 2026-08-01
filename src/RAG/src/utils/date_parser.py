@@ -1,4 +1,5 @@
 """사용자 질문에서 날짜 관련 정보를 추출하는 유틸리티."""
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta, datetime, timezone
@@ -40,9 +41,15 @@ def _month_range(year: int, month: int) -> tuple[date, date]:
     return date(year, month, 1), date(year, month, last_day)
 
 
-def _parse_relative_date(query: str, *, kind: str = "published") -> Optional[QueryDateFilter]:
-    KST = timezone(timedelta(hours=9))
-    today = datetime.now(KST).date()
+def _parse_relative_date(
+    query: str,
+    *,
+    kind: str = "published",
+    today: date | None = None,
+) -> Optional[QueryDateFilter]:
+    if today is None:
+        KST = timezone(timedelta(hours=9))
+        today = datetime.now(KST).date()
     
     if kind == "deadline" and "마감" in query and "임박" in query:
         return QueryDateFilter(
@@ -110,9 +117,15 @@ def _parse_relative_date(query: str, *, kind: str = "published") -> Optional[Que
     
     return None
 
-def _parse_specific_date(query: str, *, kind: str = "published") -> Optional[QueryDateFilter]:
-    KST = timezone(timedelta(hours=9))
-    today = datetime.now(KST).date()
+def _parse_specific_date(
+    query: str,
+    *,
+    kind: str = "published",
+    today: date | None = None,
+) -> Optional[QueryDateFilter]:
+    if today is None:
+        KST = timezone(timedelta(hours=9))
+        today = datetime.now(KST).date()
 
     # YYYY년 MM월 DD일 (ex: 2025년 11월 20일)
     match = re.search(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일", query)
@@ -145,26 +158,34 @@ def _parse_specific_date(query: str, *, kind: str = "published") -> Optional[Que
             
     return None
 
-def extract_date_filter_from_query(query: str) -> Optional[QueryDateFilter]:
+def extract_date_filter_from_query(
+    query: str,
+    *,
+    today: date | None = None,
+) -> Optional[QueryDateFilter]:
     """
     사용자 질문에서 날짜 필터 메타데이터를 추출합니다.
     날짜 정보가 없으면 None을 반환합니다.
     """
     kind = _detect_date_filter_kind(query)
 
-    date_filter = _parse_relative_date(query, kind=kind)
+    date_filter = _parse_relative_date(query, kind=kind, today=today)
     if date_filter:
         return date_filter
 
-    return _parse_specific_date(query, kind=kind)
+    return _parse_specific_date(query, kind=kind, today=today)
 
 
-def extract_date_range_from_query(query: str) -> Optional[Tuple[date, date]]:
+def extract_date_range_from_query(
+    query: str,
+    *,
+    today: date | None = None,
+) -> Optional[Tuple[date, date]]:
     """
     사용자 질문에서 날짜 관련 정보를 추출하고 (시작 날짜, 종료 날짜) 튜플을 반환합니다.
     날짜 정보가 없으면 None을 반환합니다.
     """
-    date_filter = extract_date_filter_from_query(query)
+    date_filter = extract_date_filter_from_query(query, today=today)
     if not date_filter:
         return None
     return date_filter.start, date_filter.end

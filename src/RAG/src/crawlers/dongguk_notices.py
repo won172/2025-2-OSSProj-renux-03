@@ -12,6 +12,11 @@ import requests
 from bs4 import BeautifulSoup, FeatureNotFound
 from bs4.builder import ParserRejectedMarkup
 
+from src.services.notice_image_text import (
+    append_notice_image_text,
+    collect_notice_image_text,
+)
+
 BASE_URL = "https://www.dongguk.edu"
 BOARD_CODES = {
     "일반공지": "GENERALNOTICES",
@@ -277,6 +282,30 @@ def fetch_notice_detail(
             f"/cmmn/fileDown.do?filename={quote(name)}&filepath={quote(path, safe='/')}&filerealname={quote(stored)}",
         )
         attachments.append({"name": name, "url": download_url})
+
+    # 표·일정이 본문 이미지에만 있는 공지는 get_text()만으로 핵심 사실이 사라진다.
+    # 이미지 하나의 실패는 본문 수집을 막지 않으며, 검증된 SHA 캐시를 우선하고
+    # 캐시 미스만 설정된 vision 모델로 전사한다.
+    image_texts = collect_notice_image_text(
+        content_html,
+        detail_url=url,
+        http_get=lambda image_url, timeout: _get_with_retry(
+            image_url,
+            timeout=timeout,
+            retries=retries,
+        ),
+        timeout=timeout,
+    )
+    content_text = append_notice_image_text(content_text, image_texts)
+    attachments.extend(
+        {
+            "name": "본문 이미지 전사",
+            "url": image.image_url,
+            "sha256": image.sha256,
+            "extraction_method": image.method,
+        }
+        for image in image_texts
+    )
 
     return {
         "title": title_text,

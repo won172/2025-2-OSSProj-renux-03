@@ -18,7 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,8 @@ from golden_matrix import TAXONOMY_VERSION, file_sha256, load_matrix, load_taxon
 from src.services.source_contract import normalized_source_contract
 
 
-RUNNER_VERSION = "real-http-v3-stable-attestation"
+RUNNER_VERSION = "real-http-v4-as-of"
+DEFAULT_GOLDEN_AS_OF = "2026-07-30"
 
 
 def _utc_now() -> str:
@@ -177,12 +178,22 @@ def _result_from_response(case, status: int, response: dict, latency_ms: int) ->
     }
 
 
-def _run_case(case, ask_url: str, timeout: float, headers: dict[str, str]) -> dict[str, Any]:
+def _run_case(
+    case,
+    ask_url: str,
+    timeout: float,
+    headers: dict[str, str],
+    as_of: str,
+) -> dict[str, Any]:
     started = time.perf_counter()
     try:
         status, response = _request_json(
             ask_url,
-            {"question": case.question, "sessionId": f"golden-{uuid.uuid4()}"},
+            {
+                "question": case.question,
+                "sessionId": f"golden-{uuid.uuid4()}",
+                "asOf": as_of,
+            },
             timeout,
             headers,
         )
@@ -206,6 +217,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument(
+        "--as-of",
+        default=os.getenv("RAG_GOLDEN_AS_OF", DEFAULT_GOLDEN_AS_OF),
+        help="모든 케이스가 공유할 재현 가능한 기준일(YYYY-MM-DD)",
+    )
     parser.add_argument("--case-id", action="append", default=[], help="Troubleshooting only; subset runs are never complete")
     parser.add_argument("--header", action="append", default=[], help="Extra HTTP header as Name=Value; values are not stored")
     args = parser.parse_args(argv)
@@ -217,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         if errors:
             raise ValueError("; ".join(errors))
         headers = dict(item.split("=", 1) for item in args.header)
+        date.fromisoformat(args.as_of)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"Runner contract error: {exc}", file=sys.stderr)
         return 2
@@ -250,7 +267,17 @@ def main(argv: list[str] | None = None) -> int:
         return 4
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as executor:
-        futures = [executor.submit(_run_case, case, ask_url, args.timeout, headers) for case in cases]
+        futures = [
+            executor.submit(
+                _run_case,
+                case,
+                ask_url,
+                args.timeout,
+                headers,
+                args.as_of,
+            )
+            for case in cases
+        ]
         results = [future.result() for future in futures]
 
     end_fingerprint_hash: str | None = None
@@ -296,6 +323,7 @@ def main(argv: list[str] | None = None) -> int:
         "run_started_at": started_at,
         "run_completed_at": _utc_now(),
         "endpoint": ask_url,
+        "as_of": args.as_of,
         "endpoint_ready_status": ready_status,
         "endpoint_ready_payload_hash": _canonical_hash(ready_payload),
         "header_names": sorted(headers),

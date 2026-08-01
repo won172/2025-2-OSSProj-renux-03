@@ -1,25 +1,29 @@
-"""노트북에서 가져온 밀집 임베딩+TF-IDF 하이브리드 검색 유틸리티입니다."""
+"""밀집 임베딩+BM25 하이브리드 검색 유틸리티입니다."""
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Dict # Dict 추가
+from typing import Any, Iterable, List, Optional, Tuple, Dict
 
 import joblib
 import chromadb
 import numpy as np
 import pandas as pd
 import sklearn
+from rank_bm25 import BM25Okapi
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.config import (
     DEFAULT_TOP_K,
     HYBRID_ALPHA,
+    HYBRID_FUSION_MODE,
+    HYBRID_RRF_K,
     TFIDF_TOKENIZER,
     TFIDF_REQUIRE_MANIFEST,
     TFIDF_VERIFY_INTEGRITY,
@@ -30,7 +34,7 @@ from src.vectorstore.chroma_client import get_collection, query_items
 
 logger = logging.getLogger(__name__)
 
-# TF-IDF pkl 무결성 매니페스트: {파일명: sha256}. 학습 시 갱신하고 로드 전 대조한다.
+# 희소 검색 pkl 무결성 매니페스트: {파일명: sha256}. 학습 시 갱신하고 로드 전 대조한다.
 # 경로는 호출 시점에 VECTORIZER_DIR에서 파생한다(테스트의 VECTORIZER_DIR 패치가 함께 적용되도록).
 _MANIFEST_NAME = "manifest.json"
 _KIWI = None
@@ -56,8 +60,23 @@ _KOREAN_SUFFIXES = tuple(
 )
 
 
-def _vectorizer_path(identifier: str) -> Path:
+def _bm25_path(identifier: str) -> Path:
+    return VECTORIZER_DIR / f"{identifier}_bm25.pkl"
+
+
+def _legacy_tfidf_path(identifier: str) -> Path:
     return VECTORIZER_DIR / f"{identifier}_tfidf.pkl"
+
+
+def lexical_artifact_path(identifier: str) -> Path:
+    """현재 BM25 아티팩트를 우선하고, 재색인 전에는 TF-IDF를 읽기 전용 폴백한다."""
+    bm25_path = _bm25_path(identifier)
+    return bm25_path if bm25_path.exists() else _legacy_tfidf_path(identifier)
+
+
+# 과거 테스트·도구의 내부 패치 지점을 보존한다. 신규 학습은 항상 _bm25_path를 쓴다.
+def _vectorizer_path(identifier: str) -> Path:
+    return lexical_artifact_path(identifier)
 
 
 def _manifest_path() -> Path:
@@ -198,6 +217,7 @@ def _resolve_tfidf_tokenizer_name() -> str:
 
 
 def build_tfidf_vectorizer() -> TfidfVectorizer:
+    """레거시 TF-IDF 아티팩트와 토크나이저 회귀 테스트를 위한 호환 생성기."""
     tokenizer_name = _resolve_tfidf_tokenizer_name()
     if tokenizer_name == "default":
         return TfidfVectorizer(max_features=10000)
@@ -208,6 +228,27 @@ def build_tfidf_vectorizer() -> TfidfVectorizer:
         token_pattern=None,
         lowercase=False,
     )
+
+
+@dataclass
+class BM25LexicalIndex:
+    """직렬화 가능한 한국어 BM25 검색기."""
+
+    engine: Any
+    tokenizer_name: str
+    document_count: int
+    k1: float = 1.5
+    b: float = 0.75
+
+    def score(self, query: str) -> np.ndarray:
+        tokens = (
+            _kiwi_or_light_korean_tokenize(query)
+            if self.tokenizer_name == "korean"
+            else _light_korean_tokenize(query)
+        )
+        if not tokens:
+            return np.zeros(self.document_count, dtype=np.float64)
+        return np.asarray(self.engine.get_scores(tokens), dtype=np.float64)
 
 
 def _sha256_file(path: Path) -> str:
@@ -228,7 +269,7 @@ def _read_manifest() -> Dict[str, str]:
             data = json.load(fh)
         return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("TF-IDF 매니페스트를 읽지 못했습니다(%s): %s", manifest_path, exc)
+        logger.warning("희소 검색 매니페스트를 읽지 못했습니다(%s): %s", manifest_path, exc)
         return {}
 
 
@@ -256,7 +297,7 @@ def _verify_artifact_integrity(path: Path) -> None:
     expected = manifest.get(path.name)
     if expected is None:
         msg = (
-            f"TF-IDF 아티팩트 '{path.name}'가 무결성 매니페스트에 없습니다. "
+            f"희소 검색 아티팩트 '{path.name}'가 무결성 매니페스트에 없습니다. "
             f"scripts/build_indices.py 재생성 또는 매니페스트 갱신이 필요합니다."
         )
         if TFIDF_REQUIRE_MANIFEST:
@@ -266,33 +307,46 @@ def _verify_artifact_integrity(path: Path) -> None:
     actual = _sha256_file(path)
     if actual != expected:
         raise ValueError(
-            f"TF-IDF 아티팩트 '{path.name}' 무결성 검증 실패: "
+            f"희소 검색 아티팩트 '{path.name}' 무결성 검증 실패: "
             f"매니페스트 해시와 불일치(변조/손상 가능). 로드를 거부합니다."
         )
 
 
-def train_tfidf(
+def train_bm25(
     identifier: str,
     corpus: Iterable[str],
     chunk_ids: Iterable[str] | None = None,
-) -> Tuple[TfidfVectorizer, np.ndarray]:
-    """주어진 말뭉치에 TF-IDF 벡터라이저를 학습시키고 저장합니다.
+) -> Tuple[BM25LexicalIndex, np.ndarray]:
+    """한국어 토큰을 재사용해 BM25 인덱스를 학습하고 저장한다.
 
     chunk_ids를 함께 주면 행→chunk_id 매핑이 아티팩트에 저장되어,
     검색 시 chunks_df 행 순서에 의존하지 않고 점수를 매핑할 수 있습니다.
     """
     texts = list(corpus)
     if not texts:
-        raise ValueError("Corpus is empty, cannot train TF-IDF vectorizer.")
+        raise ValueError("Corpus is empty, cannot train BM25 index.")
     ids = [str(cid) for cid in chunk_ids] if chunk_ids is not None else None
     if ids is not None and len(ids) != len(texts):
         raise ValueError(
             f"chunk_ids length ({len(ids)}) does not match corpus length ({len(texts)})."
         )
     tokenizer_name = _resolve_tfidf_tokenizer_name()
-    vectorizer = build_tfidf_vectorizer()
-    matrix = vectorizer.fit_transform(texts)
-    path = _vectorizer_path(identifier)
+    tokenizer = (
+        _kiwi_or_light_korean_tokenize
+        if tokenizer_name == "korean"
+        else _light_korean_tokenize
+    )
+    tokenized_corpus = [tokenizer(text) for text in texts]
+    engine = BM25Okapi(tokenized_corpus, k1=1.5, b=0.75)
+    vectorizer = BM25LexicalIndex(
+        engine=engine,
+        tokenizer_name=tokenizer_name,
+        document_count=len(texts),
+    )
+    # 기존 호출부가 행 수 정합성을 matrix.shape[0]으로 확인한다. BM25 점수는
+    # engine이 계산하므로 0열 행렬이면 충분하고, 문서 본문을 중복 저장하지 않는다.
+    matrix = np.empty((len(texts), 0), dtype=np.float32)
+    path = _bm25_path(identifier)
     joblib.dump(
         {
             "vectorizer": vectorizer,
@@ -303,6 +357,9 @@ def train_tfidf(
                 "document_count": len(texts),
                 "created_at": datetime.now(timezone(timedelta(hours=9))).isoformat(),
                 "sklearn_version": sklearn.__version__,
+                "retriever_type": "bm25",
+                "bm25_k1": vectorizer.k1,
+                "bm25_b": vectorizer.b,
                 "tokenizer": tokenizer_name,
                 "tokenizer_backend": (
                     "kiwi"
@@ -319,8 +376,8 @@ def train_tfidf(
     return vectorizer, matrix
 
 
-def _load_tfidf_artifact(identifier: str) -> dict:
-    path = _vectorizer_path(identifier)
+def _load_lexical_artifact(identifier: str) -> dict:
+    path = lexical_artifact_path(identifier)
     _verify_artifact_integrity(path)  # joblib.load(임의 코드 실행 가능) 이전에 fail-closed 검증
     artifact = joblib.load(path)
     if isinstance(artifact, dict) and "vectorizer" in artifact and "matrix" in artifact:
@@ -336,30 +393,38 @@ def _load_tfidf_artifact(identifier: str) -> dict:
                 "document_count": None,
                 "created_at": None,
                 "sklearn_version": None,
+                "retriever_type": "tfidf",
                 "is_legacy": True,
             },
         }
 
-    raise ValueError(f"Unexpected TF-IDF artifact format for '{identifier}'.")
+    raise ValueError(f"Unexpected lexical artifact format for '{identifier}'.")
 
 
-def load_tfidf(identifier: str) -> Tuple[TfidfVectorizer, np.ndarray]:
-    """이미 학습된 TF-IDF 벡터라이저와 행렬을 불러옵니다."""
-    data = _load_tfidf_artifact(identifier)
+def load_lexical(identifier: str) -> Tuple[Any, np.ndarray]:
+    """BM25 인덱스를 불러오며, 재색인 전에는 레거시 TF-IDF를 허용한다."""
+    data = _load_lexical_artifact(identifier)
     return data["vectorizer"], data["matrix"]
 
 
-def load_tfidf_with_ids(identifier: str) -> Tuple[TfidfVectorizer, np.ndarray, Optional[List[str]]]:
-    """TF-IDF 벡터라이저/행렬과 함께 행→chunk_id 매핑을 불러옵니다(구버전 아티팩트면 None)."""
-    data = _load_tfidf_artifact(identifier)
+def load_lexical_with_ids(identifier: str) -> Tuple[Any, np.ndarray, Optional[List[str]]]:
+    """희소 검색기와 행→chunk_id 매핑을 불러온다."""
+    data = _load_lexical_artifact(identifier)
     return data["vectorizer"], data["matrix"], data.get("chunk_ids")
 
 
-def read_tfidf_metadata(identifier: str) -> Dict:
-    """TF-IDF 아티팩트 메타데이터를 읽습니다. legacy 포맷이면 legacy 플래그를 반환합니다."""
-    data = _load_tfidf_artifact(identifier)
+def read_lexical_metadata(identifier: str) -> Dict:
+    """희소 검색 아티팩트 메타데이터를 읽는다."""
+    data = _load_lexical_artifact(identifier)
     metadata = data.get("metadata")
     return metadata if isinstance(metadata, dict) else {}
+
+
+# 외부 스크립트 호환. 신규 인덱스는 이름과 무관하게 BM25로 생성된다.
+train_tfidf = train_bm25
+load_tfidf = load_lexical
+load_tfidf_with_ids = load_lexical_with_ids
+read_tfidf_metadata = read_lexical_metadata
 
 
 def _matches_where(row: pd.Series, where_filter: Dict) -> bool:
@@ -404,6 +469,7 @@ def hybrid_search(
     alpha: float = HYBRID_ALPHA,
     where_filter: Dict | None = None,
     tfidf_chunk_ids: List[str] | None = None,
+    academic_period_query: str | None = None,
 ) -> pd.DataFrame:
     """
     최적화된 하이브리드 검색:
@@ -455,7 +521,7 @@ def hybrid_search(
             exc,
         )
 
-    # 2. Sparse Search (TF-IDF)
+    # 2. Sparse Search (BM25; 재색인 전에는 레거시 TF-IDF 호환)
     # 행→chunk_id 매핑: 아티팩트의 chunk_ids가 있으면 그것을 사용(행 순서 결합 제거),
     # 없으면(구버전 아티팩트) 행 수가 chunks_df와 일치할 때만 행 순서로 매핑.
     matrix_rows = tfidf_matrix.shape[0]
@@ -475,8 +541,17 @@ def hybrid_search(
 
     sparse_scores: Dict[str, float] = {}
     if row_ids is not None:
-        query_vec = tfidf_vectorizer.transform([query])
-        sparse_sims = cosine_similarity(query_vec, tfidf_matrix).ravel()
+        if isinstance(tfidf_vectorizer, BM25LexicalIndex):
+            raw_sparse_scores = tfidf_vectorizer.score(query)
+            positive_max = float(np.max(raw_sparse_scores)) if raw_sparse_scores.size else 0.0
+            sparse_sims = (
+                np.clip(raw_sparse_scores / positive_max, 0.0, 1.0)
+                if positive_max > 0
+                else np.zeros_like(raw_sparse_scores)
+            )
+        else:
+            query_vec = tfidf_vectorizer.transform([query])
+            sparse_sims = cosine_similarity(query_vec, tfidf_matrix).ravel()
         sparse_indices = np.argsort(sparse_sims)[::-1][:limit]
         for idx in sparse_indices:
             if sparse_sims[idx] > 0:
@@ -484,14 +559,14 @@ def hybrid_search(
         if not sparse_scores:
             # OOV 쿼리 등으로 sparse 기여가 0이면 무음으로 vector-only가 되므로 흔적을 남긴다
             logging.info(
-                "TF-IDF returned no positive scores for query %r on '%s' (vector-only search).",
+                "Sparse retrieval returned no positive scores for query %r on '%s' (vector-only search).",
                 query, collection_name,
             )
 
     # 3. Merge & Fusion
     # 후보군: Vector 검색 결과 OR TF-IDF 검색 결과.
     # where_filter가 있으면 벡터 검색은 Chroma에서 이미 필터링됨.
-    # TF-IDF-only 히트는 chunks_df 메타데이터로 필터를 직접 검증해 통과한 것만 후보로 살린다
+    # sparse-only 히트는 chunks_df 메타데이터로 필터를 직접 검증해 통과한 것만 후보로 살린다
     # (이전에는 벡터 결과와의 intersection만 허용해 키워드-only 히트가 전부 버려졌음).
     if where_filter:
         sparse_only = set(sparse_scores.keys()) - set(vec_scores.keys())
@@ -514,6 +589,20 @@ def hybrid_search(
         str(cid): pos
         for pos, cid in enumerate(chunks_df["chunk_id"].astype(str).tolist())
     }
+    dense_ranks = {
+        chunk_id: rank
+        for rank, (chunk_id, _) in enumerate(
+            sorted(vec_scores.items(), key=lambda item: item[1], reverse=True),
+            start=1,
+        )
+    }
+    sparse_ranks = {
+        chunk_id: rank
+        for rank, (chunk_id, _) in enumerate(
+            sorted(sparse_scores.items(), key=lambda item: item[1], reverse=True),
+            start=1,
+        )
+    }
     hybrid_results = []
     for cid in candidate_ids:
         v_score = vec_scores.get(cid, 0.0)
@@ -524,7 +613,16 @@ def hybrid_search(
         # TF-IDF 문서를 밀어내지 않게 하되, sparse 점수가 약한 문서는 기존
         # hybrid 점수를 그대로 사용한다. 도메인별 예외어 없이 모든 코퍼스에
         # 동일하게 적용한다.
-        weighted_score = alpha * v_score + (1.0 - alpha) * s_score
+        if HYBRID_FUSION_MODE == "rrf":
+            rrf_score = 0.0
+            if cid in dense_ranks:
+                rrf_score += 1.0 / (HYBRID_RRF_K + dense_ranks[cid])
+            if cid in sparse_ranks:
+                rrf_score += 1.0 / (HYBRID_RRF_K + sparse_ranks[cid])
+            # 두 랭킹 모두 1위일 때 1.0이 되도록 정규화해 기존 임계값 척도를 유지한다.
+            weighted_score = rrf_score / (2.0 / (HYBRID_RRF_K + 1))
+        else:
+            weighted_score = alpha * v_score + (1.0 - alpha) * s_score
         # Sparse and dense similarities are both cosine-like scores in [0, 1],
         # so the sparse score itself is a valid lower bound for an exact-word
         # match. The weighted score can still win whenever semantic evidence is
@@ -540,7 +638,10 @@ def hybrid_search(
                 title = _extract_title(str(row.get("chunk_text", "")))
             title_score = _query_title_focus_score(query, title)
         period_adjustment = (
-            _academic_period_title_adjustment(query, title)
+            _academic_period_title_adjustment(
+                academic_period_query if academic_period_query is not None else query,
+                title,
+            )
             if "notice" in collection_name.lower()
             else 0.0
         )
@@ -596,9 +697,21 @@ def hybrid_search_with_meta(
     alpha: float = HYBRID_ALPHA,
     where_filter: Dict | None = None, # where_filter 추가
     tfidf_chunk_ids: List[str] | None = None,
+    academic_period_query: str | None = None,
 ) -> pd.DataFrame:
     """노트북과 같은 형식으로 메타데이터 열을 청크 텍스트와 함께 반환합니다."""
-    hits = hybrid_search(collection_name, chunks_df, tfidf_vectorizer, tfidf_matrix, query, top_k, alpha, where_filter, tfidf_chunk_ids) # where_filter 전달
+    hits = hybrid_search(
+        collection_name,
+        chunks_df,
+        tfidf_vectorizer,
+        tfidf_matrix,
+        query,
+        top_k,
+        alpha,
+        where_filter,
+        tfidf_chunk_ids,
+        academic_period_query,
+    )
     out = hits.copy()
     out["title"] = out["chunk_text"].apply(_extract_title)
     for column in ("topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id"):
@@ -621,6 +734,8 @@ def hybrid_search_with_meta(
         "schedule_start", "schedule_end", "department", "campus_scope",
         "filename", "relative_dir", "source_file", "document_key", "source_id",
         "board_code", "article_id", "schedule_id", "staff_id", "course_id", "rule_id",
+        "canonical_key", "is_latest",
+        "title_norm", "audience", "retrieval_context",
     ]
     existing = [col for col in desired if col in out.columns]
     return out[existing]
@@ -636,6 +751,12 @@ def _extract_title(text: str) -> str:
 
 
 __all__ = [
+    "BM25LexicalIndex",
+    "train_bm25",
+    "load_lexical",
+    "load_lexical_with_ids",
+    "read_lexical_metadata",
+    "lexical_artifact_path",
     "train_tfidf",
     "load_tfidf",
     "load_tfidf_with_ids",

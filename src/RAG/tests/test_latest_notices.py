@@ -156,6 +156,47 @@ def test_recent_date_label_means_latest_available_not_fixed_recent_days():
     assert hits["chunk_id"].tolist() == ["scholarship-new-0", "scholarship-old"]
 
 
+def test_recent_date_label_never_leaks_notices_after_as_of():
+    chunks = pd.concat(
+        [
+            _notice_chunks(),
+            pd.DataFrame(
+                [
+                    {
+                        "chunk_id": "future-scholarship",
+                        "doc_id": "future-scholarship",
+                        "notice_id": 99,
+                        "position": 0,
+                        "title": "기준일 다음 날 장학 공지",
+                        "chunk_text": "미래 장학 공지 본문",
+                        "topics": "장학공지",
+                        "published_at": "2026-06-24",
+                        "url": "https://example.com/future",
+                        "source": "notices",
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    recent_filter = QueryDateFilter(
+        start=date(2026, 6, 17),
+        end=date(2026, 6, 23),
+        label="recent",
+        is_relative=True,
+    )
+
+    hits = _latest_notice_hits(
+        chunks_df=chunks,
+        top_k=5,
+        where_filter={"topics": {"$eq": "장학공지"}},
+        date_filter=recent_filter,
+    )
+
+    assert "future-scholarship" not in hits["chunk_id"].tolist()
+    assert hits["chunk_id"].tolist() == ["scholarship-new-0", "scholarship-old"]
+
+
 def test_explicit_date_filter_is_applied_before_latest_sort():
     may_filter = QueryDateFilter(
         start=date(2026, 5, 1),
@@ -178,6 +219,7 @@ def test_recent_notice_intent_and_board_alias_are_detected():
 
     assert _is_recent_notice_query("최근 장학 공지 알려줘", route) is True
     assert _extract_notice_board_filter("최근 장학 공지 알려줘", route) == "장학공지"
+    assert _extract_notice_board_filter("오늘 올라온 장학금 뭐있지", route) == "장학공지"
     assert _extract_notice_board_filter("최신 학사공지 보여줘", route) == "학사공지"
 
 

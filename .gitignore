@@ -16,7 +16,7 @@ RenuxServer.csproj.user
 # Local environment files
 src/RAG/.env
 src/RAG/env
-src/RAG/.venv/
+src/RAG/.venv*/
 src/RAG/dockerignore
 src/RAG/dongguk_rule/.dockerignore
 src/RenuxServer/.env

@@ -41,3 +41,18 @@ jobs:
           dotnet-version: 9.0.x
       - run: dotnet restore RenuxServer.sln
       - run: dotnet build RenuxServer.sln --configuration Release --no-restore
+
+  rag-python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/RAG
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: src/RAG/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q

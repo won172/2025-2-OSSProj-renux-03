@@ -16,11 +16,12 @@ from sqlalchemy.orm import Session
 from src.config import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
+    STRUCTURED_CHUNK_SIZE,
     CHUNKS_DIR,
     DATA_SOURCES,
 )
 from src.models.embedding import encode_texts
-from src.search.hybrid import train_tfidf
+from src.search.hybrid import train_bm25
 from src.services.campus_scope import (
     classify_campus_scope,
     enrich_documents_with_campus_scope,
@@ -31,6 +32,9 @@ from src.utils.preprocess import (
     make_doc_id,
     to_chunks,
 )
+from src.services.notice_versioning import annotate_notice_versions
+from src.services.rule_versioning import annotate_rule_versions
+from src.services.retrieval_context import enrich_retrieval_fields
 from src.vectorstore.chroma_client import add_items, reset_collection, upsert_items, get_all_ids, delete_items, get_existing_ids
 from src.database import (
     SessionLocal, engine, init_db,
@@ -120,8 +124,14 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
         print(f"⚠️ Warning: No chunks generated for {key}")
         return chunks_df, None, None
 
+    chunks_df = enrich_retrieval_fields(chunks_df)
+    retrieval_text = chunks_df["retrieval_text"].fillna("").astype(str)
+
     # 메타데이터 준비
-    metadatas = chunks_df.drop(columns=["chunk_text"]).to_dict(orient="records")
+    metadatas = chunks_df.drop(
+        columns=["chunk_text", "retrieval_text"],
+        errors="ignore",
+    ).to_dict(orient="records")
     metadatas = [{k: (v if v is not None else "") for k, v in m.items()} for m in metadatas]
 
     # 1. 기존 ID 조회 (전체가 아닌, 현재 chunks_df에 있는 ID들만 확인)
@@ -143,12 +153,12 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
     # -> 현재 make_doc_id는 (제목, 날짜 등)만 포함하므로 내용 변경 감지 불가.
     # -> 따라서 안전하게 전체 Upsert 수행.
     
-    embeddings = encode_texts(chunks_df["chunk_text"].tolist())
+    embeddings = encode_texts(retrieval_text.tolist())
 
     upsert_items(
         collection,
         ids=chunks_df["chunk_id"],
-        documents=chunks_df["chunk_text"],
+        documents=retrieval_text,
         metadatas=metadatas,
         embeddings=embeddings,
     )
@@ -165,21 +175,23 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
         chunks_df.to_csv(write_path, index=False, encoding="utf-8-sig")
     artifacts.chunk_path = write_path
 
-    # 4. TF-IDF 학습 (여전히 전체 데이터 필요)
-    vectorizer, matrix = train_tfidf(
+    # 4. BM25 학습 (전체 문서 길이 통계가 필요)
+    vectorizer, matrix = train_bm25(
         key,
-        chunks_df["chunk_text"].tolist(),
+        retrieval_text.tolist(),
         chunk_ids=chunks_df["chunk_id"].astype(str).tolist(),
     )
     return chunks_df, vectorizer, matrix
 
 
 def persist_dataset_artifacts_only(key: str, chunks_df: pd.DataFrame) -> Tuple[pd.DataFrame, object, object]:
-    """Chroma upsert 없이 청크 아티팩트와 TF-IDF만 갱신합니다."""
+    """Chroma upsert 없이 청크 아티팩트와 BM25만 갱신합니다."""
     if chunks_df.empty:
         print(f"⚠️ Warning: No chunks generated for {key}")
         return chunks_df, None, None
 
+    chunks_df = enrich_retrieval_fields(chunks_df)
+    retrieval_text = chunks_df["retrieval_text"].fillna("").astype(str)
     artifacts = DATASET_ARTIFACTS[key]
     artifacts.chunk_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -191,12 +203,32 @@ def persist_dataset_artifacts_only(key: str, chunks_df: pd.DataFrame) -> Tuple[p
         chunks_df.to_csv(write_path, index=False, encoding="utf-8-sig")
     artifacts.chunk_path = write_path
 
-    vectorizer, matrix = train_tfidf(
+    vectorizer, matrix = train_bm25(
         key,
-        chunks_df["chunk_text"].tolist(),
+        retrieval_text.tolist(),
         chunk_ids=chunks_df["chunk_id"].astype(str).tolist(),
     )
     return chunks_df, vectorizer, matrix
+
+
+def _persist_replacing_collection(
+    key: str,
+    collection: str,
+    chunks_df: pd.DataFrame,
+) -> Tuple[pd.DataFrame, object, object]:
+    """새 청크를 먼저 올린 뒤 더 이상 유효하지 않은 벡터만 제거한다.
+
+    전량 ``reset`` 후 임베딩하면 CPU 재구축 동안 서비스 컬렉션이 비게 된다.
+    upsert가 성공하기 전에는 기존 벡터를 보존하고, 모든 파생 아티팩트 생성까지
+    끝난 뒤에만 고아 ID를 정리한다.
+    """
+    previous_ids = set(get_all_ids(collection))
+    result = _persist_chunks(key, collection, chunks_df)
+    current_ids = set(chunks_df["chunk_id"].astype(str))
+    stale_ids = sorted(previous_ids - current_ids)
+    if stale_ids:
+        delete_items(collection, stale_ids)
+    return result
 
 
 def _save_chunks_to_sqlite(chunks_df: pd.DataFrame, source_key: str):
@@ -229,14 +261,25 @@ def _first_nonempty(row, keys: Iterable[str]) -> str:
     return ""
 
 
-_TITLE_DEADLINE_PATTERN = re.compile(
-    r"(?:~|마감|기한|까지)\s*"
-    r"(?:(?P<year>\d{4})\s*[.\-/년]\s*)?"
-    r"(?P<month>\d{1,2})\s*(?:[.\-/월])\s*"
-    r"(?P<day>\d{1,2})"
+_TITLE_DEADLINE_PATTERNS = (
+    # (~9/20), (마감 6월 21일), (4/1~7/31)
+    re.compile(
+        r"(?:~|마감|기한|까지)\s*"
+        r"(?:(?P<year>\d{4})\s*[.\-/년]\s*)?"
+        r"(?P<month>\d{1,2})\s*(?:[.\-/월])\s*"
+        r"(?P<day>\d{1,2})\s*일?"
+    ),
+    # (2026.08.06까지), (10월 12일 마감), (12.22까지)
+    re.compile(
+        r"(?:(?P<year>\d{4})\s*[.\-/년]\s*)?"
+        r"(?P<month>\d{1,2})\s*(?:[.\-/월])\s*"
+        r"(?P<day>\d{1,2})\s*일?\s*"
+        r"(?:까지|마감|기한)"
+    ),
 )
 _BODY_DEADLINE_KEYWORD_PATTERN = re.compile(
     r"("
+    r"지원서\s*접수|지원\s*기간|지원\s*마감|모집\s*기간|모집\s*마감|"
     r"신청\s*기간|신청기간|접수\s*기간|접수기간|"
     r"제출\s*기간|제출기간|서류\s*제출|서류제출|"
     r"등록\s*기간|등록기간|납부\s*기간|납부기간|"
@@ -279,7 +322,14 @@ def _parse_notice_deadline_from_title(title: object, published_date: str | None)
     if pd.isna(published):
         return None
 
-    match = _TITLE_DEADLINE_PATTERN.search(title)
+    match = next(
+        (
+            candidate
+            for pattern in _TITLE_DEADLINE_PATTERNS
+            if (candidate := pattern.search(title)) is not None
+        ),
+        None,
+    )
     if not match:
         return None
 
@@ -460,6 +510,7 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 "url": url,
                 "attachments": attachments_str,
                 "source": "notices",
+                "source_type": row.get("source_type", "html_notice"),
                 "notice_id": row.get("db_id"),
                 "document_key": row.get("document_key") or row.get("문서키"),
                 "source_id": row.get("source_id") or row.get("원문ID"),
@@ -479,6 +530,7 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
     chunks_df = pd.DataFrame(chunks)
     if not chunks_df.empty:
         chunks_df.drop_duplicates(subset=["chunk_id"], inplace=True)
+        chunks_df = annotate_notice_versions(chunks_df)
     return chunks_df
 
 
@@ -566,11 +618,19 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
 
 def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
     notice_rows = []
-    source_document_keys = {
-        str(doc.source_url): doc.document_key
-        for doc in session.query(SourceDocument)
+    source_documents = (
+        session.query(SourceDocument)
         .filter(SourceDocument.dataset == "notices")
         .all()
+    )
+    source_documents_by_key = {
+        str(doc.document_key): doc
+        for doc in source_documents
+        if doc.document_key
+    }
+    source_documents_by_url = {
+        str(doc.source_url): doc
+        for doc in source_documents
         if doc.source_url and doc.document_key
     }
     fallback_positions: dict[str, int] = {}
@@ -583,9 +643,14 @@ def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
     for chunk, notice in query_notices.all():
         doc_id, position = _chunk_parent_identity(
             chunk,
-            source_document_keys.get(str(notice.detail_url), f"notice:{notice.id}"),
+            (
+                source_documents_by_url[str(notice.detail_url)].document_key
+                if str(notice.detail_url) in source_documents_by_url
+                else f"notice:{notice.id}"
+            ),
             fallback_positions,
         )
+        source_document = source_documents_by_key.get(doc_id)
         notice_rows.append(
             {
                 "chunk_id": chunk.chunk_id,
@@ -595,10 +660,24 @@ def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
                 "title": notice.title,
                 "topics": notice.board,
                 "published_at": notice.published_date,
-                "apply_deadline": _extract_notice_apply_deadline(notice.title, chunk.chunk_text, notice.published_date),
+                # 마감일은 청크가 아니라 공지 문서의 속성이다. 청크마다 다시
+                # 추출하면 지원서 접수일과 합격자 발표일이 서로 다른 마감으로
+                # 저장될 수 있으므로 원문 전체에서 한 번 결정해 공유한다.
+                "apply_deadline": _extract_notice_apply_deadline(
+                    notice.title,
+                    notice.content,
+                    notice.published_date,
+                ),
                 "url": notice.detail_url,
                 "attachments": notice.attachments,
                 "source": "notices",
+                "source_type": (
+                    source_document.source_type if source_document is not None else "html_notice"
+                ),
+                "document_key": doc_id,
+                "source_id": (
+                    source_document.source_id if source_document is not None else ""
+                ),
                 "notice_id": notice.id,
                 "category": notice.category,
                 "question": None,
@@ -641,7 +720,8 @@ def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
 
     if not notice_rows:
         return pd.DataFrame()
-    return _canonicalize_campus_scope_frame(pd.DataFrame(notice_rows))
+    frame = annotate_notice_versions(pd.DataFrame(notice_rows))
+    return _canonicalize_campus_scope_frame(frame)
 
 
 def build_notice_index_frame_from_db() -> pd.DataFrame:
@@ -713,6 +793,7 @@ def build_rule_chunks(df: pd.DataFrame) -> pd.DataFrame:
     chunks_df = pd.DataFrame(chunks)
     if not chunks_df.empty:
         chunks_df.drop_duplicates(subset=["chunk_id"], inplace=True)
+        chunks_df = annotate_rule_versions(chunks_df)
     return chunks_df
 
 
@@ -727,10 +808,14 @@ def _entry_year_guide_cache_is_stale(output_path: Path, dependencies: Iterable[P
     )
 
 
-def ingest_rules() -> Tuple[pd.DataFrame, object, object]:
+def ingest_rules(*, force_source_reload: bool = False) -> Tuple[pd.DataFrame, object, object]:
     session = SessionLocal()
     try:
-        if session.query(Rule.id).first() is not None and session.query(Chunk.id).filter(Chunk.rule_id.isnot(None)).first() is not None:
+        if (
+            not force_source_reload
+            and session.query(Rule.id).first() is not None
+            and session.query(Chunk.id).filter(Chunk.rule_id.isnot(None)).first() is not None
+        ):
             existing = reindex_from_db("rules").get("rules")
             if existing is not None:
                 return existing
@@ -772,7 +857,17 @@ def ingest_rules() -> Tuple[pd.DataFrame, object, object]:
             fname = _first_nonempty(row, ["filename", "파일명", "규정명", "title"])
             rdir = _first_nonempty(row, ["relative_dir", "경로", "folder"])
             
-            obj = Rule(filename=fname, relative_dir=rdir, full_text=text_val)
+            obj = Rule(
+                filename=fname,
+                relative_dir=rdir,
+                full_text=text_val,
+                title=_first_nonempty(row, ["title", "규정명"]) or fname,
+                source_type=_first_nonempty(row, ["source_type", "문서유형"]),
+                source_url=_first_nonempty(row, ["source_url", "url", "원문URL"]),
+                source_page_url=_first_nonempty(row, ["source_page_url", "landing_url"]),
+                source_version=_first_nonempty(row, ["source_version", "version"]),
+                published_at=_first_nonempty(row, ["published_at", "게시일", "기준일"]),
+            )
             rule_objs.append(obj)
             
         session.add_all(rule_objs)
@@ -783,9 +878,11 @@ def ingest_rules() -> Tuple[pd.DataFrame, object, object]:
         
     chunks_df = build_rule_chunks(df)
     _save_chunks_to_sqlite(chunks_df, "rules")
-    # 규정 파일이 삭제/개정되면 옛 doc_id 청크가 고아로 남으므로 전체 리셋 후 재적재
-    reset_collection(DATASET_ARTIFACTS["rules"].collection)
-    return _persist_chunks("rules", DATASET_ARTIFACTS["rules"].collection, chunks_df)
+    return _persist_replacing_collection(
+        "rules",
+        DATASET_ARTIFACTS["rules"].collection,
+        chunks_df,
+    )
 
 
 # --- Schedule ---
@@ -828,17 +925,21 @@ def build_schedule_chunks(df: pd.DataFrame) -> pd.DataFrame:
     enrich_documents_with_campus_scope(docs)
     chunks = to_chunks(
         docs,
-        chunk_size=CHUNK_SIZE // 2,
+        chunk_size=STRUCTURED_CHUNK_SIZE // 2,
         chunk_overlap=CHUNK_OVERLAP // 2,
         include_title=True,
     )
     return pd.DataFrame(chunks)
 
 
-def ingest_schedule() -> Tuple[pd.DataFrame, object, object]:
+def ingest_schedule(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, object, object]:
     session = SessionLocal()
     try:
-        if session.query(Schedule.id).first() is not None and session.query(Chunk.id).filter(Chunk.schedule_id.isnot(None)).first() is not None:
+        if (
+            not refresh_from_csv
+            and session.query(Schedule.id).first() is not None
+            and session.query(Chunk.id).filter(Chunk.schedule_id.isnot(None)).first() is not None
+        ):
             existing = reindex_from_db("schedule").get("schedule")
             if existing is not None:
                 return existing
@@ -1002,7 +1103,7 @@ def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
     enrich_documents_with_campus_scope(docs)
     chunks = to_chunks(
         docs,
-        chunk_size=CHUNK_SIZE * 2,
+        chunk_size=STRUCTURED_CHUNK_SIZE * 2,
         chunk_overlap=CHUNK_OVERLAP,
         include_title=True,
     )
@@ -1205,7 +1306,12 @@ def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
         })
         
     enrich_documents_with_campus_scope(docs)
-    chunks = to_chunks(docs, chunk_size=CHUNK_SIZE, chunk_overlap=0, include_title=True)
+    chunks = to_chunks(
+        docs,
+        chunk_size=STRUCTURED_CHUNK_SIZE,
+        chunk_overlap=0,
+        include_title=True,
+    )
     return pd.DataFrame(chunks)
 
 
@@ -1464,35 +1570,49 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
         # 2. Rules
         if not target or target == "rules":
             print("🔄 Re-indexing rules from DB...")
-            query = (
-                session.query(Chunk, Rule)
-                .join(Rule, Chunk.rule_id == Rule.id)
-                .order_by(Rule.id.asc(), Chunk.position.asc(), Chunk.id.asc())
-            )
-            data = []
-            fallback_positions: dict[str, int] = {}
-            for chunk, rule in query.all():
-                doc_id, position = _chunk_parent_identity(
-                    chunk, f"rule:{rule.id}", fallback_positions,
-                )
-                data.append({
-                    "chunk_id": chunk.chunk_id,
-                    "chunk_text": chunk.chunk_text,
-                    "doc_id": doc_id,
-                    "position": position,
-                    "title": rule.filename,
-                    "topics": "규정",
-                    "relative_dir": rule.relative_dir,
+            rule_rows = [
+                {
+                    "text": rule.full_text,
                     "filename": rule.filename,
-                    "source": "rules",
-                    "url": raw_data.get("curriculum_url") or raw_data.get("source_url", ""),
-                    "published_at": "",
-                    "rule_id": rule.id
-                })
-            if data:
-                df = _canonicalize_campus_scope_frame(pd.DataFrame(data))
-                reset_collection(DATASET_ARTIFACTS["rules"].collection)
-                results["rules"] = _persist_chunks("rules", DATASET_ARTIFACTS["rules"].collection, df)
+                    "relative_dir": rule.relative_dir,
+                    "db_id": rule.id,
+                    "title": rule.title or rule.filename,
+                    "source_type": rule.source_type or "rules_text",
+                    "source_url": rule.source_url or "",
+                    "source_page_url": rule.source_page_url or "",
+                    "source_version": rule.source_version or "",
+                    "published_at": rule.published_at or "",
+                }
+                for rule in session.query(Rule).order_by(Rule.id.asc()).all()
+                if str(rule.full_text or "").strip()
+            ]
+            if rule_rows:
+                # Rule.full_text가 정본이다. 기존 300자 파생 청크를 다시 이어 붙이면
+                # overlap과 줄바꿈 오차가 누적되므로 정본에서 600자로 직접 재분할한다.
+                df = _canonicalize_campus_scope_frame(
+                    build_rule_chunks(pd.DataFrame(rule_rows))
+                )
+                session.query(Chunk).filter(Chunk.rule_id.isnot(None)).delete(
+                    synchronize_session=False
+                )
+                session.bulk_insert_mappings(
+                    Chunk,
+                    df[
+                        [
+                            "chunk_id",
+                            "chunk_text",
+                            "doc_id",
+                            "position",
+                            "rule_id",
+                        ]
+                    ].to_dict(orient="records"),
+                )
+                session.commit()
+                results["rules"] = _persist_replacing_collection(
+                    "rules",
+                    DATASET_ARTIFACTS["rules"].collection,
+                    df,
+                )
 
         # 3. Schedule
         if not target or target == "schedule":
@@ -1620,6 +1740,7 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
             if not meals_df.empty:
                 df = build_meal_chunks(meals_df)
                 if not df.empty:
+                    df = _canonicalize_campus_scope_frame(df)
                     reset_collection(DATASET_ARTIFACTS["meals"].collection)
                     results["meals"] = _persist_chunks("meals", DATASET_ARTIFACTS["meals"].collection, df)
 

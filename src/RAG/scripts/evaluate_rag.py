@@ -4,6 +4,7 @@ import json
 import os
 import pandas as pd
 import sys
+from datetime import date
 from pathlib import Path
 from typing import List
 import uuid
@@ -36,10 +37,10 @@ JSON만 출력: {"verdict": "...", "grounded": true/false, "reason": "..."}"""
 
 
 DEFAULT_THRESHOLDS = {
-    "route_hit_rate": 0.80,
-    "context_recall_proxy": 0.70,
-    "answer_relevancy_proxy": 0.70,
-    "fallback_rate": 0.35,
+    "faithfulness": 0.75,
+    "answer_relevancy": 0.80,
+    "context_precision": 0.70,
+    "context_recall": 0.80,
 }
 
 
@@ -59,6 +60,14 @@ def _bool_mean_or_none(series: pd.Series) -> float | None:
 
 def _pct(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.2%}"
+
+
+def resolve_evaluation_as_of(row_value: object, override: str | None = None) -> str:
+    raw = override or ("" if pd.isna(row_value) else str(row_value).strip())
+    try:
+        return date.fromisoformat(raw).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"invalid evaluation as_of: {raw!r}") from exc
 
 
 def summarize_results(results_df: pd.DataFrame, thresholds: dict[str, float]) -> dict:
@@ -83,19 +92,40 @@ def summarize_results(results_df: pd.DataFrame, thresholds: dict[str, float]) ->
     if "hit" in results_df.columns:
         metrics["route_hit_rate"] = _bool_mean_or_none(results_df["hit"])
     if "context_recall_proxy" in results_df.columns:
-        metrics["context_recall_proxy"] = _bool_mean_or_none(results_df["context_recall_proxy"])
+        context_recall = _bool_mean_or_none(results_df["context_recall_proxy"])
+        metrics["context_recall_proxy"] = context_recall
+        metrics["context_recall"] = context_recall
+    if "context_precision_proxy" in results_df.columns:
+        context_precision = _mean_or_none(results_df["context_precision_proxy"])
+        metrics["context_precision_proxy"] = context_precision
+        metrics["context_precision"] = context_precision
     if "keyword_score" in results_df.columns:
-        metrics["answer_relevancy_proxy"] = _mean_or_none(results_df["keyword_score"])
+        answer_relevancy = _mean_or_none(results_df["keyword_score"])
+        metrics["answer_relevancy_proxy"] = answer_relevancy
+        metrics["answer_relevancy"] = answer_relevancy
     if "fallback" in results_df.columns:
         metrics["fallback_rate"] = _bool_mean_or_none(results_df["fallback"])
     if "judge_grounded" in results_df.columns and results_df["judge_grounded"].notna().any():
-        metrics["faithfulness_proxy"] = _bool_mean_or_none(results_df["judge_grounded"])
+        faithfulness = _bool_mean_or_none(results_df["judge_grounded"])
+        metrics["faithfulness_proxy"] = faithfulness
+        metrics["faithfulness"] = faithfulness
     elif "grounding_grounded" in results_df.columns:
-        metrics["faithfulness_proxy"] = _bool_mean_or_none(results_df["grounding_grounded"])
+        faithfulness = _bool_mean_or_none(results_df["grounding_grounded"])
+        metrics["faithfulness_proxy"] = faithfulness
+        metrics["faithfulness"] = faithfulness
     if "grounding_score" in results_df.columns:
         metrics["avg_grounding_score"] = _mean_or_none(results_df["grounding_score"])
     if "top_hybrid_score" in results_df.columns:
         metrics["avg_top_hybrid_score"] = _mean_or_none(results_df["top_hybrid_score"])
+    if "retrieval_repeat_consistent" in results_df.columns:
+        repeat_consistency = _bool_mean_or_none(
+            results_df["retrieval_repeat_consistent"]
+        )
+        metrics["retrieval_repeat_consistency"] = repeat_consistency
+        if repeat_consistency is not None and repeat_consistency < 1.0:
+            summary["warnings"].append(
+                f"retrieval_repeat_consistency {_pct(repeat_consistency)} below 100.00%"
+            )
 
     for dataset, group in results_df.groupby("expected_dataset", dropna=False):
         dataset_key = str(dataset)
@@ -103,6 +133,7 @@ def summarize_results(results_df: pd.DataFrame, thresholds: dict[str, float]) ->
             "count": int(len(group)),
             "route_hit_rate": _bool_mean_or_none(group["hit"]) if "hit" in group else None,
             "context_recall_proxy": _bool_mean_or_none(group["context_recall_proxy"]) if "context_recall_proxy" in group else None,
+            "context_precision_proxy": _mean_or_none(group["context_precision_proxy"]) if "context_precision_proxy" in group else None,
             "answer_relevancy_proxy": _mean_or_none(group["keyword_score"]) if "keyword_score" in group else None,
             "fallback_rate": _bool_mean_or_none(group["fallback"]) if "fallback" in group else None,
         }
@@ -110,6 +141,9 @@ def summarize_results(results_df: pd.DataFrame, thresholds: dict[str, float]) ->
     for metric_name, threshold in thresholds.items():
         value = metrics.get(metric_name)
         if value is None:
+            summary["warnings"].append(
+                f"{metric_name} is unavailable; required threshold is {_pct(threshold)}"
+            )
             continue
         if metric_name == "fallback_rate":
             if value > threshold:
@@ -128,19 +162,21 @@ def write_markdown_report(summary: dict, results_df: pd.DataFrame, output_path: 
         f"- Total questions: {summary.get('total_questions', 0)}",
         f"- Route hit rate: {_pct(metrics.get('route_hit_rate'))}",
         f"- Context recall proxy: {_pct(metrics.get('context_recall_proxy'))}",
+        f"- Context precision proxy: {_pct(metrics.get('context_precision_proxy'))}",
         f"- Answer relevancy proxy: {_pct(metrics.get('answer_relevancy_proxy'))}",
         f"- Faithfulness proxy: {_pct(metrics.get('faithfulness_proxy'))}",
         f"- Fallback rate: {_pct(metrics.get('fallback_rate'))}",
         "",
         "## Dataset Summary",
         "",
-        "| Dataset | Count | Route Hit | Context Recall | Answer Relevancy | Fallback |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Dataset | Count | Route Hit | Context Recall | Context Precision | Answer Relevancy | Fallback |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for dataset, row in summary.get("by_dataset", {}).items():
         lines.append(
             f"| {dataset} | {row.get('count', 0)} | {_pct(row.get('route_hit_rate'))} | "
-            f"{_pct(row.get('context_recall_proxy'))} | {_pct(row.get('answer_relevancy_proxy'))} | "
+            f"{_pct(row.get('context_recall_proxy'))} | {_pct(row.get('context_precision_proxy'))} | "
+            f"{_pct(row.get('answer_relevancy_proxy'))} | "
             f"{_pct(row.get('fallback_rate'))} |"
         )
 
@@ -202,15 +238,38 @@ async def run_evaluation(
     output_dir: str | None = None,
     thresholds: dict[str, float] | None = None,
     fail_on_threshold: bool = False,
+    as_of_override: str | None = None,
+    repeat_count: int = 1,
 ):
     os.environ["RAG_USE_QUERY_ANALYSIS"] = "1" if use_query_analysis else "0"
-    from api.rag_service import AskRequest, ask, _is_recent_notice_query
+    from api import rag_service
+
+    # 평가 실행은 각 행의 기준일을 재현해야 한다. 운영 API의 asOf 차단 기본값은
+    # 그대로 유지하고, 이 프로세스 안에서만 명시적으로 허용한다.
+    rag_service.RAG_ALLOW_AS_OF_OVERRIDE = True
+    AskRequest = rag_service.AskRequest
+    ask = rag_service.ask
+    _is_recent_notice_query = rag_service._is_recent_notice_query
 
     thresholds = thresholds or DEFAULT_THRESHOLDS
     df = pd.read_csv(csv_path)
+    required_columns = {"question", "expected_dataset", "expected_keywords", "as_of"}
+    missing_columns = sorted(required_columns - set(df.columns))
+    if missing_columns:
+        raise ValueError(f"evaluation_set missing columns: {', '.join(missing_columns)}")
+    if repeat_count < 1:
+        raise ValueError("repeat_count must be at least 1")
+    df = df.copy()
+    df["_evaluation_case"] = range(len(df))
+    df = df.loc[df.index.repeat(repeat_count)].copy()
+    df["_repeat_index"] = df.groupby("_evaluation_case").cumcount() + 1
+    df.reset_index(drop=True, inplace=True)
     results = []
     
-    print(f"🚀 Starting RAG Evaluation with {len(df)} questions...")
+    print(
+        f"🚀 Starting RAG Evaluation with {len(df)} requests "
+        f"({len(df) // repeat_count} questions × {repeat_count})..."
+    )
     
     # Mock FastAPI Request for request_id
     class MockRequest:
@@ -225,11 +284,24 @@ async def run_evaluation(
             keywords: List[str] = []
         else:
             keywords = [k.strip() for k in str(raw_keywords).split(',') if k.strip()]
+        raw_forbidden = row.get("forbidden_keywords")
+        forbidden_keywords = (
+            []
+            if pd.isna(raw_forbidden)
+            else [k.strip() for k in str(raw_forbidden).split(",") if k.strip()]
+        )
+        try:
+            row_as_of = resolve_evaluation_as_of(
+                row.get("as_of"),
+                as_of_override,
+            )
+        except ValueError as exc:
+            raise ValueError(f"{exc} for question {question!r}") from exc
         request_id = f"eval_{uuid.uuid4().hex}"
         
         print(f"🧐 Evaluating: {question}")
         
-        req = AskRequest(question=question)
+        req = AskRequest(question=question, asOf=row_as_of)
         try:
             mock_request = MockRequest(request_id)
             resp = await ask(req, mock_request)
@@ -243,10 +315,33 @@ async def run_evaluation(
             
             # 2. Answer Quality Check (Keyword Containment)
             keyword_hits = [k for k in keywords if k in resp.answer]
-            keyword_score = len(keyword_hits) / len(keywords) if keywords else 1.0
+            keyword_score_raw = (
+                len(keyword_hits) / len(keywords)
+                if keywords
+                else 1.0
+            )
+            forbidden_keyword_hits = [
+                keyword for keyword in forbidden_keywords if keyword in resp.answer
+            ]
+            # Safety regressions must fail the same answer-quality gate even
+            # when every positive keyword is also present.
+            keyword_score = (
+                0.0 if forbidden_keyword_hits else keyword_score_raw
+            )
             
             # 3. Fallback Check
             fallback = resp.fallback_triggered
+            raw_expected_fallback = row.get("expected_fallback_reason")
+            expected_fallback_reason = (
+                ""
+                if pd.isna(raw_expected_fallback)
+                else str(raw_expected_fallback).strip()
+            )
+            expected_fallback_match = bool(
+                expected_fallback_reason
+                and fallback
+                and resp.fallback_reason == expected_fallback_reason
+            )
             recent_notice_query = _is_recent_notice_query(question, resp.route)
             source_count = len(resp.sources)
             top_source = resp.sources[0] if resp.sources else None
@@ -259,7 +354,23 @@ async def run_evaluation(
             )
             context_recall_proxy = (
                 expected_ds == "smalltalk"
+                or expected_fallback_match
                 or expected_ds in source_datasets
+            )
+            context_precision_proxy = (
+                1.0
+                if expected_ds == "smalltalk" or expected_fallback_match
+                else (
+                    sum(
+                        1
+                        for source in (resp.sources or [])
+                        if str(getattr(source, "source", "") or "").strip()
+                        == expected_ds
+                    )
+                    / source_count
+                    if source_count
+                    else 0.0
+                )
             )
 
             session = SessionLocal()
@@ -285,18 +396,42 @@ async def run_evaluation(
                 judge_result = await judge_answer(question, resp.answer, sources_text, expected_answer)
 
             results.append({
+                "evaluation_case": int(row["_evaluation_case"]),
+                "repeat_index": int(row["_repeat_index"]),
                 "question": question,
+                "answer": resp.answer,
+                "as_of": row_as_of,
                 "expected_dataset": expected_ds,
                 "actual_route": ", ".join(resp.route),
                 **judge_result,
                 "hit": hit,
                 "smalltalk_route_hit": smalltalk_route_hit,
                 "keyword_score": keyword_score,
+                "keyword_score_raw": keyword_score_raw,
+                "forbidden_keyword_hits": ", ".join(forbidden_keyword_hits),
+                "forbidden_keyword_pass": not forbidden_keyword_hits,
                 "fallback": fallback,
                 "fallback_reason": resp.fallback_reason,
+                "expected_fallback_reason": expected_fallback_reason,
+                "expected_fallback_match": expected_fallback_match,
                 "source_count": source_count,
                 "source_datasets": ", ".join(source_datasets),
+                "retrieval_signature": json.dumps(
+                    {
+                        "route": list(resp.route),
+                        "fallback": bool(resp.fallback_triggered),
+                        "fallback_reason": resp.fallback_reason,
+                        "source_refs": [
+                            getattr(source, "source_ref", None)
+                            or getattr(source, "chunk_id", None)
+                            for source in (resp.sources or [])
+                        ],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
                 "context_recall_proxy": context_recall_proxy,
+                "context_precision_proxy": context_precision_proxy,
                 "top_hybrid_score": None if query_log is None else query_log.top_hybrid_score,
                 "final_score": None if top_source is None else top_source.final_score,
                 "grounding_checked": None if query_log is None else query_log.grounding_checked,
@@ -326,6 +461,19 @@ async def run_evaluation(
             })
 
     results_df = pd.DataFrame(results)
+    if (
+        repeat_count > 1
+        and not results_df.empty
+        and {"evaluation_case", "retrieval_signature"}.issubset(results_df.columns)
+    ):
+        consistency_by_case = (
+            results_df.groupby("evaluation_case")["retrieval_signature"]
+            .nunique(dropna=False)
+            .eq(1)
+        )
+        results_df["retrieval_repeat_consistent"] = results_df[
+            "evaluation_case"
+        ].map(consistency_by_case)
     
     print("\n" + "="*30)
     print("📊 Evaluation Summary")
@@ -396,7 +544,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--eval-set",
         default=str(Path(__file__).resolve().parents[1] / "tests" / "evaluation_set.csv"),
-        help="평가셋 CSV 경로 (columns: question, expected_dataset, expected_keywords[, expected_answer])",
+        help=(
+            "평가셋 CSV 경로 "
+            "(columns: question, expected_dataset, expected_keywords, as_of"
+            "[, forbidden_keywords, expected_answer])"
+        ),
+    )
+    parser.add_argument(
+        "--as-of",
+        default=None,
+        help="문제 재현용 전체 기준일 override(기본은 CSV 각 행의 as_of)",
     )
     parser.add_argument(
         "--output-dir",
@@ -406,21 +563,27 @@ if __name__ == "__main__":
     parser.add_argument("--judge", action="store_true",
                         help="LLM-judge로 답변 정확도/근거 일치성 채점 (OPENAI_API_KEY 필요). "
                              "evaluation_set.csv에 expected_answer 컬럼이 있으면 정답 기준으로 채점")
-    parser.add_argument("--min-route-hit", type=float, default=DEFAULT_THRESHOLDS["route_hit_rate"])
-    parser.add_argument("--min-context-recall", type=float, default=DEFAULT_THRESHOLDS["context_recall_proxy"])
-    parser.add_argument("--min-answer-relevancy", type=float, default=DEFAULT_THRESHOLDS["answer_relevancy_proxy"])
-    parser.add_argument("--max-fallback-rate", type=float, default=DEFAULT_THRESHOLDS["fallback_rate"])
+    parser.add_argument("--min-faithfulness", type=float, default=DEFAULT_THRESHOLDS["faithfulness"])
+    parser.add_argument("--min-context-recall", type=float, default=DEFAULT_THRESHOLDS["context_recall"])
+    parser.add_argument("--min-context-precision", type=float, default=DEFAULT_THRESHOLDS["context_precision"])
+    parser.add_argument("--min-answer-relevancy", type=float, default=DEFAULT_THRESHOLDS["answer_relevancy"])
     parser.add_argument(
         "--fail-on-threshold",
         action="store_true",
         help="게이트 기준 미달/초과 경고가 있으면 종료 코드 2로 실패 처리",
     )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="각 질문을 N회 반복해 라우트·폴백·출처 식별자 일관성을 검사",
+    )
     args = parser.parse_args()
     gate_thresholds = {
-        "route_hit_rate": args.min_route_hit,
-        "context_recall_proxy": args.min_context_recall,
-        "answer_relevancy_proxy": args.min_answer_relevancy,
-        "fallback_rate": args.max_fallback_rate,
+        "faithfulness": args.min_faithfulness,
+        "context_recall": args.min_context_recall,
+        "context_precision": args.min_context_precision,
+        "answer_relevancy": args.min_answer_relevancy,
     }
     asyncio.run(
         run_evaluation(
@@ -430,5 +593,7 @@ if __name__ == "__main__":
             output_dir=args.output_dir,
             thresholds=gate_thresholds,
             fail_on_threshold=args.fail_on_threshold,
+            as_of_override=args.as_of,
+            repeat_count=args.repeat,
         )
     )

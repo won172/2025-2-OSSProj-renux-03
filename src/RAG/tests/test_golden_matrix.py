@@ -202,6 +202,13 @@ def test_valid_fixture_passes_four_axes(golden_cases, passing_results):
     failures = [detail for detail in details if not detail["all_axes_passed"]]
     assert failures == []
     assert summary["passed"] is True
+    assert summary["rag_metrics"] == {
+        "faithfulness": 1.0,
+        "answer_relevancy": 1.0,
+        "context_precision": 1.0,
+        "context_recall": 1.0,
+    }
+    assert summary["rag_metric_failures"] == []
 
 
 def test_korean_document_citation_markers_match_transported_sources(golden_cases, passing_results):
@@ -381,6 +388,7 @@ def test_runner_maps_only_real_transport_fields(golden_cases):
 
 
 def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
+    received_requests = []
     artifact = {
         "path": "tests/golden_matrix.csv",
         "bytes": MATRIX.stat().st_size,
@@ -393,7 +401,7 @@ def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
     fingerprint = {
         "schema_version": 1,
         "build_revision": "fixture-revision",
-        "answer_contract_version": "ask-response-v3-source-lineage",
+        "answer_contract_version": "ask-response-v4-active-deadline",
         "runtime_config": {
             "llm_provider": "openai", "query_analysis_model": "fixture-query",
             "answer_model": "fixture-answer", "embedding_model": "fixture-embedding",
@@ -425,6 +433,7 @@ def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("Content-Length", "0"))
             request = json.loads(self.rfile.read(length))
+            received_requests.append(request)
             response = {
                 "request_id": "http-real-id", "answer": f"응답: {request['question']}", "citations": "",
                 "route": ["schedule"], "sources": [], "suggested_questions": [],
@@ -456,6 +465,8 @@ def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
     assert manifest["candidate_fingerprint_stable"] is True
     assert manifest["candidate_fingerprint_end_sha256"] == manifest["candidate_fingerprint_sha256"]
     assert manifest["selected_case_ids"] == ["AC-001"]
+    assert manifest["as_of"] == "2026-07-30"
+    assert received_requests[0]["asOf"] == "2026-07-30"
 
 
 def test_missing_real_replay_is_explicit_hold(tmp_path, capsys):

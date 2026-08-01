@@ -56,6 +56,12 @@ def test_normalize_unicode_fullwidth_and_invisible():
     assert "​" not in out
 
 
+def test_notice_line_break_does_not_split_academic_year_token():
+    normalized = normalize_whitespace("수강신청 기간: 2026\n학년도 2학기")
+
+    assert "2026학년도" in normalized
+
+
 # ---------- standardize_date ----------
 
 def test_standardize_date_formats():

@@ -26,10 +26,12 @@ pandas>=2.2.2
 numpy>=1.26.4
 python-dotenv>=1.0.1
 scikit-learn==1.8.0
+rank-bm25>=0.2.2
 pyarrow>=16.0.0
 beautifulsoup4>=4.12.0 # Added for web scraping
 lxml>=4.9.0            # Added for web scraping (BeautifulSoup's parser)
 pdfplumber>=0.11.0     # D-Flex 학식 PDF 식단표 텍스트/표 추출
+pypdf>=5.0.0           # 학번별 학사제도/학업이수 가이드 PDF 파싱
 APScheduler>=3.10.0    # 공지/학식 데이터 주기적 자동 갱신(in-process 스케줄러)
 
 # === Utility / reranking / fuzzy matching ===
@@ -42,3 +44,5 @@ requests>=2.31.0
 jsonschema>=4.22.0
 pydantic>=2.7.4
 sqlalchemy>=2.0.0
+pytest>=8.4.0
+pytest-asyncio>=1.0.0

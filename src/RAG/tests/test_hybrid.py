@@ -15,13 +15,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.search.hybrid import (  # noqa: E402
+    BM25LexicalIndex,
     _academic_period_title_adjustment,
     _matches_where,
     build_tfidf_vectorizer,
     hybrid_search,
-    load_tfidf,
-    load_tfidf_with_ids,
-    train_tfidf,
+    load_lexical,
+    load_lexical_with_ids,
+    read_lexical_metadata,
+    train_bm25,
 )
 import src.search.hybrid as hybrid  # noqa: E402
 
@@ -59,17 +61,19 @@ def test_matches_where_unknown_operator_is_conservative():
     assert not _matches_where(_row(major="통계학과"), {"major": {"$gt": "a"}})
 
 
-# ---------- train_tfidf chunk_id 키잉 ----------
+# ---------- BM25 chunk_id 키잉 ----------
 
-def test_train_tfidf_persists_chunk_ids(tmp_path):
-    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
-         patch("src.search.hybrid._vectorizer_path", lambda ident: tmp_path / f"{ident}_tfidf.pkl"):
+def test_train_bm25_persists_chunk_ids_and_metadata(tmp_path):
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path):
         corpus = ["장학금 신청 안내", "수강신청 일정 공지", "졸업 요건 변경"]
         ids = ["c1", "c2", "c3"]
-        train_tfidf("testset", corpus, chunk_ids=ids)
-        _, matrix, loaded_ids = load_tfidf_with_ids("testset")
+        train_bm25("testset", corpus, chunk_ids=ids)
+        index, matrix, loaded_ids = load_lexical_with_ids("testset")
         assert loaded_ids == ids
         assert matrix.shape[0] == 3
+        assert isinstance(index, BM25LexicalIndex)
+        assert read_lexical_metadata("testset")["retriever_type"] == "bm25"
+        assert (tmp_path / "testset_bm25.pkl").exists()
 
 
 def test_korean_tfidf_tokenizer_handles_particle_and_spacing_variants():
@@ -94,23 +98,23 @@ def test_korean_tfidf_tokenizer_exposes_three_syllable_compound_stem():
     assert scores[0] > scores[1]
 
 
-def test_train_tfidf_rejects_mismatched_ids(tmp_path):
-    with patch("src.search.hybrid._vectorizer_path", lambda ident: tmp_path / f"{ident}_tfidf.pkl"):
+def test_train_bm25_rejects_mismatched_ids(tmp_path):
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path):
         with pytest.raises(ValueError):
-            train_tfidf("testset", ["a", "b"], chunk_ids=["only-one"])
+            train_bm25("testset", ["a", "b"], chunk_ids=["only-one"])
 
 
-# ---------- TF-IDF pkl 무결성 검증(매니페스트) ----------
+# ---------- BM25 pkl 무결성 검증(매니페스트) ----------
 
 def test_train_writes_manifest_and_load_verifies(tmp_path):
     """학습 시 매니페스트에 sha256이 기록되고, 정상 로드는 검증을 통과한다."""
     with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
          patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True):
-        train_tfidf("intg", ["가나다", "라마바"], chunk_ids=["c1", "c2"])
+        train_bm25("intg", ["가나다 안내", "라마바 공지"], chunk_ids=["c1", "c2"])
         manifest = hybrid._read_manifest()
-        assert "intg_tfidf.pkl" in manifest
+        assert "intg_bm25.pkl" in manifest
         # 검증이 켜진 상태에서도 정상 아티팩트는 로드된다(예외 없음).
-        vec, matrix = load_tfidf("intg")
+        vec, matrix = load_lexical("intg")
         assert matrix.shape[0] == 2
 
 
@@ -118,12 +122,12 @@ def test_load_rejects_tampered_artifact(tmp_path):
     """매니페스트 해시와 다른(변조된) pkl은 fail-closed로 로드를 거부한다."""
     with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
          patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True):
-        train_tfidf("intg", ["가나다", "라마바"], chunk_ids=["c1", "c2"])
+        train_bm25("intg", ["가나다 안내", "라마바 공지"], chunk_ids=["c1", "c2"])
         # 아티팩트 바이트를 변조 → 해시 불일치 유발
-        pkl = tmp_path / "intg_tfidf.pkl"
+        pkl = tmp_path / "intg_bm25.pkl"
         pkl.write_bytes(pkl.read_bytes() + b"\x00tampered")
         with pytest.raises(ValueError, match="무결성"):
-            load_tfidf("intg")
+            load_lexical("intg")
 
 
 def test_load_strict_mode_rejects_unmanifested(tmp_path):
@@ -131,11 +135,27 @@ def test_load_strict_mode_rejects_unmanifested(tmp_path):
     with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
          patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True), \
          patch("src.search.hybrid.TFIDF_REQUIRE_MANIFEST", True):
-        train_tfidf("intg", ["가나다", "라마바"], chunk_ids=["c1", "c2"])
+        train_bm25("intg", ["가나다 안내", "라마바 공지"], chunk_ids=["c1", "c2"])
         # 매니페스트를 비워 미등록 상태로 만든다
         (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
         with pytest.raises(ValueError):
-            load_tfidf("intg")
+            load_lexical("intg")
+
+
+def test_bm25_normalizes_for_document_length(tmp_path):
+    corpus = [
+        "장학금 신청",
+        "장학금 신청 " + " ".join(f"무관단어{index}" for index in range(80)),
+        "수강신청 일정",
+        "졸업 요건",
+        "도서관 운영시간",
+        "기숙사 입사",
+    ]
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path):
+        index, _ = train_bm25("length", corpus)
+
+    scores = index.score("장학금 신청")
+    assert scores[0] > scores[1] > 0
 
 
 # ---------- hybrid_search (Chroma/임베딩 모킹) ----------
@@ -176,6 +196,42 @@ def test_hybrid_search_maps_sparse_by_chunk_ids():
     top = result.iloc[0]
     assert top["chunk_id"] == "c1"
     assert top["sparse_score"] > 0
+
+
+def test_hybrid_search_uses_bm25_sparse_ranking(tmp_path):
+    chunks_df = pd.DataFrame(
+        {
+            "chunk_id": ["c1", "c2", "c3", "c4"],
+            "chunk_text": [
+                "장학금 신청 안내",
+                "수강신청 일정",
+                "졸업 요건",
+                "도서관 운영시간",
+            ],
+        }
+    )
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path):
+        index, matrix = train_bm25(
+            "bm25-search",
+            chunks_df["chunk_text"],
+            chunk_ids=chunks_df["chunk_id"],
+        )
+    with patch(
+        "src.search.hybrid.get_collection",
+        return_value=_fake_chroma([], []),
+    ), patch("src.search.hybrid.encode_queries", return_value=[[0.0]]):
+        result = hybrid_search(
+            "fake",
+            chunks_df,
+            index,
+            matrix,
+            "장학금 신청",
+            top_k=3,
+            tfidf_chunk_ids=["c1", "c2", "c3", "c4"],
+        )
+
+    assert result.iloc[0]["chunk_id"] == "c1"
+    assert result.iloc[0]["sparse_score"] == pytest.approx(1.0)
 
 
 def test_hybrid_search_falls_back_to_sparse_when_chroma_segment_is_broken():

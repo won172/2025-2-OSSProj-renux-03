@@ -104,6 +104,72 @@ def test_balanced_shortlist_keeps_each_datasets_strongest_sparse_candidate():
     assert shortlist.iloc[0]["chunk_id"] == "schedule-0"
 
 
+def test_current_notice_query_deterministically_excludes_superseded_versions():
+    frame = _frame("notices", count=3)
+    frame["title"] = [
+        "2024학년도 장학금 신청 안내",
+        "2026학년도 장학금 신청 안내",
+        "분류되지 않은 장학금 안내",
+    ]
+    frame["is_latest"] = [False, True, None]
+
+    shortlist = rag_service._build_balanced_shortlist(
+        [frame],
+        query="장학금 신청 안내",
+        per_dataset=3,
+    )
+
+    assert "notices-0" not in shortlist["chunk_id"].tolist()
+    assert {"notices-1", "notices-2"} <= set(shortlist["chunk_id"])
+
+
+def test_explicit_historical_year_preserves_superseded_notice_versions():
+    frame = _frame("notices", count=2)
+    frame["title"] = [
+        "2023학년도 장학금 신청 안내",
+        "2026학년도 장학금 신청 안내",
+    ]
+    frame["is_latest"] = [False, True]
+
+    shortlist = rag_service._build_balanced_shortlist(
+        [frame],
+        query="2023학년도 장학금 신청 안내",
+        per_dataset=2,
+    )
+
+    assert set(shortlist["chunk_id"]) == {"notices-0", "notices-1"}
+
+
+def test_registration_search_defaults_to_undergraduate_audience():
+    frame = _frame("schedule", count=3)
+    frame["audience"] = ["graduate", "undergraduate", "common"]
+    frame["hybrid_score"] = [0.99, 0.60, 0.50]
+
+    shortlist = rag_service._build_balanced_shortlist(
+        [frame],
+        query="수강신청 언제야?",
+        per_dataset=3,
+    )
+
+    assert "schedule-0" not in shortlist["chunk_id"].tolist()
+    assert shortlist.iloc[0]["chunk_id"] == "schedule-1"
+
+
+def test_explicit_graduate_query_excludes_undergraduate_candidates():
+    frame = _frame("schedule", count=3)
+    frame["audience"] = ["undergraduate", "graduate", "common"]
+    frame["hybrid_score"] = [0.99, 0.60, 0.50]
+
+    shortlist = rag_service._build_balanced_shortlist(
+        [frame],
+        query="대학원 수강신청 언제야?",
+        per_dataset=3,
+    )
+
+    assert "schedule-0" not in shortlist["chunk_id"].tolist()
+    assert shortlist.iloc[0]["chunk_id"] == "schedule-1"
+
+
 def test_schedule_alignment_prefers_requested_year_and_semester():
     hits = pd.DataFrame([
         {"chunk_id": "march", "schedule_start": "2026-03-03", "hybrid_score": 0.52},

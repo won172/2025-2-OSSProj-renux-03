@@ -48,6 +48,9 @@ RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "0") == "1"
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 RERANKER_CANDIDATES = int(os.getenv("RERANKER_CANDIDATES", "20"))  # 재정렬할 상위 후보 수
 RERANKER_MODEL_REVISION = os.getenv("RERANKER_MODEL_REVISION") or None  # 리랭커 리비전 고정(선택)
+RERANKER_MODE = os.getenv("RERANKER_MODE", "conditional").strip().lower()
+RERANKER_MAX_TOP_GAP = float(os.getenv("RERANKER_MAX_TOP_GAP", "0.08"))
+RERANKER_MIN_TEXT_CHARS = int(os.getenv("RERANKER_MIN_TEXT_CHARS", "450"))
 
 # TF-IDF 아티팩트(*.pkl) 무결성 검증.
 # pkl은 joblib.load 시 임의 코드를 실행할 수 있어, 학습 시 기록한 SHA-256 매니페스트와
@@ -67,13 +70,24 @@ TFIDF_TOKENIZER = os.getenv("TFIDF_TOKENIZER", "korean").strip().lower()
 # 이웃 청크(앞뒤 1개)를 함께 제공해 잘린 근거를 보완한다(추가 비용 없음, 기본 활성).
 PARENT_CONTEXT_ENABLED = os.getenv("PARENT_CONTEXT_ENABLED", "1") == "1"
 
-# 청크 분할과 검색 기본값.
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "300")) # 청크 크기 기본값
+# 청크 분할과 검색 기본값. 300/600/900자 Contextual BM25 A/B에서
+# 장문 공지·규정의 recall@20이 600자에서 가장 높아 기본값을 600자로 정했다.
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "600"))
+# 일정·교과·연락처는 정형 행 단위 의미를 유지한다. 장문 청킹 실험의 영향이
+# 이 데이터셋까지 번지지 않도록 종전 300자 기준을 별도로 고정한다.
+STRUCTURED_CHUNK_SIZE = int(os.getenv("STRUCTURED_CHUNK_SIZE", "300"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "80")) # 청크 겹침 기본값
 HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.4")) # 하이브리드 검색 가중치 기본값
+HYBRID_FUSION_MODE = os.getenv("HYBRID_FUSION_MODE", "rrf").strip().lower()
+HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
 DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "5")) # 검색 결과 개수 기본값
 RECENCY_WEIGHT = float(os.getenv("RECENCY_WEIGHT", "0.4")) # Re-ranking 가중치 추가
 MIN_RETRIEVAL_SCORE = float(os.getenv("MIN_RETRIEVAL_SCORE", "0.12")) # 검색 실패 판단 최소 하이브리드 점수
+# RRF 점수는 절대 관련도가 아니라 순위 합의도다. 질의와 근거의 어휘 접점이 전혀
+# 없을 때는 원래 dense/BM25 점수 중 하나가 이 값 이상이어야 생성 단계로 보낸다.
+RRF_UNALIGNED_MIN_COMPONENT_SCORE = float(
+    os.getenv("RRF_UNALIGNED_MIN_COMPONENT_SCORE", "0.40")
+)
 RECENCY_DECAY_DAYS_BY_DATASET = {
     "notices": float(os.getenv("RECENCY_DECAY_DAYS_NOTICES", "90")),
     "schedule": float(os.getenv("RECENCY_DECAY_DAYS_SCHEDULE", "180")),
@@ -82,6 +96,11 @@ RECENCY_DECAY_DAYS_BY_DATASET = {
     # (미래 날짜 메뉴는 recency가 1.0으로 클램프되어 다가오는 식단이 우대됨)
     "meals": float(os.getenv("RECENCY_DECAY_DAYS_MEALS", "4")),
 }
+# "현재 진행 중" 공지에서 마감일을 추출하지 못한 경우, 최근 게시물만
+# 보수적으로 남길 수 있는 최대 게시 경과일. 마감일 미상 문서를 전부 버리지는 않는다.
+ACTIVE_NOTICE_UNKNOWN_MAX_AGE_DAYS = int(
+    os.getenv("ACTIVE_NOTICE_UNKNOWN_MAX_AGE_DAYS", "90")
+)
 
 # 컨텍스트 관련 설정
 MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "4000"))
@@ -100,6 +119,17 @@ LLM_ROUTER_DESCRIPTIONS = {
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # 질의분석/라우터용 (항상 OpenAI)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 RAG_REQUIRE_OPENAI_API_KEY = os.getenv("RAG_REQUIRE_OPENAI_API_KEY", "0") == "1"
+# 검증된 SHA-256 전사 캐시는 항상 사용하고, 캐시 미스만 선택한 vision 모델로
+# 전사한다. 신규 공지에만 적용되므로 기존 전체 코퍼스를 반복 호출하지 않는다.
+RAG_NOTICE_IMAGE_OCR_ENABLED = os.getenv("RAG_NOTICE_IMAGE_OCR_ENABLED", "1") == "1"
+RAG_NOTICE_IMAGE_OCR_MODEL = os.getenv("RAG_NOTICE_IMAGE_OCR_MODEL", "gpt-4o-mini")
+RAG_NOTICE_IMAGE_OCR_MAX_IMAGES = int(os.getenv("RAG_NOTICE_IMAGE_OCR_MAX_IMAGES", "2"))
+RAG_NOTICE_IMAGE_OCR_MAX_BYTES = int(
+    os.getenv("RAG_NOTICE_IMAGE_OCR_MAX_BYTES", str(5 * 1024 * 1024))
+)
+RAG_NOTICE_IMAGE_OCR_MIN_TEXT_CHARS = int(
+    os.getenv("RAG_NOTICE_IMAGE_OCR_MIN_TEXT_CHARS", "20")
+)
 RAG_ROUTER_CACHE_TTL_SECONDS = int(os.getenv("RAG_ROUTER_CACHE_TTL_SECONDS", "300"))
 RAG_SEMANTIC_CACHE_ENABLED = os.getenv("RAG_SEMANTIC_CACHE_ENABLED", "0") == "1"
 RAG_SEMANTIC_CACHE_THRESHOLD = float(os.getenv("RAG_SEMANTIC_CACHE_THRESHOLD", "0.97"))
@@ -145,11 +175,28 @@ RAG_SUGGEST_FOLLOWUPS_COUNT = int(os.getenv("RAG_SUGGEST_FOLLOWUPS_COUNT", "5"))
 RAG_GROUNDING_CHECK_ENABLED = os.getenv("RAG_GROUNDING_CHECK_ENABLED", "1") == "1"
 RAG_COLLEGE_SCOPE_ENABLED = os.getenv("RAG_COLLEGE_SCOPE_ENABLED", "1") == "1"
 RAG_GROUNDING_MIN_SCORE = float(os.getenv("RAG_GROUNDING_MIN_SCORE", "0.5"))
+RAG_GROUNDING_FAILURE_POLICY = os.getenv(
+    "RAG_GROUNDING_FAILURE_POLICY",
+    "replace",
+).strip().lower()
+# grounding 실패 시 이미 전송한 토큰을 회수할 수 없으므로, 검증을 켠 스트림은 기본적으로
+# 생성 결과를 메모리에 모아 검증한 뒤 한 번에 내보낸다.
+RAG_STREAM_BUFFER_UNTIL_GROUNDED = (
+    os.getenv("RAG_STREAM_BUFFER_UNTIL_GROUNDED", "1") == "1"
+)
 # 질의 분석의 intent와 안전한 키워드 보강으로 필요한 데이터셋만 검색한다.
 # 장애 진단 등에서만 환경변수로 전체 검색을 명시적으로 켤 수 있다.
 RAG_SEARCH_ALL_DATASETS = os.getenv("RAG_SEARCH_ALL_DATASETS", "0") == "1"
 # 검색 시 질문을 여러 서브쿼리로 펼치지 않고, 사용자 질문 1개로만 검색한다.
 RAG_SINGLE_QUERY_RETRIEVAL = os.getenv("RAG_SINGLE_QUERY_RETRIEVAL", "1") == "1"
+# 하이브리드 검색은 이 개수의 결과를 데이터셋별 후단 정렬에 넘긴다. 내부 dense/sparse
+# 후보는 5배(기본 100개)까지 모으므로 recency가 top-k 절단 전에 개입할 여지가 생긴다.
+RAG_RETRIEVAL_TOP_K_PER_DATASET = int(
+    os.getenv("RAG_RETRIEVAL_TOP_K_PER_DATASET", "20")
+)
+# 재현 가능한 골든 테스트/과거 시점 검증에서만 요청의 asOf 값을 허용한다.
+# 운영 기본값에서는 클라이언트가 임의의 과거 시점을 현재 답변처럼 만들 수 없게 막는다.
+RAG_ALLOW_AS_OF_OVERRIDE = os.getenv("RAG_ALLOW_AS_OF_OVERRIDE", "0") == "1"
 # 전체 데이터셋 검색 뒤 OpenAI가 직접 관련성/중복/충돌을 판정할 때의 비용 상한.
 # 데이터셋별 후보 수를 먼저 제한해 특정 코퍼스가 shortlist를 독점하지 않게 한다.
 RAG_EVIDENCE_CANDIDATES_PER_DATASET = int(os.getenv("RAG_EVIDENCE_CANDIDATES_PER_DATASET", "3"))
@@ -226,14 +273,22 @@ __all__ = [
     "RERANKER_MODEL",
     "RERANKER_CANDIDATES",
     "RERANKER_MODEL_REVISION",
+    "RERANKER_MODE",
+    "RERANKER_MAX_TOP_GAP",
+    "RERANKER_MIN_TEXT_CHARS",
     "PARENT_CONTEXT_ENABLED",
     "CHUNK_SIZE",
+    "STRUCTURED_CHUNK_SIZE",
     "CHUNK_OVERLAP",
     "HYBRID_ALPHA",
+    "HYBRID_FUSION_MODE",
+    "HYBRID_RRF_K",
     "DEFAULT_TOP_K",
     "MIN_RETRIEVAL_SCORE",
+    "RRF_UNALIGNED_MIN_COMPONENT_SCORE",
     "RECENCY_WEIGHT",
     "RECENCY_DECAY_DAYS_BY_DATASET",
+    "ACTIVE_NOTICE_UNKNOWN_MAX_AGE_DAYS",
     "TFIDF_VERIFY_INTEGRITY",
     "TFIDF_REQUIRE_MANIFEST",
     "TFIDF_TOKENIZER",
@@ -242,6 +297,11 @@ __all__ = [
     "OPENAI_MODEL",
     "OPENAI_API_KEY",
     "RAG_REQUIRE_OPENAI_API_KEY",
+    "RAG_NOTICE_IMAGE_OCR_ENABLED",
+    "RAG_NOTICE_IMAGE_OCR_MODEL",
+    "RAG_NOTICE_IMAGE_OCR_MAX_IMAGES",
+    "RAG_NOTICE_IMAGE_OCR_MAX_BYTES",
+    "RAG_NOTICE_IMAGE_OCR_MIN_TEXT_CHARS",
     "RAG_ROUTER_CACHE_TTL_SECONDS",
     "RAG_SEMANTIC_CACHE_ENABLED",
     "RAG_SEMANTIC_CACHE_THRESHOLD",
@@ -268,8 +328,12 @@ __all__ = [
     "RAG_GROUNDING_CHECK_ENABLED",
     "RAG_COLLEGE_SCOPE_ENABLED",
     "RAG_GROUNDING_MIN_SCORE",
+    "RAG_GROUNDING_FAILURE_POLICY",
+    "RAG_STREAM_BUFFER_UNTIL_GROUNDED",
     "RAG_SEARCH_ALL_DATASETS",
     "RAG_SINGLE_QUERY_RETRIEVAL",
+    "RAG_RETRIEVAL_TOP_K_PER_DATASET",
+    "RAG_ALLOW_AS_OF_OVERRIDE",
     "RAG_EVIDENCE_CANDIDATES_PER_DATASET",
     "RAG_EVIDENCE_MAX_CANDIDATES",
     "RAG_EVIDENCE_TEXT_CHARS",

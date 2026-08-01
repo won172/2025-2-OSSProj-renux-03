@@ -52,6 +52,12 @@ class Rule(Base):
     filename = Column(String, index=True)
     relative_dir = Column(String)
     full_text = Column(Text)
+    title = Column(String, nullable=True)
+    source_type = Column(String, nullable=True)
+    source_url = Column(Text, nullable=True)
+    source_page_url = Column(Text, nullable=True)
+    source_version = Column(String, nullable=True, index=True)
+    published_at = Column(String, nullable=True, index=True)
     
     chunks = relationship("Chunk", back_populates="rule")
 
@@ -235,6 +241,7 @@ class RagQueryLog(Base):
     session_id = Column(String, index=True)
     question = Column(Text)
     expanded_question = Column(Text)
+    as_of = Column(String, nullable=True, index=True)
     route = Column(Text)
     answer = Column(Text)
     fallback_triggered = Column(Boolean, default=False)
@@ -318,6 +325,17 @@ def _ensure_sqlite_columns(table_name: str, columns: dict[str, str]) -> None:
 def ensure_runtime_schema() -> None:
     """기존 SQLite 파일에 누락된 운영 로그 컬럼을 보강합니다."""
     _ensure_sqlite_columns(
+        "rules",
+        {
+            "title": "VARCHAR",
+            "source_type": "VARCHAR",
+            "source_url": "TEXT",
+            "source_page_url": "TEXT",
+            "source_version": "VARCHAR",
+            "published_at": "VARCHAR",
+        },
+    )
+    _ensure_sqlite_columns(
         "source_documents",
         {
             "raw_payload_json": "TEXT",
@@ -334,6 +352,7 @@ def ensure_runtime_schema() -> None:
     _ensure_sqlite_columns(
         "rag_query_logs",
         {
+            "as_of": "VARCHAR",
             "fallback_reason": "VARCHAR",
             "grounding_checked": "BOOLEAN DEFAULT 0",
             "grounding_grounded": "BOOLEAN",

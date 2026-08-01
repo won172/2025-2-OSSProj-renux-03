@@ -134,12 +134,73 @@ def test_wise_followup_is_allowed_only_in_wise_scope_when_source_supports_it():
     assert result == ["WISE캠퍼스 휴학 신청 서류는 무엇인가요?"]
 
 
-def test_both_api_paths_generate_followups_only_after_grounding_stage():
+def test_answer_paths_do_not_wait_for_followup_generation():
     for endpoint in (rag_service.ask, rag_service.ask_stream):
         source = inspect.getsource(endpoint)
-        grounding_position = source.index("grounding_result = await check_answer_grounding")
-        followup_position = source.index("suggested_questions = await generate_followup_questions")
-        assert grounding_position < followup_position
+        assert "generate_followup_questions(" not in source
+
+    followup_source = inspect.getsource(rag_service.followups)
+    assert "context.eligible" in followup_source
+    assert "generate_followup_questions(" in followup_source
+
+
+@pytest.mark.asyncio
+async def test_followup_endpoint_generates_only_for_grounded_logged_answer(monkeypatch):
+    source = {
+        **SOURCES[0],
+        "chunk_id": "notice-async-1",
+        "source_ref": source_reference({**SOURCES[0], "chunk_id": "notice-async-1"}),
+    }
+    context = rag_service.FollowupGenerationContext(
+        question="교내장학 신청 방법은?",
+        answer="교내장학 신청 서류를 준비하세요.",
+        source_context=[source],
+        campus_scope="seoul_bmc",
+        supported_domains=["notices"],
+        eligible=True,
+    )
+    generated = False
+
+    async def fake_generate(*_args, **_kwargs):
+        nonlocal generated
+        generated = True
+        return ["장학 신청 서류는 무엇인가요?"]
+
+    monkeypatch.setattr(rag_service, "_load_followup_generation_context", lambda _request_id: context)
+    monkeypatch.setattr(rag_service, "generate_followup_questions", fake_generate)
+    monkeypatch.setattr(rag_service, "_merge_followup_observability_log", lambda *_args: None)
+
+    response = await rag_service.followups(
+        rag_service.FollowupRequest(requestId="async-followup-1")
+    )
+
+    assert generated is True
+    assert response.questions == ["장학 신청 서류는 무엇인가요?"]
+    assert response.question_details[0].source_refs == [source["source_ref"]]
+
+
+@pytest.mark.asyncio
+async def test_followup_endpoint_skips_ungrounded_answer(monkeypatch):
+    context = rag_service.FollowupGenerationContext(
+        question="질문",
+        answer="답변",
+        source_context=SOURCES,
+        campus_scope="seoul_bmc",
+        supported_domains=["notices"],
+        eligible=False,
+    )
+
+    async def should_not_run(*_args, **_kwargs):
+        raise AssertionError("ungrounded answers must not generate followups")
+
+    monkeypatch.setattr(rag_service, "_load_followup_generation_context", lambda _request_id: context)
+    monkeypatch.setattr(rag_service, "generate_followup_questions", should_not_run)
+
+    response = await rag_service.followups(
+        rag_service.FollowupRequest(requestId="async-followup-2")
+    )
+
+    assert response.questions == []
 
 
 def test_single_generic_token_overlap_does_not_pass_topic_validation():

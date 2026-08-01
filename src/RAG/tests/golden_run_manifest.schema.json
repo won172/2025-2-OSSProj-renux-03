@@ -44,9 +44,22 @@
         "embedding_revision": {"type": ["string", "null"]},
         "embedding_device": {"type": "string", "minLength": 1},
         "reranker_enabled": {"type": "boolean"},
+        "reranker_mode": {"enum": ["conditional", "always", "off"]},
         "reranker_model": {"type": ["string", "null"]},
         "reranker_revision": {"type": ["string", "null"]},
         "top_k": {"type": "integer", "minimum": 1},
+        "retrieval_top_k_per_dataset": {"type": "integer", "minimum": 1},
+        "active_notice_unknown_max_age_days": {"type": "integer", "minimum": 0},
+        "single_query_retrieval": {"type": "boolean"},
+        "recency_weight": {"type": "number", "minimum": 0, "maximum": 1},
+        "hybrid_fusion_mode": {"type": "string", "minLength": 1},
+        "hybrid_rrf_k": {"type": "integer", "minimum": 1},
+        "lexical_retriever": {"enum": ["bm25", "tfidf_legacy"]},
+        "chunk_size": {"type": "integer", "minimum": 1},
+        "structured_chunk_size": {"type": "integer", "minimum": 1},
+        "grounding_failure_policy": {"type": "string", "minLength": 1},
+        "stream_buffer_until_grounded": {"type": "boolean"},
+        "as_of_override_enabled": {"type": "boolean"},
         "routerless": {"const": true},
         "scheduler_enabled": {"type": "boolean"}
       }
@@ -60,7 +73,7 @@
       "properties": {
         "schema_version": {"const": 1},
         "build_revision": {"type": "string", "minLength": 1},
-        "answer_contract_version": {"const": "ask-response-v3-source-lineage"},
+        "answer_contract_version": {"const": "ask-response-v4-active-deadline"},
         "dense_index_ready": {"type": "boolean"},
         "runtime_config": {"$ref": "#/properties/candidate_config"},
         "artifact_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -77,6 +90,7 @@
               "cached_chunk_count": {"type": ["integer", "null"], "minimum": 0},
               "dense_index_ready": {"type": "boolean"},
               "retrieval_mode": {"enum": ["hybrid", "sparse_degraded"]},
+              "lexical_retriever": {"type": ["string", "null"]},
               "chunk_artifact": {"type": ["string", "null"]},
               "vectorizer_artifact": {"type": ["string", "null"]}
             }

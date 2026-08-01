@@ -22,7 +22,8 @@ ANSWER_PROMPT_TEMPLATE = """
 6. {current_date} 기준 최신 정보를 우선하세요.\n
 7. 답변에 볼드체(**) 등 마크다운 서식을 절대 사용하지 마세요.\n
 8. 이전 대화 맥락을 고려하되, 현재 질문이 주제가 바뀌었다면 이전 내용은 무시하고 현재 질문에 집중하세요.\n
-9. 질문에 '최근', '어제' 등 시간 표현이 있다면, 제공된 [컨텍스트] 내 문서의 '게시일'과 현재 날짜({current_date})를 비교하여 정확히 계산하고 답변하세요.\n\n
+9. 질문에 '최근', '어제' 등 시간 표현이 있다면, 제공된 [컨텍스트] 내 문서의 '게시일'과 현재 날짜({current_date})를 비교하여 정확히 계산하고 답변하세요.\n
+10. 모집·공모·장학·신청·접수의 현재 상태를 답할 때는 문서의 신청 마감일과 현재 날짜({current_date})를 반드시 비교하세요. 마감일이 현재 날짜보다 이전이면 진행 중·모집 중·신청 가능으로 표현하지 마세요. 마감이 지난 자료만 있으면 "현재 접수 중인 것은 확인되지 않습니다"라고 답하고, 마감일이 없으면 "마감일 확인 필요"라고 명시하세요.\n\n
 [컨텍스트]\n
 {context}
 """
@@ -38,11 +39,10 @@ def get_client() -> OpenAI:
 def extract_title(text: str) -> str:
     if not isinstance(text, str) or not text.strip():
         return ""
-    if text.startswith("[") and "]" in text:
-        closing = text.find("]")
-        if closing > 1:
-            return text[1:closing].strip()
-    return text.split("\n", 1)[0].strip()[:120]
+    first_line = text.split("\n", 1)[0].strip()
+    if first_line.startswith("[") and first_line.endswith("]"):
+        return first_line[1:-1].strip()[:240]
+    return first_line[:120]
 
 
 def _clean_cell(value: object) -> str:

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import csv
+from pathlib import Path
+
+from src.config import DATA_SOURCES
 from src.services.course_recommendation import (
     CourseRecord,
     CourseRecommendationProfile,
@@ -51,6 +55,37 @@ def test_current_department_aliases_resolve_to_official_curriculum_name():
         "컴퓨터·AI학부"
     )
     assert canonical_department_identity("국제통상학전공") == canonical_department_identity("국제통상학과")
+    assert canonical_department_identity("영어영문학부 영어문학전공") == canonical_department_identity(
+        "영어영문학부"
+    )
+    assert canonical_department_identity("영어영문학부 영어통번역학전공") == canonical_department_identity(
+        "영어영문학부"
+    )
+
+
+def test_every_catalog_department_has_structured_course_rows_after_alias_resolution():
+    data_dir = Path(DATA_SOURCES["courses_all"]).parent
+    with (data_dir / "dongguk_departments_catalog.csv").open(
+        "r", encoding="utf-8-sig", newline=""
+    ) as handle:
+        catalog_departments = {
+            row["department_name"].strip() for row in csv.DictReader(handle)
+        }
+    with Path(DATA_SOURCES["courses_all"]).open(
+        "r", encoding="utf-8-sig", newline=""
+    ) as handle:
+        course_departments = {
+            canonical_department_identity(row["department_name"])
+            for row in csv.DictReader(handle)
+            if row.get("record_type") == "table_row"
+        }
+
+    missing = sorted(
+        department
+        for department in catalog_departments
+        if canonical_department_identity(department) not in course_departments
+    )
+    assert missing == []
 
 
 def test_profile_extraction_requires_personalization_fields():
