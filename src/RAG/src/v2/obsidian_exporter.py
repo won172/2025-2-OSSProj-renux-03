@@ -210,6 +210,7 @@ tags:
     concepts = [
         ("학사경고", "성적 미달 시 발생하는 학칙 제재 조치 및 이수 조건"),
         ("장학금", "성적우수, 형설, 복지 등 동국대학교 장학금 수혜 규정 및 조건"),
+        ("수강신청", "학기별 교과목 수강신청, 수강정정 및 취소 일정/절차"),
         ("졸업요건", "단과대학 및 학과별 이수학점, 논문, 외국어 기준 조건")
     ]
 
@@ -238,6 +239,53 @@ tags:
             f.write(md_content)
 
         stats["concepts"] += 1
+
+    # 5. 공지사항 (Notices) 내보내기
+    notices_dir = target_vault / "Notices"
+    notices_dir.mkdir(parents=True, exist_ok=True)
+    stats["notices"] = 0
+
+    cursor.execute("""
+        SELECT id, board, title, category, published_date, content
+        FROM notices
+        LIMIT 1000
+    """)
+    notice_rows = cursor.fetchall()
+
+    for n_row in notice_rows:
+        n_title = (n_row["title"] or f"공지-{n_row['id']}").strip()
+        board = n_row["board"] or "일반공지"
+        pub_date = n_row["published_date"] or ""
+        body = n_row["content"] or ""
+
+        md_content = f"""---
+type: notice
+board: "{board}"
+date: "{pub_date}"
+title: "{n_title}"
+tags:
+  - 공지사항
+  - 학사공지
+---
+
+# 📢 {n_title}
+
+* **게시판**: `{board}`
+* **게시일자**: `{pub_date}`
+
+## 📝 공지사항 본문 내용
+{body}
+
+## 🔗 연관 개념 & 학과
+* [[학사경고]]
+* [[장학금]]
+* [[수강신청]]
+"""
+        safe_filename = n_title.replace("/", "_")[:60] + ".md"
+        with open(notices_dir / safe_filename, "w", encoding="utf-8") as f:
+            f.write(md_content)
+
+        stats["notices"] += 1
 
     elapsed = time.time() - start_time
     logger.info(f"✅ Obsidian Vault 내보내기 완료! ({target_vault}, {elapsed:.2f}초 소요)")

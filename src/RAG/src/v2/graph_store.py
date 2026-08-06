@@ -175,6 +175,32 @@ def populate_entity_graph(conn: sqlite3.Connection) -> Tuple[int, int]:
             add_entity(scholarship_id, "concept", "장학금 지급 규정", "장학금 신청 자격 및 선발 기준")
             add_relation(rule_id, "REGULATES", scholarship_id, "장학금 규정 관련 조항")
 
+    # --- D. 공지사항 (Notices) 엔티티/관계 파싱 ---
+    cursor.execute("SELECT id, board, title, category, published_date, content FROM notices LIMIT 2000")
+    notice_rows = cursor.fetchall()
+
+    for row in notice_rows:
+        n_title = (row["title"] or f"공지-{row['id']}").strip()
+        n_id = f"notice:{row['id']}"
+        board = row["board"] or "일반공지"
+        published_date = row["published_date"] or ""
+        content_text = row["content"] or ""
+
+        attrs = {
+            "board": board,
+            "published_date": published_date,
+            "category": row["category"]
+        }
+        add_entity(n_id, "notice", n_title, content_text[:150], attrs)
+
+        # 공지사항 본문/제목 내 개념 연관 자동 바인딩
+        if "장학" in n_title or "장학" in content_text:
+            add_relation(n_id, "ANNOUNCES", "concept:장학금", "장학금 공지사항 게시")
+        if "수강신청" in n_title or "수강신청" in content_text:
+            add_relation(n_id, "ANNOUNCES", "concept:수강신청", "수강신청 및 변경 안내 공지")
+        if "학사경고" in n_title or "학사경고" in content_text:
+            add_relation(n_id, "ANNOUNCES", "concept:학사경고", "학사경고 관련 공지")
+
     # --- DB Batch Insert ---
     cursor.executemany(
         f"INSERT OR REPLACE INTO {ENTITY_TABLE} (entity_id, entity_type, name, description, attributes) VALUES (?, ?, ?, ?, ?)",
