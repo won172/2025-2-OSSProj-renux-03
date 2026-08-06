@@ -1,0 +1,1 @@
+import{j as t,c as s}from"./index-AMpp6ZCd.js";import{u as a}from"./adminConsoleContext-FOWPGv4R.js";const o=()=>{const{isUniversityLevel:e}=a();return t.jsx(s,{to:e?"/admin/dashboard":"/admin/department",replace:!0})};export{o as default};

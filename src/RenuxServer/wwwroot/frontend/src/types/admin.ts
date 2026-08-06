@@ -171,6 +171,10 @@ export interface RagAdminStatus {
     fallback_count: number
     latest_query_at: string | null
     fallback_reasons?: Record<string, number>
+    /** 집계 기간(일). 지표는 누적이 아니라 이 기간 기준이다. */
+    window_days?: number
+    /** 같은 기간의 평가 하네스·시점 이동 요청 수(품질 지표에서 제외된 몫). */
+    synthetic_query_count?: number
   }
   visitor_stats?: {
     today: number | null

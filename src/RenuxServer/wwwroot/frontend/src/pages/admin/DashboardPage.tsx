@@ -168,6 +168,26 @@ const DashboardPage = () => {
   const satisfaction = ragStatus?.feedback?.satisfaction
   const fallbackReasons = ragStatus?.rag_logs.fallback_reasons ?? {}
 
+  // 품질 지표는 누적이 아니라 최근 기간의 실제 사용자 트래픽만 센다. 기간을 밝히지
+  // 않으면 누적으로 오해하고, 그러면 기능이 없던 시절 데이터가 최근 개선을 덮는다.
+  const windowLabel = ragStatus?.rag_logs.window_days
+    ? `최근 ${ragStatus.rag_logs.window_days}일`
+    : undefined
+
+  const metricsScope = useMemo(() => {
+    if (!ragStatus) return undefined
+    const windowDays = ragStatus.rag_logs.window_days
+    const synthetic = ragStatus.rag_logs.synthetic_query_count
+    const parts = [
+      windowDays ? `최근 ${windowDays}일 · 실제 사용자 질문 기준` : '실제 사용자 질문 기준',
+    ]
+    if (synthetic != null && synthetic > 0) {
+      parts.push(`평가 실행 ${synthetic.toLocaleString('ko-KR')}건 제외`)
+    }
+    parts.push(`갱신 ${formatDateTime(ragStatus.generated_at)}`)
+    return parts.join(' · ')
+  }, [ragStatus])
+
   return (
     <>
       <PageHeader
@@ -197,17 +217,22 @@ const DashboardPage = () => {
         />
       </div>
 
-      <Panel title="핵심 지표" description={ragStatus ? `기준 ${formatDateTime(ragStatus.generated_at)}` : undefined}>
+      <Panel title="핵심 지표" description={metricsScope}>
         {ragStatusError ? (
           <ErrorNote>{ragStatusError}</ErrorNote>
         ) : (
           <div className="ac-metrics">
             <MetricCard label="오늘 접속자" value={formatCount(ragStatus?.visitor_stats?.today, '명')} />
-            <MetricCard label="누적 접속자" value={formatCount(ragStatus?.visitor_stats?.total, '명')} />
+            {/* 접속자 누계는 성격상 누적이라 패널 헤더의 기간과 다르다. 카드에 명시한다. */}
             <MetricCard
-              label="총 질문"
+              label="누적 접속자"
+              value={formatCount(ragStatus?.visitor_stats?.total, '명')}
+              hint="전체 기간"
+            />
+            <MetricCard
+              label="질문 수"
               value={formatCount(ragStatus?.rag_logs.total_queries)}
-              hint="대화 로그 보기 →"
+              hint={windowLabel ? `${windowLabel} · 대화 로그 보기 →` : '대화 로그 보기 →'}
               onClick={() => navigate('/admin/logs')}
             />
             <MetricCard
