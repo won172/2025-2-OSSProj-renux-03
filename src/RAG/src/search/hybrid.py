@@ -34,7 +34,8 @@ from src.config import (
     TFIDF_VERIFY_INTEGRITY,
     VECTORIZER_DIR,
 )
-from src.search.fts_index import Fts5LexicalIndex, load_fts_index
+from src.search import fts_index as _fts
+from src.search.fts_index import Fts5LexicalIndex
 from src.models.embedding import encode_queries
 from src.vectorstore.chroma_client import get_collection, query_items
 
@@ -80,6 +81,22 @@ def lexical_artifact_path(identifier: str) -> Path:
     """현재 BM25 아티팩트를 우선하고, 재색인 전에는 TF-IDF를 읽기 전용 폴백한다."""
     bm25_path = _bm25_path(identifier)
     return bm25_path if bm25_path.exists() else _legacy_tfidf_path(identifier)
+
+
+def live_lexical_index_path(identifier: str) -> Path:
+    """지금 실제로 검색에 쓰이는 희소 인덱스 파일 경로.
+
+    데이터셋 캐시가 이 파일의 mtime으로 재색인을 감지한다. `lexical_artifact_path`를
+    쓰면 안 되는데, 그 함수는 pkl **로딩**에도 쓰이므로 FTS5를 가리키게 바꾸면
+    joblib이 SQLite 파일을 역직렬화하려 든다.
+
+    FTS5 인덱스는 데이터셋별 파일이 아니라 하나의 SQLite 파일이라, 공지를
+    재색인하면 교과목 캐시도 함께 무효화된다. 불필요한 재로딩이지만 안전한
+    방향이고(낡은 인덱스를 계속 쓰는 것보다 낫다), parquet 재로딩 비용뿐이다.
+    """
+    if LEXICAL_BACKEND == "fts5":
+        return _fts.fts_db_path()
+    return lexical_artifact_path(identifier)
 
 
 # 과거 테스트·도구의 내부 패치 지점을 보존한다. 신규 학습은 항상 _bm25_path를 쓴다.
@@ -450,7 +467,7 @@ def train_bm25(
 
 def _load_fts_artifact(identifier: str) -> Optional[dict]:
     """FTS5 백엔드로 희소 인덱스를 읽는다. 없으면 None(호출부가 pkl로 폴백)."""
-    index = load_fts_index(identifier)
+    index = _fts.load_fts_index(identifier)
     if index is None:
         return None
     return {

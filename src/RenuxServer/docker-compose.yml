@@ -72,6 +72,11 @@ services:
             - LLM_PROVIDER=${LLM_PROVIDER:-openai}
             # Release evaluation binds the HTTP candidate to the deployed Git revision.
             - RAG_BUILD_REVISION=${RAG_BUILD_REVISION:-local-unversioned}
+            # 희소 검색 백엔드: "fts5"(기본, artifacts/fts/lexical_fts.db) 또는
+            # "pickle"(artifacts/vectorizers/*_bm25.pkl). 골든셋 70건 비교에서
+            # fts5가 열등하지 않아 전환했다. 문제가 보이면 pickle로 되돌린다.
+            # 인덱스가 없으면 경고 후 pkl로 자동 폴백한다.
+            - RAG_LEXICAL_BACKEND=${RAG_LEXICAL_BACKEND:-fts5}
             # 질의분석/라우터는 항상 OpenAI를 사용하므로 키는 필수.
             - OPENAI_API_KEY=${OPENAI_API_KEY}
             - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-gpt-4o-mini}

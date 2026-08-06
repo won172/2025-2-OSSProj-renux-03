@@ -66,12 +66,16 @@ TFIDF_REQUIRE_MANIFEST = os.getenv("TFIDF_REQUIRE_MANIFEST", "0") == "1"
 # "default"로 두면 scikit-learn 기본 token_pattern을 사용한다.
 TFIDF_TOKENIZER = os.getenv("TFIDF_TOKENIZER", "korean").strip().lower()
 
-# 희소 검색 백엔드. "pickle"(기본)은 artifacts/vectorizers/*_bm25.pkl을 읽고,
-# "fts5"는 artifacts/fts/lexical_fts.db의 SQLite FTS5 인덱스를 읽는다.
-# fts5는 pkl 12개(194MB)와 그것을 지키는 매니페스트·락·해시 검증을 대체하려는
-# 것이지만, 두 백엔드의 검색 결과 동등성을 측정하기 전까지 기본을 바꾸지 않는다.
-# fts5 인덱스가 없으면 경고를 남기고 pkl로 폴백한다(운영 중단 없이 되돌아감).
-LEXICAL_BACKEND = os.getenv("RAG_LEXICAL_BACKEND", "pickle").strip().lower()
+# 희소 검색 백엔드. "fts5"(기본)는 artifacts/fts/lexical_fts.db의 SQLite FTS5
+# 인덱스를, "pickle"은 artifacts/vectorizers/*_bm25.pkl을 읽는다.
+#
+# 골든셋 70건 검색 계층 비교(scripts/compare_lexical_backends.py) 결과 fts5가
+# 열등하지 않아 기본을 전환했다 — 키워드 커버리지 57.7% → 60.7%,
+# 63건 동일 / 6건 개선 / 1건 악화. pkl과 그 매니페스트·락·해시 검증 계층은
+# 실사용 확인 뒤에 제거한다. 문제가 보이면 RAG_LEXICAL_BACKEND=pickle로 되돌린다.
+#
+# fts5 인덱스가 없으면 경고를 남기고 pkl로 폴백한다(재색인 전에도 검색이 산다).
+LEXICAL_BACKEND = os.getenv("RAG_LEXICAL_BACKEND", "fts5").strip().lower()
 
 # Parent-document 확장: 검색은 작은 청크로 하되, 생성 컨텍스트에는 같은 문서의
 # 이웃 청크(앞뒤 1개)를 함께 제공해 잘린 근거를 보완한다(추가 비용 없음, 기본 활성).

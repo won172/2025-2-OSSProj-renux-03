@@ -95,6 +95,7 @@ from src.pipelines.ingest import (
 from src.search.hybrid import (
     hybrid_search_with_meta,
     lexical_artifact_path,
+    live_lexical_index_path,
     load_lexical_with_ids,
     read_lexical_metadata,
     score_lexical_query,
@@ -5276,7 +5277,9 @@ def _ensure_dataset_locked(key: str) -> Tuple[pd.DataFrame, object, object, list
     
     chunk_path = artifacts.chunk_path
     csv_path = artifacts.csv_path
-    vectorizer_path = lexical_artifact_path(key)
+    # 캐시 무효화는 **실제로 검색에 쓰이는** 인덱스의 mtime을 봐야 한다.
+    # pkl 경로를 보면 FTS5 백엔드에서 재색인을 감지하지 못한다.
+    vectorizer_path = live_lexical_index_path(key)
 
     if not chunk_path.exists() and csv_path.exists():
         artifacts.chunk_path = csv_path
@@ -5315,7 +5318,7 @@ def _ensure_dataset_locked(key: str) -> Tuple[pd.DataFrame, object, object, list
             tfidf_chunk_ids = chunks_df["chunk_id"].astype(str).tolist() if not chunks_df.empty else None
             chunk_path = DATASET_ARTIFACTS[key].chunk_path
             chunk_mtime = chunk_path.stat().st_mtime if chunk_path.exists() else -1.0
-            current_artifact_path = lexical_artifact_path(key)
+            current_artifact_path = live_lexical_index_path(key)
             vectorizer_mtime = (
                 current_artifact_path.stat().st_mtime
                 if current_artifact_path.exists()
@@ -5326,7 +5329,7 @@ def _ensure_dataset_locked(key: str) -> Tuple[pd.DataFrame, object, object, list
         tfidf_chunk_ids = chunks_df["chunk_id"].astype(str).tolist() if not chunks_df.empty else None
         chunk_path = DATASET_ARTIFACTS[key].chunk_path
         chunk_mtime = chunk_path.stat().st_mtime if chunk_path.exists() else -1.0
-        vectorizer_path = lexical_artifact_path(key)
+        vectorizer_path = live_lexical_index_path(key)
         vectorizer_mtime = vectorizer_path.stat().st_mtime if vectorizer_path.exists() else -1.0
 
     chunks_df = enrich_retrieval_fields(chunks_df)

@@ -64,11 +64,11 @@ def _점수(질의: str) -> tuple[np.ndarray, list[str]]:
 # --- 백엔드 선택 --------------------------------------------------------------
 
 
-def test_기본값은_pkl이다():
-    """측정 전에 운영 동작이 바뀌면 안 된다."""
+def test_기본값은_fts5이다():
+    """골든셋 비교(S1.4)에서 열등하지 않아 전환했다. 되돌리려면 env로 pickle."""
     from src.config import LEXICAL_BACKEND
 
-    assert LEXICAL_BACKEND == "pickle"
+    assert LEXICAL_BACKEND == "fts5"
 
 
 def test_pkl_백엔드는_BM25인덱스를_돌려준다(양쪽_인덱스, monkeypatch):
@@ -155,3 +155,39 @@ def test_알_수_없는_백엔드_이름은_pkl로_동작한다(양쪽_인덱스
     _백엔드(monkeypatch, "fts")
     data = _load_lexical_artifact("notices")
     assert isinstance(data["vectorizer"], BM25LexicalIndex)
+
+
+# --- 캐시 무효화가 실제 인덱스를 따라간다 --------------------------------------
+
+
+def test_감시_경로가_백엔드를_따라간다(tmp_path, monkeypatch):
+    """데이터셋 캐시는 이 경로의 mtime으로 재색인을 감지한다.
+
+    pkl 경로를 계속 보면 FTS5로 전환한 뒤 재색인해도 캐시가 갱신되지 않아
+    낡은 인덱스로 계속 검색한다. pkl을 제거하는 단계에서는 아예 -1.0이 된다.
+    """
+    import src.search.fts_index as fts
+    import src.search.hybrid as hybrid
+    from src.search.hybrid import live_lexical_index_path
+
+    monkeypatch.setattr(hybrid, "VECTORIZER_DIR", tmp_path)
+    monkeypatch.setattr(fts, "fts_db_path", lambda: tmp_path / "lexical_fts.db")
+
+    monkeypatch.setattr(hybrid, "LEXICAL_BACKEND", "fts5")
+    assert live_lexical_index_path("notices") == tmp_path / "lexical_fts.db"
+
+    monkeypatch.setattr(hybrid, "LEXICAL_BACKEND", "pickle")
+    assert live_lexical_index_path("notices").name.endswith(".pkl")
+
+
+def test_감시_경로는_로딩_경로와_분리되어_있다(양쪽_인덱스, monkeypatch):
+    """lexical_artifact_path를 FTS5로 돌리면 joblib이 SQLite를 역직렬화하려 든다.
+
+    두 함수가 갈라져 있어야 fts5 백엔드에서도 pkl 폴백이 살아 있다.
+    """
+    import src.search.hybrid as hybrid
+    from src.search.hybrid import lexical_artifact_path, live_lexical_index_path
+
+    monkeypatch.setattr(hybrid, "LEXICAL_BACKEND", "fts5")
+    assert lexical_artifact_path("notices").name.endswith(".pkl")
+    assert live_lexical_index_path("notices").name.endswith(".db")
