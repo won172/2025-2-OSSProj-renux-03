@@ -30,7 +30,6 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
