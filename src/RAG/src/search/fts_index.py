@@ -19,9 +19,9 @@ FTS5 인덱스는 SQLite 파일 하나이므로 그 계층이 통째로 필요 �
 ## 점수 부호
 
 SQLite `bm25()`는 **음수**이고 **작을수록 관련도가 높다.** 부호를 버리면
-(`abs()`) 순위가 뒤집힌다. 여기서는 부호를 뒤집어(`-rank`) 양수 관련도로 만든
-뒤 최댓값으로 나눈다. 기존 `BM25LexicalIndex.score`와 같은 0..1 계약이다.
-`test_fts_index.py`가 이 방향을 고정한다.
+(`abs()`) 순위가 뒤집힌다. 여기서는 부호를 뒤집어(`-rank`) 양수 관련도로 만든다.
+0..1 정규화는 `BM25LexicalIndex`와 마찬가지로 `hybrid.score_lexical_query`가
+한 곳에서 하므로 여기서는 하지 않는다. `test_fts_index.py`가 이 방향을 고정한다.
 """
 from __future__ import annotations
 
@@ -114,7 +114,13 @@ class Fts5LexicalIndex:
         return len(self.chunk_ids)
 
     def score(self, query: str) -> np.ndarray:
-        """질의에 대한 0..1 정규화 점수를 `chunk_ids` 순서에 맞춘 배열로 반환한다."""
+        """질의에 대한 **원점수**를 `chunk_ids` 순서에 맞춘 배열로 반환한다.
+
+        `BM25LexicalIndex.score`와 동일하게 정규화하지 않은 값을 돌려준다.
+        0..1 정규화는 두 백엔드 공통으로 `hybrid.score_lexical_query`가 한 곳에서
+        수행한다. 여기서 미리 정규화하면 백엔드를 바꿀 때 정규화 의미까지 함께
+        바뀌어 두 백엔드를 비교할 수 없다.
+        """
         from src.search.hybrid import _kiwi_or_light_korean_tokenize, _light_korean_tokenize
 
         scores = np.zeros(self.document_count, dtype=np.float64)
@@ -158,11 +164,7 @@ class Fts5LexicalIndex:
             pos = int(row["rowid"])
             if 0 <= pos < self.document_count:
                 scores[pos] = -float(row["rank"])
-
-        positive_max = float(scores.max())
-        if positive_max <= 0:
-            return np.zeros_like(scores)
-        return np.clip(scores / positive_max, 0.0, 1.0)
+        return scores
 
 
 def build_fts_index(

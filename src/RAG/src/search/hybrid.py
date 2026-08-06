@@ -28,11 +28,13 @@ from src.config import (
     HYBRID_ALPHA,
     HYBRID_FUSION_MODE,
     HYBRID_RRF_K,
+    LEXICAL_BACKEND,
     TFIDF_TOKENIZER,
     TFIDF_REQUIRE_MANIFEST,
     TFIDF_VERIFY_INTEGRITY,
     VECTORIZER_DIR,
 )
+from src.search.fts_index import Fts5LexicalIndex, load_fts_index
 from src.models.embedding import encode_queries
 from src.vectorstore.chroma_client import get_collection, query_items
 
@@ -446,7 +448,38 @@ def train_bm25(
     return vectorizer, matrix
 
 
+def _load_fts_artifact(identifier: str) -> Optional[dict]:
+    """FTS5 백엔드로 희소 인덱스를 읽는다. 없으면 None(호출부가 pkl로 폴백)."""
+    index = load_fts_index(identifier)
+    if index is None:
+        return None
+    return {
+        "vectorizer": index,
+        # 호출부가 행 수 정합성을 matrix.shape[0]으로 확인한다. BM25 경로와 동일하게
+        # 0열 행렬로 충분하다(문서 본문을 중복 저장하지 않는다).
+        "matrix": np.empty((index.document_count, 0), dtype=np.float32),
+        "chunk_ids": index.chunk_ids,
+        "metadata": {
+            "dataset": identifier,
+            "document_count": index.document_count,
+            "retriever_type": "fts5",
+            "tokenizer": index.tokenizer_name,
+            "source": str(index.db_path),
+        },
+    }
+
+
 def _load_lexical_artifact(identifier: str) -> dict:
+    if LEXICAL_BACKEND == "fts5":
+        artifact = _load_fts_artifact(identifier)
+        if artifact is not None:
+            return artifact
+        # 인덱스가 아직 없을 때 검색을 죽이지 않는다. 재색인 전에도 기존 pkl로 돈다.
+        logger.warning(
+            "RAG_LEXICAL_BACKEND=fts5이지만 '%s' FTS5 인덱스가 없습니다. pkl로 폴백합니다.",
+            identifier,
+        )
+
     path = lexical_artifact_path(identifier)
     # 검증부터 역직렬화 완료까지 공유 잠금을 유지해 검증 후 파일 교체(TOCTOU)도 막는다.
     with _artifact_lock(exclusive=False):
@@ -486,8 +519,13 @@ def load_lexical_with_ids(identifier: str) -> Tuple[Any, np.ndarray, Optional[Li
 
 
 def score_lexical_query(vectorizer: Any, matrix: np.ndarray, query: str) -> np.ndarray:
-    """Return normalized per-row scores for BM25 or legacy TF-IDF."""
-    if isinstance(vectorizer, BM25LexicalIndex):
+    """Return normalized per-row scores for BM25, FTS5, or legacy TF-IDF.
+
+    BM25(pkl)와 FTS5는 둘 다 정규화되지 않은 원점수를 돌려주고, 0..1 정규화는
+    여기 한 곳에서만 한다. 백엔드를 바꿔도 정규화 의미가 달라지지 않아야
+    두 백엔드의 검색 결과를 비교할 수 있다.
+    """
+    if isinstance(vectorizer, (BM25LexicalIndex, Fts5LexicalIndex)):
         raw_scores = np.asarray(vectorizer.score(query), dtype=np.float64)
         positive_max = float(np.max(raw_scores)) if raw_scores.size else 0.0
         scores = (

@@ -66,6 +66,13 @@ TFIDF_REQUIRE_MANIFEST = os.getenv("TFIDF_REQUIRE_MANIFEST", "0") == "1"
 # "default"로 두면 scikit-learn 기본 token_pattern을 사용한다.
 TFIDF_TOKENIZER = os.getenv("TFIDF_TOKENIZER", "korean").strip().lower()
 
+# 희소 검색 백엔드. "pickle"(기본)은 artifacts/vectorizers/*_bm25.pkl을 읽고,
+# "fts5"는 artifacts/fts/lexical_fts.db의 SQLite FTS5 인덱스를 읽는다.
+# fts5는 pkl 12개(194MB)와 그것을 지키는 매니페스트·락·해시 검증을 대체하려는
+# 것이지만, 두 백엔드의 검색 결과 동등성을 측정하기 전까지 기본을 바꾸지 않는다.
+# fts5 인덱스가 없으면 경고를 남기고 pkl로 폴백한다(운영 중단 없이 되돌아감).
+LEXICAL_BACKEND = os.getenv("RAG_LEXICAL_BACKEND", "pickle").strip().lower()
+
 # Parent-document 확장: 검색은 작은 청크로 하되, 생성 컨텍스트에는 같은 문서의
 # 이웃 청크(앞뒤 1개)를 함께 제공해 잘린 근거를 보완한다(추가 비용 없음, 기본 활성).
 PARENT_CONTEXT_ENABLED = os.getenv("PARENT_CONTEXT_ENABLED", "1") == "1"
@@ -301,6 +308,7 @@ __all__ = [
     "TFIDF_VERIFY_INTEGRITY",
     "TFIDF_REQUIRE_MANIFEST",
     "TFIDF_TOKENIZER",
+    "LEXICAL_BACKEND",
     "MAX_CONTEXT_LENGTH",
     "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
