@@ -1,4 +1,3 @@
-from __future__ import annotations
 import csv
 import copy
 import functools
@@ -181,12 +180,6 @@ app = FastAPI(
     title="동똑이",
     description="25-2 오픈소스소프트웨어프로젝트 팀 Renux의 동국대학교 캠퍼스 RAG 어시스턴트 API 서비스입니다.",
 )
-
-try:
-    from api.v2_router import router as v2_router
-    app.include_router(v2_router)
-except Exception as _v2_err:
-    logging.warning("v2_router 로드 실패: %s", _v2_err)
 _request_as_of: ContextVar[str | None] = ContextVar("rag_request_as_of", default=None)
 
 

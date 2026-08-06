@@ -20,26 +20,16 @@ from src.config import (
 
 @lru_cache(maxsize=1)
 def get_embedder() -> SentenceTransformer:
-    """캐시에 담긴 SentenceTransformer 인스턴스를 반환합니다."""
-    import os
-    from pathlib import Path
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
-    cache_base = Path(__file__).resolve().parents[2] / "huggingface_cache"
-    if cache_base.exists():
-        os.environ["HF_HOME"] = str(cache_base)
+    """캐시에 담긴 SentenceTransformer 인스턴스를 반환합니다.
 
-    target_model_name = EMBED_MODEL_NAME
-    snapshots_dir = cache_base / "hub" / f"models--{EMBED_MODEL_NAME.replace('/', '--')}" / "snapshots"
-    if snapshots_dir.exists():
-        snapshots = [p for p in snapshots_dir.iterdir() if p.is_dir()]
-        if snapshots:
-            target_model_name = str(snapshots[0])
-
+    trust_remote_code는 기본 비활성(MODEL_TRUST_REMOTE_CODE)으로, 신뢰할 수 없는
+    HF 모델이 로드 중 임의 코드를 실행하는 공급망 위험을 차단한다. 커스텀 코드가
+    필요한 모델은 고정 리비전(EMBED_MODEL_REVISION)과 함께 명시적으로 켜야 한다.
+    """
     model = SentenceTransformer(
-        target_model_name,
+        EMBED_MODEL_NAME,
         trust_remote_code=MODEL_TRUST_REMOTE_CODE,
-        revision=EMBED_MODEL_REVISION if target_model_name == EMBED_MODEL_NAME else None,
+        revision=EMBED_MODEL_REVISION,
         device=EMBED_DEVICE,
     )
     return model

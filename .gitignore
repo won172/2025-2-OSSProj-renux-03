@@ -53,6 +53,9 @@ src/RAG/artifacts/db_chroma/
 # Chroma 장애·복구 사본과 재색인 실행 로그는 로컬 운영 산출물이다.
 src/RAG/artifacts/db_chroma.*/
 src/RAG/artifacts/rebuilds/
+# Obsidian Vault는 SQLite에서 재생성 가능한 파생물이다(마크다운 5천여 개, 24MB).
+src/RAG/artifacts/obsidian_vault/
+src/RAG/artifacts/.obsidian/
 src/RAG/tmp/
 src/RAG/scripts/.codex_*
 /tmp/
