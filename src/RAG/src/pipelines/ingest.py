@@ -6,7 +6,8 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 import json
-import argparse # Add logging import
+import argparse
+import logging
 import hashlib
 
 import pandas as pd
@@ -119,6 +120,41 @@ def _chunk_parent_identity(
     return doc_id, position
 
 
+def _train_lexical_indices(
+    key: str, texts: list[str], chunk_ids: list[str]
+) -> Tuple[object, object]:
+    """희소 검색 인덱스를 pkl과 FTS5 양쪽으로 만든다.
+
+    두 백엔드를 언제든 바꿔 끼울 수 있어야 하므로(`RAG_LEXICAL_BACKEND`) 항상
+    둘 다 갱신한다. 한쪽만 갱신하면 전환한 순간 낡은 인덱스로 검색하게 된다.
+
+    실패 처리는 지금 어느 쪽이 실제로 쓰이는지에 따라 다르다.
+    - 사용 중인 백엔드의 인덱스 구축이 실패하면 그대로 올린다. 조용히 넘기면
+      낡은 인덱스로 계속 검색하게 되고, 그건 수집이 실패한 것보다 나쁘다.
+    - 사용하지 않는 쪽이 실패하면 경고만 남기고 진행한다. 아직 검색에 쓰이지
+      않는 인덱스 때문에 공지·학식 수집이 멈춰서는 안 된다.
+
+    반환값은 기존 호출부 계약을 유지하기 위해 항상 pkl 쪽 (vectorizer, matrix)이다.
+    검색 시 실제로 어느 것을 읽을지는 `hybrid._load_lexical_artifact`가 정한다.
+    """
+    from src.config import LEXICAL_BACKEND
+    from src.search.fts_index import build_fts_index
+
+    vectorizer, matrix = train_bm25(key, texts, chunk_ids=chunk_ids)
+
+    try:
+        build_fts_index(key, texts, chunk_ids)
+    except Exception as exc:
+        if LEXICAL_BACKEND == "fts5":
+            raise
+        logging.warning(
+            "'%s' FTS5 인덱스 구축에 실패했습니다(현재 백엔드=%s이라 진행): %s",
+            key, LEXICAL_BACKEND, exc,
+        )
+
+    return vectorizer, matrix
+
+
 def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple[pd.DataFrame, object, object]:
     if chunks_df.empty:
         print(f"⚠️ Warning: No chunks generated for {key}")
@@ -176,10 +212,10 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
     artifacts.chunk_path = write_path
 
     # 4. BM25 학습 (전체 문서 길이 통계가 필요)
-    vectorizer, matrix = train_bm25(
+    vectorizer, matrix = _train_lexical_indices(
         key,
         retrieval_text.tolist(),
-        chunk_ids=chunks_df["chunk_id"].astype(str).tolist(),
+        chunks_df["chunk_id"].astype(str).tolist(),
     )
     return chunks_df, vectorizer, matrix
 
@@ -203,10 +239,10 @@ def persist_dataset_artifacts_only(key: str, chunks_df: pd.DataFrame) -> Tuple[p
         chunks_df.to_csv(write_path, index=False, encoding="utf-8-sig")
     artifacts.chunk_path = write_path
 
-    vectorizer, matrix = train_bm25(
+    vectorizer, matrix = _train_lexical_indices(
         key,
         retrieval_text.tolist(),
-        chunk_ids=chunks_df["chunk_id"].astype(str).tolist(),
+        chunks_df["chunk_id"].astype(str).tolist(),
     )
     return chunks_df, vectorizer, matrix
 
