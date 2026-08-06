@@ -62,21 +62,23 @@ services:
             - ../RAG/data:/app/data
         depends_on:
             - redis
-            - ollama
         env_file:
             - .env
             - ../RAG/.env
         environment:
             # 답변 생성 프로바이더: "openai"(기본) 또는 "ollama".
+            # 로컬 전환은 실측 후 보류 — 생성만 보면 2~3초지만 실제 파이프라인은
+            # 근거선택·생성·근거검증이 모두 로컬을 타 한 질문에 92초가 걸렸다.
             - LLM_PROVIDER=${LLM_PROVIDER:-openai}
             # Release evaluation binds the HTTP candidate to the deployed Git revision.
             - RAG_BUILD_REVISION=${RAG_BUILD_REVISION:-local-unversioned}
             # 질의분석/라우터는 항상 OpenAI를 사용하므로 키는 필수.
             - OPENAI_API_KEY=${OPENAI_API_KEY}
             - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-gpt-4o-mini}
-            # 로컬 LLM(Ollama)을 쓸 때만 필요. host.docker.internal 로 호스트의 Ollama에 접속.
+            # 답변 생성은 호스트에서 직접 띄운 Ollama를 쓴다. 컨테이너로 Ollama를 올리면
+            # Docker VM 메모리 안에서 모델을 또 적재하려다 죽는다(23GB 모델 · VM 7.7GB에서 실측).
             - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-            - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
+            - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-qwen3.6:latest}
             - OLLAMA_TIMEOUT_SECONDS=${OLLAMA_TIMEOUT_SECONDS:-300}
             - REDIS_URL=redis://redis:6379/0
             # 공지·학식 데이터 자동 갱신 스케줄러(in-process). 기본 켜짐, env로 끌 수 있음.
@@ -101,15 +103,6 @@ services:
             retries: 5
             start_period: 180s
 
-    ollama:
-        container_name: renux_ollama
-        image: ollama/ollama:latest
-        ports:
-            - "11434:11434"
-        volumes:
-            - ollama_data:/root/.ollama
-        restart: always
-
     redis:
         container_name: renux_redis_internal
         image: redis:alpine
@@ -131,5 +124,4 @@ services:
 volumes:
     postgres_data_test:
     redis_data:
-    ollama_data:
     data_protection_keys:

@@ -73,6 +73,11 @@ def _build_ollama_llm() -> BaseChatModel:
         base_url=OLLAMA_BASE_URL,
         temperature=OLLAMA_CHAT_TEMPERATURE,
         client_kwargs={"timeout": OLLAMA_TIMEOUT_SECONDS},
+        # 추론 모드를 끈다. RAG는 근거가 이미 주어진 상태에서 정리하는 작업이라 긴
+        # 추론이 할 일이 없는데, 켜두면 예산을 거기에 다 쓴다 — qwen3.6에서 1,200토큰을
+        # 사고에 쓰고 답변이 0자로 나온 것을 실측했다. 끄면 같은 질문이 2~3초에 끝난다.
+        # 추론을 지원하지 않는 모델은 이 값을 무시하므로 그대로 둬도 안전하다.
+        reasoning=False,
     )
 
 
