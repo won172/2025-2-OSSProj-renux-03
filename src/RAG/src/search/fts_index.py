@@ -182,6 +182,55 @@ class Fts5LexicalIndex:
         return scores
 
 
+def absent_terms(
+    identifier: str, terms: Iterable[str], *, db_path: Optional[Path] = None
+) -> List[str]:
+    """주어진 토큰 중 이 데이터셋 코퍼스에 **한 번도 나오지 않는** 것을 돌려준다.
+
+    "검색이 못 찾았다"와 "그런 데이터가 아예 없다"는 처방이 완전히 다르다.
+    앞은 랭킹·필터 문제이고, 뒤는 사람이 자료를 채워야 하는 문제다. 그런데 폴백
+    로그만 보면 둘이 똑같이 보인다. 골든 70건 실측에서 기대 키워드의 24.5%p가
+    코퍼스 어디에도 없었다 — 검색으로는 절대 닿을 수 없는 몫이다.
+
+    FTS5는 색인된 어휘 목록을 `fts5vocab`으로 그대로 노출하므로, 별도 자료구조
+    없이 이 판정을 할 수 있다. pkl(rank_bm25) 백엔드로는 불가능했다.
+    """
+    table = _table_name(identifier)
+    wanted = [t for t in {str(x).strip().lower() for x in terms} if t]
+    if not wanted:
+        return []
+
+    target = db_path or fts_db_path()
+    if not target.exists():
+        return []
+    try:
+        conn = _connect(target, read_only=True)
+    except sqlite3.OperationalError:
+        return []
+
+    try:
+        # fts5vocab은 임시 DB에 만든다. 본 DB가 읽기 전용이어도 temp는 쓸 수 있다.
+        conn.execute(f"CREATE VIRTUAL TABLE temp.vocab_probe USING fts5vocab(main, {table}, 'row')")
+        placeholders = ",".join("?" for _ in wanted)
+        present = {
+            str(row[0])
+            for row in conn.execute(
+                f"SELECT term FROM temp.vocab_probe WHERE term IN ({placeholders})", wanted
+            )
+        }
+    except sqlite3.OperationalError as exc:
+        logger.warning("어휘 조회 실패(%s): %s", identifier, exc)
+        return []
+    finally:
+        try:
+            conn.execute("DROP TABLE IF EXISTS temp.vocab_probe")
+        except sqlite3.OperationalError:
+            pass
+        conn.close()
+
+    return [t for t in wanted if t not in present]
+
+
 def build_fts_index(
     identifier: str,
     corpus: Iterable[str],

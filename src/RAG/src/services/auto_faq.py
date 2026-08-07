@@ -108,6 +108,7 @@ def collect_gap_questions(
             "fallback": 값["fallback"],
             "ungrounded": 값["ungrounded"],
             "reasons": dict(값["reasons"]),
+            "missing_terms": missing_from_corpus(값["sample"]),
         }
         for 값 in 묶음.values()
         if 값["count"] >= min_count and (값["fallback"] or 값["ungrounded"])
@@ -142,6 +143,38 @@ def _already_covered() -> set[str]:
     return covered
 
 
+def missing_from_corpus(question: str) -> List[str]:
+    """질문의 내용어 중 어느 데이터셋 코퍼스에도 없는 낱말.
+
+    "검색이 못 찾았다"와 "그런 자료가 아예 없다"는 처방이 다르다. 앞은 랭킹을
+    손볼 일이고, 뒤는 사람이 자료를 채워야 한다. 폴백 로그만으로는 둘이 똑같이
+    보인다 — 골든 70건에서 기대 키워드의 24.5%p가 코퍼스에 아예 없었다.
+
+    질문어(`알려줘`, `얼마야`)와 n-gram 조각(`려줘`)은 빼고 내용어만 본다.
+    그것들은 원래 코퍼스에 없는 게 정상이라, 두면 신호가 잡음에 묻힌다.
+    """
+    from src.pipelines.ingest import DATASET_ARTIFACTS
+    from src.search.fts_index import absent_terms
+    from src.search.hybrid import _QUERY_TITLE_STOPWORDS, _light_korean_tokenize
+
+    tokens = _light_korean_tokenize(question)
+    내용어 = [
+        t for t in tokens
+        if len(t) >= 2
+        and t not in _QUERY_TITLE_STOPWORDS
+        and not any(t != o and t in o for o in tokens)  # 더 긴 토큰의 조각 제외
+    ]
+    if not 내용어:
+        return []
+
+    남은 = set(내용어)
+    for key in DATASET_ARTIFACTS:
+        if not 남은:
+            break
+        남은 &= set(absent_terms(key, 남은))
+    return [t for t in 내용어 if t in 남은]
+
+
 def _observation_note(후보: Dict, days: int) -> str:
     """작성자가 답을 쓰도록 관측 근거만 남긴다. 답을 지어내지 않는다."""
     줄 = [
@@ -154,6 +187,10 @@ def _observation_note(후보: Dict, days: int) -> str:
         줄.append(f"답변 실패(폴백) {후보['fallback']}회" + (f" — {사유}" if 사유 else ""))
     if 후보["ungrounded"]:
         줄.append(f"근거검증 실패 {후보['ungrounded']}회")
+    없는말 = 후보.get("missing_terms") or []
+    if 없는말:
+        # 자료를 새로 써야 하는 질문과, 있는 자료를 못 찾은 질문을 구분해 준다.
+        줄.append(f"코퍼스에 없는 낱말: {', '.join(없는말)} — 검색이 아니라 자료가 없는 쪽입니다.")
     return "\n".join(줄)
 
 
@@ -174,6 +211,7 @@ def _register_draft(후보: Dict, days: int) -> bool:
                         "observed_count": 후보["count"],
                         "observed_fallback": 후보["fallback"],
                         "observed_ungrounded": 후보["ungrounded"],
+                        "missing_terms": 후보.get("missing_terms") or [],
                     },
                     ensure_ascii=False,
                 ),

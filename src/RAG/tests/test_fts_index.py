@@ -310,3 +310,44 @@ def test_구버전_스키마_파일에도_재색인이_된다(db):
     _build(db, "notices", {"n2": "새 본문"})  # 여기서 터지면 안 된다
     idx = load_fts_index("notices", db_path=db)
     assert idx is not None and idx.chunk_ids == ["n2"]
+
+
+# --- 어휘 커버리지 진단 --------------------------------------------------------
+
+
+def test_코퍼스에_없는_낱말을_가려낸다(db):
+    """"검색이 못 찾았다"와 "그런 자료가 아예 없다"는 처방이 다르다.
+
+    폴백 로그만으로는 둘이 똑같이 보인다. 골든 70건에서 기대 키워드의 24.5%p가
+    코퍼스에 아예 없었고, 그건 검색으로 절대 닿을 수 없는 몫이다.
+    """
+    from src.search.fts_index import absent_terms
+
+    _build(db, "notices", {"n1": "장학금 신청 안내", "n2": "휴학 절차"})
+    assert absent_terms("notices", ["장학금", "휴학"], db_path=db) == []
+    assert absent_terms("notices", ["총학생회비"], db_path=db) == ["총학생회비"]
+
+    섞임 = absent_terms("notices", ["장학금", "총학생회비", "보강"], db_path=db)
+    assert set(섞임) == {"총학생회비", "보강"}
+
+
+def test_어휘_조회가_인덱스를_바꾸지_않는다(db):
+    """진단용 임시 테이블이 인덱스에 남으면 다음 재구축이 깨진다."""
+    import sqlite3
+
+    from src.search.fts_index import absent_terms
+
+    _build(db, "notices", {"n1": "장학금 안내"})
+    absent_terms("notices", ["총학생회비"], db_path=db)
+
+    conn = sqlite3.connect(str(db))
+    남은 = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE name LIKE '%vocab%'")]
+    conn.close()
+    assert 남은 == []
+    _build(db, "notices", {"n2": "재구축"})  # 여기서 터지면 안 된다
+
+
+def test_인덱스가_없으면_빈_목록이다(db):
+    from src.search.fts_index import absent_terms
+
+    assert absent_terms("notices", ["아무말"], db_path=db) == []
