@@ -28,6 +28,7 @@ from src.config import (
     HYBRID_ALPHA,
     HYBRID_FUSION_MODE,
     HYBRID_RRF_K,
+    HYBRID_TITLE_FOCUS_WEIGHT,
     LEXICAL_BACKEND,
     TFIDF_TOKENIZER,
     TFIDF_REQUIRE_MANIFEST,
@@ -822,7 +823,11 @@ def hybrid_search(
             if "notice" in collection_name.lower()
             else 0.0
         )
-        final_score = max(weighted_score, lexical_guard_score) + 0.18 * title_score + period_adjustment
+        final_score = (
+            max(weighted_score, lexical_guard_score)
+            + HYBRID_TITLE_FOCUS_WEIGHT * title_score
+            + period_adjustment
+        )
         hybrid_results.append((cid, final_score, v_score, s_score))
     
     # 점수순 정렬

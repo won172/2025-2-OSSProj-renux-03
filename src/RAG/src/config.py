@@ -77,6 +77,17 @@ TFIDF_TOKENIZER = os.getenv("TFIDF_TOKENIZER", "korean").strip().lower()
 # fts5 인덱스가 없으면 경고를 남기고 pkl로 폴백한다(재색인 전에도 검색이 산다).
 LEXICAL_BACKEND = os.getenv("RAG_LEXICAL_BACKEND", "fts5").strip().lower()
 
+# 제목이 질의와 겹칠 때 최종 점수에 더하는 가산의 가중치.
+# 하드코딩돼 있던 0.18을 설정으로 뺐다 — 기본값은 그대로여서 동작은 바뀌지 않는다.
+#
+# 골든 70건 실측에서는 이 값을 0으로 두면 키워드 커버리지가 61.7% → 63.0%로
+# 오른다(개선 3건·악화 0건). 다만 그 근거만으로 기본값을 바꾸지는 않았다.
+# 0으로 두면 test_hybrid의 기존 보호 두 가지가 깨진다 — 정확한 어휘 일치가
+# 밀집 결과에 묻히지 않게 하는 것과, 제목 일치가 순위 신호로 작동하는 것이다.
+# 골든 70건의 +1.3%p는 그 둘을 뒤집기에 약하다. 더 넓은 표본(폴백률 포함
+# 골든 러너 전체)에서 확인되면 그때 0으로 내린다.
+HYBRID_TITLE_FOCUS_WEIGHT = float(os.getenv("HYBRID_TITLE_FOCUS_WEIGHT", "0.18"))
+
 # Parent-document 확장: 검색은 작은 청크로 하되, 생성 컨텍스트에는 같은 문서의
 # 이웃 청크(앞뒤 1개)를 함께 제공해 잘린 근거를 보완한다(추가 비용 없음, 기본 활성).
 PARENT_CONTEXT_ENABLED = os.getenv("PARENT_CONTEXT_ENABLED", "1") == "1"
@@ -313,6 +324,7 @@ __all__ = [
     "TFIDF_REQUIRE_MANIFEST",
     "TFIDF_TOKENIZER",
     "LEXICAL_BACKEND",
+    "HYBRID_TITLE_FOCUS_WEIGHT",
     "MAX_CONTEXT_LENGTH",
     "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
