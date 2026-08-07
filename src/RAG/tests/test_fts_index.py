@@ -240,3 +240,73 @@ def test_메타데이터가_깨지면_None을_반환한다(db):
     conn.commit()
     conn.close()
     assert load_fts_index("notices", db_path=db) is None
+
+
+# --- 토크나이저 불일치 감지 ----------------------------------------------------
+
+
+def test_토크나이저_구현이_바뀌면_크게_남긴다(db, caplog, monkeypatch):
+    """Kiwi 설치·제거만으로 어휘가 통째로 바뀐다.
+
+    TFIDF_TOKENIZER는 둘 다 "korean"이라 이름으로는 구분되지 않는다.
+    실측: 같은 질의에 Kiwi는 ['교환','학생'], 폴백은 ['교환학생','교환','환학',…]를
+    낸다. 색인과 질의가 갈리면 예외 없이 히트만 사라진다.
+    """
+    import logging
+
+    import src.search.fts_index as fts
+
+    monkeypatch.setattr(fts, "tokenizer_backend", lambda _n: "light_korean")
+    _build(db, "notices", {"n1": "교환학생 지원 안내"})
+
+    monkeypatch.setattr(fts, "tokenizer_backend", lambda _n: "kiwi")
+    with caplog.at_level(logging.ERROR):
+        idx = load_fts_index("notices", db_path=db)
+
+    assert idx is not None, "경고만 하고 인덱스는 계속 쓸 수 있어야 한다"
+    assert "재색인이 필요합니다" in caplog.text
+    assert "light_korean" in caplog.text and "kiwi" in caplog.text
+
+
+def test_같은_토크나이저면_조용하다(db, caplog):
+    import logging
+
+    _build(db, "notices", {"n1": "교환학생 지원 안내"})
+    with caplog.at_level(logging.ERROR):
+        assert load_fts_index("notices", db_path=db) is not None
+    assert caplog.text == ""
+
+
+def test_구버전_인덱스는_경고_없이_읽힌다(db, caplog):
+    """tokenizer_backend 컬럼이 없던 인덱스도 계속 읽혀야 한다."""
+    import logging
+    import sqlite3
+
+    _build(db, "notices", {"n1": "본문"})
+    conn = sqlite3.connect(str(db))
+    conn.execute("UPDATE lexical_meta SET tokenizer_backend = NULL")
+    conn.commit()
+    conn.close()
+
+    with caplog.at_level(logging.ERROR):
+        assert load_fts_index("notices", db_path=db) is not None
+    assert caplog.text == ""
+
+
+def test_구버전_스키마_파일에도_재색인이_된다(db):
+    """CREATE TABLE IF NOT EXISTS는 기존 테이블에 컬럼을 더하지 않는다.
+
+    새 파일만 쓰는 테스트는 이 경로를 타지 않아, 실제 인덱스에서만
+    'no column named tokenizer_backend'로 터졌다.
+    """
+    import sqlite3
+
+    _build(db, "notices", {"n1": "본문"})
+    conn = sqlite3.connect(str(db))
+    conn.execute("ALTER TABLE lexical_meta DROP COLUMN tokenizer_backend")
+    conn.commit()
+    conn.close()
+
+    _build(db, "notices", {"n2": "새 본문"})  # 여기서 터지면 안 된다
+    idx = load_fts_index("notices", db_path=db)
+    assert idx is not None and idx.chunk_ids == ["n2"]

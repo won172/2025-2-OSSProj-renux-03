@@ -52,6 +52,21 @@ def fts_db_path() -> Path:
     return FTS_DIR / FTS_DB_NAME
 
 
+def tokenizer_backend(tokenizer_name: str) -> str:
+    """지금 실제로 쓰이는 토크나이저 구현 이름.
+
+    `TFIDF_TOKENIZER="korean"`은 Kiwi가 설치돼 있으면 형태소 분석을, 없으면 경량
+    폴백을 쓴다. 둘은 **어휘가 전혀 다르다** — Kiwi는 "교환학생"을 교환+학생으로
+    쪼개고, 폴백은 복합어와 n-gram을 남긴다. 색인과 질의가 서로 다른 쪽을 쓰면
+    히트가 조용히 사라진다. 그래서 이름("korean")이 아니라 실제 구현을 기록한다.
+    """
+    if tokenizer_name != "korean":
+        return tokenizer_name
+    from src.search.hybrid import _load_kiwi
+
+    return "kiwi" if _load_kiwi() is not None else "light_korean"
+
+
 def _validate_identifier(identifier: str) -> str:
     if not _SAFE_IDENTIFIER.match(identifier or ""):
         raise ValueError(
@@ -221,9 +236,17 @@ def build_fts_index(
                        identifier TEXT PRIMARY KEY,
                        document_count INTEGER NOT NULL,
                        tokenizer TEXT NOT NULL,
-                       chunk_ids TEXT NOT NULL
+                       chunk_ids TEXT NOT NULL,
+                       tokenizer_backend TEXT
                    )"""
             )
+            # CREATE TABLE IF NOT EXISTS는 이미 있는 테이블에 컬럼을 더하지 않는다.
+            # 기존 인덱스 파일을 복사해 이어 쓰므로 빠진 컬럼은 여기서 채운다.
+            # (테스트는 매번 새 파일을 만들어 이 경로를 타지 않는다 — 실제 인덱스에서만 터졌다.)
+            컬럼 = {r["name"] for r in conn.execute("PRAGMA table_info(lexical_meta)")}
+            if "tokenizer_backend" not in 컬럼:
+                conn.execute("ALTER TABLE lexical_meta ADD COLUMN tokenizer_backend TEXT")
+
             # content=''(contentless)로 토큰 원문을 저장하지 않는다. 필요한 것은
             # bm25() 점수와 행 위치뿐이고 본문은 parquet에 이미 있다. 저장하면
             # notices 기준 저장하면 34.7MB, 저장하지 않으면 9.3MB다.
@@ -247,8 +270,10 @@ def build_fts_index(
             )
             conn.execute(
                 "INSERT OR REPLACE INTO lexical_meta "
-                "(identifier, document_count, tokenizer, chunk_ids) VALUES (?, ?, ?, ?)",
-                (identifier, len(ids), tokenizer, json.dumps(ids, ensure_ascii=False)),
+                "(identifier, document_count, tokenizer, chunk_ids, tokenizer_backend) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (identifier, len(ids), tokenizer, json.dumps(ids, ensure_ascii=False),
+                 tokenizer_backend(tokenizer)),
             )
             conn.commit()
         finally:
@@ -281,10 +306,19 @@ def load_fts_index(
     except sqlite3.OperationalError:
         return None
     try:
-        row = conn.execute(
-            "SELECT document_count, tokenizer, chunk_ids FROM lexical_meta WHERE identifier = ?",
-            (identifier,),
-        ).fetchone()
+        try:
+            row = conn.execute(
+                "SELECT document_count, tokenizer, chunk_ids, tokenizer_backend "
+                "FROM lexical_meta WHERE identifier = ?",
+                (identifier,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # tokenizer_backend 이전에 만들어진 인덱스. 재색인하면 채워진다.
+            row = conn.execute(
+                "SELECT document_count, tokenizer, chunk_ids, NULL AS tokenizer_backend "
+                "FROM lexical_meta WHERE identifier = ?",
+                (identifier,),
+            ).fetchone()
     except sqlite3.OperationalError:
         return None
     finally:
@@ -303,6 +337,17 @@ def load_fts_index(
             identifier, len(ids), row["document_count"],
         )
         return None
+
+    저장된_구현 = row["tokenizer_backend"]
+    현재_구현 = tokenizer_backend(str(row["tokenizer"]))
+    if 저장된_구현 and 저장된_구현 != 현재_구현:
+        # Kiwi 설치·제거만으로 어휘가 통째로 바뀐다. 색인과 질의가 갈리면
+        # 예외 없이 히트만 사라지므로, 조용히 나빠지지 않도록 크게 남긴다.
+        logger.error(
+            "'%s' FTS5 인덱스는 '%s' 토크나이저로 만들어졌는데 지금은 '%s'를 씁니다. "
+            "어휘가 달라 희소 검색이 제대로 동작하지 않습니다 — 재색인이 필요합니다.",
+            identifier, 저장된_구현, 현재_구현,
+        )
 
     return Fts5LexicalIndex(
         identifier=identifier,
