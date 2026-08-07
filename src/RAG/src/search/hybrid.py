@@ -465,6 +465,31 @@ def train_bm25(
     return vectorizer, matrix
 
 
+# 희소 인덱스가 데이터셋의 이 비율보다 적게 덮으면 낡았거나 잘린 것으로 본다.
+LEXICAL_COVERAGE_FLOOR = float(os.getenv("RAG_LEXICAL_COVERAGE_FLOOR", "0.9"))
+
+
+def _warn_if_lexical_index_is_stale(
+    collection_name: str, index_rows: int, dataset_rows: int
+) -> None:
+    """희소 인덱스가 데이터셋을 거의 못 덮으면 크게 남긴다.
+
+    행 수가 인덱스 메타와만 일치하면(예: 둘 다 1) 기존 검사를 그대로 통과한다.
+    실제로 notices 색인이 11,279건에서 1건으로 잘린 채 검색이 예외 없이 계속
+    돌았고, 희소 검색 기여만 조용히 사라졌다. 그때 아무것도 알려주지 않았다.
+
+    검색을 세우지는 않는다 — 밀집 검색만으로도 답은 나오므로, 조용히 나빠지는
+    것만 막으면 된다.
+    """
+    if dataset_rows <= 0 or index_rows >= dataset_rows * LEXICAL_COVERAGE_FLOOR:
+        return
+    logger.error(
+        "희소 인덱스가 데이터셋의 일부만 덮고 있습니다 — '%s' 인덱스 %d행 / 데이터 %d행 "
+        "(%.1f%%). 재색인이 필요합니다. 검색은 밀집 위주로 계속 진행합니다.",
+        collection_name, index_rows, dataset_rows, 100.0 * index_rows / dataset_rows,
+    )
+
+
 def _load_fts_artifact(identifier: str) -> Optional[dict]:
     """FTS5 백엔드로 희소 인덱스를 읽는다. 없으면 None(호출부가 pkl로 폴백)."""
     index = _fts.load_fts_index(identifier)
@@ -680,6 +705,7 @@ def hybrid_search(
     row_ids: List[str] | None = None
     if tfidf_chunk_ids is not None and len(tfidf_chunk_ids) == matrix_rows:
         row_ids = [str(cid) for cid in tfidf_chunk_ids]
+        _warn_if_lexical_index_is_stale(collection_name, matrix_rows, len(chunks_df))
     elif matrix_rows == len(chunks_df):
         row_ids = chunks_df["chunk_id"].astype(str).tolist()
     else:

@@ -191,3 +191,35 @@ def test_감시_경로는_로딩_경로와_분리되어_있다(양쪽_인덱스,
     monkeypatch.setattr(hybrid, "LEXICAL_BACKEND", "fts5")
     assert lexical_artifact_path("notices").name.endswith(".pkl")
     assert live_lexical_index_path("notices").name.endswith(".db")
+
+
+# --- 잘린 인덱스 감지 ----------------------------------------------------------
+
+
+def test_인덱스가_데이터셋을_거의_못_덮으면_크게_남긴다(caplog):
+    """실제로 겪은 사고다.
+
+    테스트가 운영 FTS 인덱스를 덮어써 notices가 11,279행에서 1행이 됐는데,
+    행 수가 인덱스 메타와 일치해(1 == 1) 기존 검사를 통과했고 검색은 예외 없이
+    계속 돌았다. 희소 검색 기여만 조용히 사라졌다.
+    """
+    import logging
+
+    from src.search.hybrid import _warn_if_lexical_index_is_stale
+
+    with caplog.at_level(logging.ERROR):
+        _warn_if_lexical_index_is_stale("dongguk_notices", 1, 11279)
+    assert "일부만 덮고" in caplog.text
+    assert "11279" in caplog.text
+
+
+def test_정상_범위에서는_조용하다(caplog):
+    import logging
+
+    from src.search.hybrid import _warn_if_lexical_index_is_stale
+
+    with caplog.at_level(logging.ERROR):
+        _warn_if_lexical_index_is_stale("dongguk_notices", 11279, 11279)
+        _warn_if_lexical_index_is_stale("dongguk_notices", 11000, 11279)  # 재색인 시차
+        _warn_if_lexical_index_is_stale("dongguk_notices", 0, 0)
+    assert caplog.text == ""
