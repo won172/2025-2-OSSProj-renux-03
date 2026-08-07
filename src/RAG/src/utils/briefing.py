@@ -47,12 +47,19 @@ def split_meal_corners(menu_text: str, limit: int) -> list[dict[str, str]]:
 def is_closed_row(is_closed_value: object, menu_text: str) -> bool:
     """식당이 오늘 쉬는지 판정한다.
 
-    CSV에서 is_closed는 문자열("True"/"False")로 들어오므로 bool() 변환에 의존할 수 없다
-    ("False"도 참이 된다). 플래그가 비어 있어도 본문이 '휴무'면 쉬는 것으로 본다.
+    플래그는 원천마다 표기가 다르다. CSV는 "True"/"False", 청크 아티팩트는
+    "1"/"0"으로 담는다(ingest가 astype(str)로 저장한다). bool() 변환에 의존할 수
+    없고("False"도 참이 된다), 한쪽 표기만 받으면 다른 원천에서 휴무가 통째로
+    운영으로 뒤집힌다 — 실제로 아티팩트의 "1"을 못 읽어 휴무 57건이 전부 운영으로
+    판정됐다. ingest가 쓰는 집합과 같게 맞춘다.
+
+    플래그가 비어 있어도 본문이 휴무를 뜻하면 쉬는 것으로 본다. 아티팩트 본문은
+    "…는 2026-08-03(월)에 휴무입니다."처럼 문장이라 완전일치로는 걸리지 않는다.
     """
-    if str(is_closed_value).strip().lower() == "true":
+    if str(is_closed_value).strip().lower() in {"true", "1", "1.0"}:
         return True
-    return menu_text.strip() == CLOSED_MENU_TEXT
+    body = menu_text.strip()
+    return body == CLOSED_MENU_TEXT or body.endswith("휴무입니다.")
 
 
 def format_schedule_period(start_date: str | None, end_date: str | None) -> str:
