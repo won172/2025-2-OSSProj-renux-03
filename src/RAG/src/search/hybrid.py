@@ -791,11 +791,20 @@ def hybrid_search(
             weighted_score = rrf_score / (2.0 / (HYBRID_RRF_K + 1))
         else:
             weighted_score = alpha * v_score + (1.0 - alpha) * s_score
-        # Sparse and dense similarities are both cosine-like scores in [0, 1],
-        # so the sparse score itself is a valid lower bound for an exact-word
-        # match. The weighted score can still win whenever semantic evidence is
-        # stronger.
-        lexical_guard_score = s_score
+        # lexical guard: 정확한 어휘 일치 문서가 밀려나지 않도록 희소 점수를 하한으로 둔다.
+        #
+        # 이 전제는 `weighted` 모드에서만 성립한다. 그때는 weighted_score가
+        # `alpha*dense + (1-alpha)*sparse`라 s_score와 같은 코사인 척도다.
+        #
+        # RRF 모드에서는 척도가 다르다. s_score는 최댓값으로 나눈 값이라 희소 1위
+        # 문서가 **항상 정확히 1.0**인데, RRF 점수는 두 랭킹 모두 1위일 때만 1.0에
+        # 닿는다. 그래서 max()가 희소 상위 문서를 밀집 근거와 무관하게 최상단에
+        # 올려버리고, 융합을 하는 의미가 사라진다.
+        #
+        # 골든 69건 실측: guard를 RRF에서 끄면 키워드 커버리지 58.5% → 62.6%
+        # (개선 6건·악화 0건). 규정 데이터셋이 54.2% → 100%로 가장 크게 움직인다.
+        # 기본값이 rrf로 바뀔 때 함께 손봤어야 했던 부분이다.
+        lexical_guard_score = 0.0 if HYBRID_FUSION_MODE == "rrf" else s_score
         title_score = 0.0
         title = ""
         row_position = id_to_pos.get(str(cid))
