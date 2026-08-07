@@ -214,29 +214,42 @@ def refresh_notices_job() -> None:
             "ok",
             f"신규 {summary.get('new', 0)} · 수정 {summary.get('updated', 0)} · 실패 {summary.get('failed', 0)}",
         )
+        _start_faq_draft_worker()
     except Exception as exc:  # noqa: BLE001 — 한 번의 실패가 스케줄러를 죽이지 않도록
         logger.error("[scheduler] 공지 갱신 실패: %s", exc, exc_info=True)
-        # ── 공지사항 수집 완료 시 자동 FAQ 초안 생성 (별도 스레드에서 비동기 실행) ──
-        import asyncio
-        import threading
-
-        async def _async_faq() -> None:
-            from src.services.auto_faq import generate_faq_drafts
-            try:
-                res = await generate_faq_drafts()
-                logger.info(
-                    "[auto_faq] 수집 후 자동 생성 완료 → 신규 %d건 · 건너뜀 %d건",
-                    res["created"], res["skipped_existing"],
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.error("[auto_faq] 자동 FAQ 생성 실패: %s", exc, exc_info=True)
-
-        def _faq_worker():
-            asyncio.run(_async_faq())
-
-        t = threading.Thread(target=_faq_worker, daemon=True, name="auto_faq")
-        t.start()
         _record_run("refresh_notices", "failed", str(exc))
+
+
+def _start_faq_draft_worker() -> None:
+    """공지 갱신이 **성공한 뒤** FAQ 초안 생성을 별도 스레드에서 돌린다.
+
+    이 호출은 원래 except 블록 안에 있어 공지 갱신이 실패했을 때만 돌았다.
+    주석은 "수집 완료 시"였지만 동작은 정반대였다.
+
+    스레드로 빼는 이유는 초안 생성이 질의 로그 전수를 훑기 때문이다. 스케줄러
+    작업을 붙잡아 다음 갱신 주기를 밀면 안 된다. 실패해도 공지 갱신 결과에
+    영향을 주지 않는다.
+    """
+    import asyncio
+    import threading
+
+    def _worker() -> None:
+        async def _run() -> None:
+            from src.services.auto_faq import generate_faq_drafts
+
+            결과 = await generate_faq_drafts()
+            logger.info(
+                "[auto_faq] 초안 %d건 등록 (후보 %d · 기존 %d · 상한 초과 %d)",
+                결과["created"], 결과["candidates"],
+                결과["skipped_existing"], 결과["truncated"],
+            )
+
+        try:
+            asyncio.run(_run())
+        except Exception as exc:  # noqa: BLE001 - 관측 기능이 본 작업을 대신 죽이지 않는다
+            logger.error("[auto_faq] 자동 FAQ 초안 생성 실패: %s", exc, exc_info=True)
+
+    threading.Thread(target=_worker, daemon=True, name="auto_faq").start()
 
 
 def refresh_rules_job() -> None:
