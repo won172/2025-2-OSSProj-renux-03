@@ -24,6 +24,7 @@ import type { DepartmentKnowledge, KnowledgeStatus } from '../../types/admin'
 
 type ContentType = 'knowledge' | 'event' | 'announcement'
 type StatusFilter = 'all' | KnowledgeStatus
+type Visibility = 'department' | 'public'
 
 const SOURCE_TYPE_BY_CONTENT: Record<ContentType, string> = {
   knowledge: 'custom_knowledge',
@@ -67,6 +68,7 @@ const DepartmentAdminPage = () => {
   const [mode, setMode] = useState<'view' | 'create'>('view')
 
   const [contentType, setContentType] = useState<ContentType>('knowledge')
+  const [visibility, setVisibility] = useState<Visibility>('department')
   const [form, setForm] = useState(emptyForm)
   const [formError, setFormError] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(false)
@@ -127,6 +129,7 @@ const DepartmentAdminPage = () => {
 
     if (!seed) {
       setContentType('knowledge')
+      setVisibility('department')
       setForm(emptyForm)
       return
     }
@@ -134,6 +137,7 @@ const DepartmentAdminPage = () => {
     // 반려 항목의 "수정 후 재제출" — 처음부터 다시 쓰지 않도록 원본 payload를 폼에 채운다.
     const raw = seed.raw
     const text = (key: string) => (typeof raw[key] === 'string' ? (raw[key] as string) : '')
+    setVisibility(text('visibility') === 'public' ? 'public' : 'department')
     if (seed.sourceType === 'event') {
       setContentType('event')
       setForm({
@@ -179,6 +183,8 @@ const DepartmentAdminPage = () => {
         question: form.title.trim(),
         answer: form.content.trim(),
         category: department,
+        department,
+        visibility,
         requester: userName,
       }
     }
@@ -194,6 +200,7 @@ const DepartmentAdminPage = () => {
         end_date: form.endDate || form.startDate,
         location: form.location.trim(),
         department,
+        visibility,
         description: form.content.trim(),
         requester: userName,
       }
@@ -209,6 +216,7 @@ const DepartmentAdminPage = () => {
       date: form.startDate,
       category: form.category.trim() || '일반',
       department,
+      visibility,
       requester: userName,
     }
   }
@@ -225,6 +233,7 @@ const DepartmentAdminPage = () => {
       showToast('제출했습니다. 검수 승인 후 챗봇에 반영됩니다.', 'success')
       setMode('view')
       setForm(emptyForm)
+      setVisibility('department')
       notifyDataChanged()
       await loadItems()
     } catch (error) {
@@ -255,7 +264,7 @@ const DepartmentAdminPage = () => {
   const previewPayload = useMemo(() => {
     const department = majorName || '학과정보'
     if (contentType === 'knowledge') {
-      return { question: form.title, answer: form.content, category: department }
+      return { question: form.title, answer: form.content, category: department, visibility }
     }
     if (contentType === 'event') {
       return {
@@ -264,6 +273,7 @@ const DepartmentAdminPage = () => {
         end_date: form.endDate || form.startDate,
         location: form.location,
         department,
+        visibility,
         description: form.content,
       }
     }
@@ -273,8 +283,9 @@ const DepartmentAdminPage = () => {
       date: form.startDate,
       category: form.category || '일반',
       department,
+      visibility,
     }
-  }, [contentType, form, majorName])
+  }, [contentType, form, majorName, visibility])
 
   return (
     <>
@@ -367,6 +378,23 @@ const DepartmentAdminPage = () => {
                     <option value="event">📅 학과 행사 (Event)</option>
                     <option value="announcement">📢 공지사항 (Notice)</option>
                   </select>
+                </div>
+
+                <div className="ac-field">
+                  <label className="ac-label" htmlFor="dept-visibility">공개 범위</label>
+                  <select
+                    id="dept-visibility"
+                    className="ac-select"
+                    value={visibility}
+                    onChange={(event) => setVisibility(event.target.value as Visibility)}
+                    disabled={submitting}
+                  >
+                    <option value="department">{majorName || '소속 학과'} 학생에게만 공개</option>
+                    <option value="public">전체 사용자에게 공개</option>
+                  </select>
+                  <span className="ac-hint">
+                    학과 전용 정보는 게스트와 다른 학과 학생의 홈·채팅 검색에 표시되지 않습니다.
+                  </span>
                 </div>
 
                 <div className="ac-field">

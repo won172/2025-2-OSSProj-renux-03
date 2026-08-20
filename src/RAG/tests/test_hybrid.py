@@ -455,6 +455,7 @@ def test_hybrid_search_with_meta_preserves_campus_date_and_locator_fields():
     assert result.loc[0, "campus_scope"] == "shared"
     assert result.loc[0, "schedule_id"] == "schedule-db-1"
     assert result.loc[0, "department"] == "학사지원팀"
+    assert result.columns.is_unique
 
 
 def test_대괄호로_시작하는_제목을_통째로_되살린다():

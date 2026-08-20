@@ -29,3 +29,23 @@ def test_schedule_refresh_replaces_current_year_and_preserves_history():
 
     assert set(merged["내용"]) == {"2025 일정", "수정 후 일정"}
     assert "수정 전 일정" not in set(merged["내용"])
+
+
+def test_schedule_refresh_drops_legacy_blank_year_snapshot():
+    existing = pd.DataFrame(
+        [
+            {"학년도": "", "내용": "개강", "start": "2026-03-01", "end": "2026-03-01"},
+            {"학년도": "", "내용": "종강", "start": "2026-06-21", "end": "2026-06-21"},
+        ]
+    )
+    incoming = pd.DataFrame(
+        [
+            {"학년도": "2026", "내용": "개강", "start": "2026-03-01", "end": "2026-03-01"},
+            {"학년도": "2026", "내용": "종강", "start": "2026-06-21", "end": "2026-06-21"},
+        ]
+    )
+
+    merged = _merge_schedule_snapshots(existing, incoming)
+
+    assert len(merged) == 2
+    assert set(merged["학년도"]) == {"2026"}

@@ -231,7 +231,7 @@ def absent_terms(
     return [t for t in wanted if t not in present]
 
 
-def build_fts_index(
+def _build_fts_index_unlocked(
     identifier: str,
     corpus: Iterable[str],
     chunk_ids: Iterable[str],
@@ -258,11 +258,9 @@ def build_fts_index(
     target = db_path or fts_db_path()
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    from src.search.hybrid import _kiwi_or_light_korean_tokenize, _light_korean_tokenize
+    from src.search.hybrid import corpus_tokenize
 
-    tokenize = (
-        _kiwi_or_light_korean_tokenize if tokenizer == "korean" else _light_korean_tokenize
-    )
+    tokenize = corpus_tokenize
 
     # 기존 파일을 임시 사본으로 복사해 다른 데이터셋 테이블을 보존한다.
     fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
@@ -340,6 +338,27 @@ def build_fts_index(
         tokenizer_name=tokenizer,
         db_path=target,
     )
+
+
+def build_fts_index(
+    identifier: str,
+    corpus: Iterable[str],
+    chunk_ids: Iterable[str],
+    *,
+    db_path: Optional[Path] = None,
+    tokenizer_name: Optional[str] = None,
+) -> Fts5LexicalIndex:
+    """Serialize writes to the shared FTS DB, including standalone rebuilds."""
+    from src.services.ingest_runtime import serialized_ingest_write
+
+    with serialized_ingest_write(dataset=identifier, operation="build_fts_index"):
+        return _build_fts_index_unlocked(
+            identifier,
+            corpus,
+            chunk_ids,
+            db_path=db_path,
+            tokenizer_name=tokenizer_name,
+        )
 
 
 def load_fts_index(

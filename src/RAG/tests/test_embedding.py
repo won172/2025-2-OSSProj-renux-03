@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -30,3 +31,36 @@ def test_query_embedding_is_reused_across_routerless_dataset_searches(monkeypatc
     assert fake.calls == 1
     assert np.array_equal(first, second)
     assert first is not second
+
+
+@pytest.mark.parametrize(
+    ("vectors", "message"),
+    [
+        (np.asarray([[1.0, 2.0]]), "row count mismatch"),
+        (np.empty((2, 0), dtype=np.float32), "dimension must be positive"),
+        (np.asarray([[1.0, np.nan], [2.0, 3.0]]), "non-finite"),
+    ],
+)
+def test_passage_embedding_validation_rejects_invalid_model_output(monkeypatch, vectors, message):
+    class FakeEmbedder:
+        def encode(self, _texts, **_kwargs):
+            return vectors
+
+    monkeypatch.setattr(embedding, "get_embedder", lambda: FakeEmbedder())
+
+    with pytest.raises(ValueError, match=message):
+        embedding.encode_texts(["첫 문서", "둘째 문서"])
+
+
+def test_passage_embedding_validation_preserves_valid_matrix(monkeypatch):
+    expected = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+
+    class FakeEmbedder:
+        def encode(self, _texts, **_kwargs):
+            return expected
+
+    monkeypatch.setattr(embedding, "get_embedder", lambda: FakeEmbedder())
+
+    actual = embedding.encode_texts(["첫 문서", "둘째 문서"])
+
+    assert np.array_equal(actual, expected)

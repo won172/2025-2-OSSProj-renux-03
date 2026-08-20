@@ -257,6 +257,54 @@ def _kiwi_or_light_korean_tokenize(text: str) -> list[str]:
     return tokens or _light_korean_tokenize(text)
 
 
+def corpus_tokenize(text: str) -> list[str]:
+    """색인에 실제로 쓰인 토크나이저로 자른다.
+
+    색인·질의·어휘 조회가 각자 다른 토크나이저를 쓰면 히트가 조용히 사라진다.
+    실제로 Kiwi를 켠 뒤 `missing_from_corpus`가 "졸업 **요건이**"를 코퍼스에
+    없는 낱말로 보고했다 — 색인에는 Kiwi가 만든 `요건`이 있는데 조사가 붙은
+    경량 토큰으로 조회했기 때문이다. 그 상태로 신뢰도 판정을 세우면 정상
+    질문을 자료 없음으로 오인한다. 세 경로가 같은 함수를 쓰게 해서 막는다.
+    """
+    if _resolve_tfidf_tokenizer_name() == "korean":
+        return _kiwi_or_light_korean_tokenize(text)
+    return _light_korean_tokenize(text)
+
+
+def content_tokens(text: str) -> list[str]:
+    """어휘 부재 판정에 쓸 **내용어**만 남긴다(출현 순서 보존).
+
+    질문어(`알려줘`, `보여줘`)와 활용형 어미는 코퍼스에 없는 것이 정상이라,
+    그대로 두면 모든 질문이 "코퍼스에 없는 말이 있다"로 잡혀 신호가 잡음에 묻힌다.
+    Kiwi가 있으면 명사만 취해 이 문제를 구조적으로 없앤다(품사 정보가 있으므로
+    불용어 목록을 계속 늘릴 필요가 없다). 없으면 종전 휴리스틱으로 폴백한다.
+    """
+    kiwi = _load_kiwi()
+    if kiwi is not None:
+        try:
+            nouns: list[str] = []
+            for token in kiwi.tokenize(str(text)):
+                form = str(getattr(token, "form", "")).strip().lower()
+                tag = str(getattr(token, "tag", ""))
+                if tag.startswith(("NNG", "NNP", "SL", "SN")) and len(form) >= 2:
+                    if form not in nouns and form not in _QUERY_TITLE_STOPWORDS:
+                        nouns.append(form)
+            if nouns:
+                return nouns
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Kiwi 내용어 추출 실패, 경량 폴백: %s", exc)
+
+    tokens = _light_korean_tokenize(text)
+    return [
+        token
+        for token in tokens
+        if len(token) >= 2
+        and token not in _QUERY_TITLE_STOPWORDS
+        # 더 긴 토큰의 조각(n-gram)은 뺀다 — 그 자체로는 의미 단위가 아니다.
+        and not any(token != other and token in other for other in tokens)
+    ]
+
+
 def _resolve_tfidf_tokenizer_name() -> str:
     name = (TFIDF_TOKENIZER or "korean").strip().lower()
     if name in {"default", "sklearn", "word"}:
@@ -894,9 +942,18 @@ def hybrid_search_with_meta(
         tfidf_chunk_ids,
         academic_period_query,
     )
-    out = hits.copy()
+    # Metadata schemas can contain the same logical field more than once after
+    # an artifact migration (for example, ``department`` was added to the
+    # common fields while it already existed in the schedule/staff fields).
+    # Keep the first occurrence so downstream DataFrame alignment remains
+    # well-defined.  A duplicate-column frame makes even ignore_index concat
+    # fail with "Reindexing only valid with uniquely valued Index objects".
+    out = hits.loc[:, ~hits.columns.duplicated(keep="first")].copy()
     out["title"] = out["chunk_text"].apply(_extract_title)
-    for column in ("topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id"):
+    for column in (
+        "topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id",
+        "department", "visibility",
+    ):
         if column not in out.columns:
             out[column] = ""
         else:
@@ -907,13 +964,14 @@ def hybrid_search_with_meta(
     desired = [
         "chunk_id", "title", "chunk_text", "hybrid_score", "vector_score", "sparse_score",
         "topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id",
+        "department", "visibility",
         "major", "college_name", "entry_year", "source_type", "attachments",
         "course_code", "credit", "grade", "semester", "course_type",
         "curriculum_year", "source_page", "source_priority", "course_code_conflict",
         "availability_status", "data_quality_score", "collection_status",
         "doc_id", "position",  # parent-document 확장(이웃 청크 결합)에 사용
         "is_closed", "restaurant", "meal_date",  # 학식: 휴무 패널티·식당/날짜 표시에 사용
-        "schedule_start", "schedule_end", "department", "campus_scope",
+        "schedule_start", "schedule_end", "campus_scope",
         "filename", "relative_dir", "source_file", "document_key", "source_id",
         "board_code", "article_id", "schedule_id", "staff_id", "course_id", "rule_id",
         "canonical_key", "is_latest",
@@ -921,7 +979,7 @@ def hybrid_search_with_meta(
         "staff_position", "staff_role", "staff_phone",  # 연락처 질의 순위 판단에 사용
         "has_substantive_body",  # 제목만 있는 공지를 근거 자리에서 뒤로 미는 데 사용
     ]
-    existing = [col for col in desired if col in out.columns]
+    existing = list(dict.fromkeys(col for col in desired if col in out.columns))
     return out[existing]
 
 

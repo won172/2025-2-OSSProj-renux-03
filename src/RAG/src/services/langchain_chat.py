@@ -18,7 +18,6 @@ from src.services.source_contract import source_reference
 
 import httpx
 import redis
-from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from langchain_core.chat_history import BaseChatMessageHistory
@@ -44,8 +43,6 @@ from src.config import (
     REDIS_HISTORY_TTL_SECONDS,
     REDIS_URL,
 )
-
-load_dotenv()
 
 # Redis 클라이언트를 미리 초기화하여 RedisChatMessageHistory에 전달합니다.
 _REDIS_CLIENT = redis.from_url(REDIS_URL)
@@ -473,7 +470,7 @@ def validate_followup_questions(
     count: int,
 ) -> list[str]:
     """Deterministically remove unsafe or unsupported LLM suggestions."""
-    if not source_context or count <= 0:
+    if not source_context or count <= 0 or campus_scope == "wise":
         return []
 
     support_text = f"{answer}\n{_followup_source_text(source_context)}"

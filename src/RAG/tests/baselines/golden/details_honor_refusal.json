@@ -1,0 +1,6780 @@
+[
+  {
+    "id": "AC-001",
+    "domain": "academic-calendar",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['2학기']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-002",
+    "domain": "academic-calendar",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['수강정정', '기간']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-003",
+    "domain": "academic-calendar",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['중간고사', '기간']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-004",
+    "domain": "academic-calendar",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-005",
+    "domain": "academic-calendar",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-006",
+    "domain": "academic-calendar",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'schedule']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['보강', '수업']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices', 'schedule']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "AC-007",
+    "domain": "academic-calendar",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['unknown']"
+        ]
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "AC-008",
+    "domain": "academic-calendar",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['날짜']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-009",
+    "domain": "academic-calendar",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['학과']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-010",
+    "domain": "academic-calendar",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-011",
+    "domain": "academic-calendar",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-012",
+    "domain": "academic-calendar",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['확인할 수 없', '담당 교수']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "AC-013",
+    "domain": "academic-calendar",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-014",
+    "domain": "academic-calendar",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "RG-001",
+    "domain": "registration",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['2026.07.20', '07.22']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "claim axis '장바구니' has no nearby citation",
+          "claim axis '재학' has no nearby citation",
+          "claim axis '휴학생' has no nearby citation",
+          "claim axis '변동' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "RG-002",
+    "domain": "registration",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "RG-003",
+    "domain": "registration",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:d4a3a4f68b79570921dd3555fd27dc4cd9c62e88440ab69ee7236da33bf902ef: source is not an official URL or a traceable trusted local dataset"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "RG-004",
+    "domain": "registration",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "answer citation markers do not link to transported sources",
+          "claim axis '전공필수' has no nearby citation",
+          "claim axis '학점' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "RG-005",
+    "domain": "registration",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices', 'rules']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "RG-006",
+    "domain": "registration",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "RG-007",
+    "domain": "registration",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "RG-008",
+    "domain": "registration",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "RG-009",
+    "domain": "registration",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['courses', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['타학과', '수강']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['courses', 'rules']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "RG-010",
+    "domain": "registration",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:136f41268f4103621e1226108c0e9756fd0f024bc1c8aec4ffbecdcfe20f8306: source is not an official URL or a traceable trusted local dataset"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "RG-011",
+    "domain": "registration",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:d4a3a4f68b79570921dd3555fd27dc4cd9c62e88440ab69ee7236da33bf902ef: source is not an official URL or a traceable trusted local dataset",
+          "cross-domain datasets missing: ['rules']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "RG-012",
+    "domain": "registration",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['unknown']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['대리', '본인']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "RG-013",
+    "domain": "registration",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:d4a3a4f68b79570921dd3555fd27dc4cd9c62e88440ab69ee7236da33bf902ef: source is not an official URL or a traceable trusted local dataset",
+          "required campus evidence missing: ['seoul', 'wise']",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "RG-014",
+    "domain": "registration",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['야간', '월요일']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['courses']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "GR-001",
+    "domain": "graduation",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.5,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "GR-002",
+    "domain": "graduation",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:c6cb1624e6f4a0ab0813171e079be30157b57e5b43bee04cfc6b9caa68f12d32: source is not an official URL or a traceable trusted local dataset"
+        ]
+      },
+      "followup": {
+        "passed": false,
+        "reasons": [
+          "meaningless or non-question follow-up"
+        ]
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "GR-003",
+    "domain": "graduation",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "GR-004",
+    "domain": "graduation",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "GR-005",
+    "domain": "graduation",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['교양필수', '학점']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices', 'rules']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "GR-006",
+    "domain": "graduation",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "GR-007",
+    "domain": "graduation",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "GR-008",
+    "domain": "graduation",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'schedule']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['졸업예정', '신청']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices', 'schedule']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "GR-009",
+    "domain": "graduation",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "GR-010",
+    "domain": "graduation",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['어학']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:c6cb1624e6f4a0ab0813171e079be30157b57e5b43bee04cfc6b9caa68f12d32: source is not an official URL or a traceable trusted local dataset"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "GR-011",
+    "domain": "graduation",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "cross-domain datasets missing: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "GR-012",
+    "domain": "graduation",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['확정할 수 없', '학사운영실']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "GR-013",
+    "domain": "graduation",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:d4a3a4f68b79570921dd3555fd27dc4cd9c62e88440ab69ee7236da33bf902ef: source is not an official URL or a traceable trusted local dataset",
+          "no expected dataset present: ['rules']",
+          "required campus evidence missing: ['seoul', 'wise']",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "GR-014",
+    "domain": "graduation",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.25,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "SC-001",
+    "domain": "scholarship",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "SC-002",
+    "domain": "scholarship",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "SC-003",
+    "domain": "scholarship",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "SC-004",
+    "domain": "scholarship",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['휴학', '등록금']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices', 'rules']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "SC-005",
+    "domain": "scholarship",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "answer citation markers do not link to transported sources",
+          "claim axis '근로장학생' has no nearby citation",
+          "claim axis '공고' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "SC-006",
+    "domain": "scholarship",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "SC-007",
+    "domain": "scholarship",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "SC-008",
+    "domain": "scholarship",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['접수']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "SC-009",
+    "domain": "scholarship",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "SC-010",
+    "domain": "scholarship",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:4a63c70818b336615c1a913d09ca895fa2cf6ac788e59f65c96a79ed7dce3982: source is not an official URL or a traceable trusted local dataset"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "SC-011",
+    "domain": "scholarship",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['장학금']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "cross-domain datasets missing: ['notices', 'rules']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "SC-012",
+    "domain": "scholarship",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['unknown']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['발표 전', '확인할 수 없']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "SC-013",
+    "domain": "scholarship",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['캠퍼스', '장학']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices', 'rules']",
+          "required campus evidence missing: ['seoul', 'wise']",
+          "required published/effective date is missing",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "SC-014",
+    "domain": "scholarship",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['마감']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "AS-001",
+    "domain": "academic-status",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-002",
+    "domain": "academic-status",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:ce254b7ac17581688601c3c7a7d30840ef788739f701f57e487101d09f5ee4bd: source is not an official URL or a traceable trusted local dataset"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-003",
+    "domain": "academic-status",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "claim axis '전과' has no nearby citation",
+          "claim axis '신청' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-004",
+    "domain": "academic-status",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-005",
+    "domain": "academic-status",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "answer citation markers do not link to transported sources",
+          "claim axis '재학증명서' has no nearby citation",
+          "claim axis '발급' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-006",
+    "domain": "academic-status",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-007",
+    "domain": "academic-status",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "AS-008",
+    "domain": "academic-status",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['복학', '마감']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-009",
+    "domain": "academic-status",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-010",
+    "domain": "academic-status",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": false,
+        "reasons": [
+          "meaningless or non-question follow-up"
+        ]
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-011",
+    "domain": "academic-status",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.6666666666666666,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-012",
+    "domain": "academic-status",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['개인정보', '제공할 수 없']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "AS-013",
+    "domain": "academic-status",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['복학']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:d4a3a4f68b79570921dd3555fd27dc4cd9c62e88440ab69ee7236da33bf902ef: source is not an official URL or a traceable trusted local dataset",
+          "required campus evidence missing: ['seoul', 'wise']",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-014",
+    "domain": "academic-status",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['학적']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CL-001",
+    "domain": "campus-life",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:d6bda8e75b953cdaff4ebdf77534d5b0cf4f58f46cdad0c4396e2ebeab46a7bb: source is not an official URL or a traceable trusted local dataset"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CL-002",
+    "domain": "campus-life",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CL-003",
+    "domain": "campus-life",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['분실물', '신고']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CL-004",
+    "domain": "campus-life",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'staff']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['시설', '민원']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices', 'staff']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CL-005",
+    "domain": "campus-life",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['열람실', '위치']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CL-006",
+    "domain": "campus-life",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "claim axis '와이파이' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CL-007",
+    "domain": "campus-life",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "CL-008",
+    "domain": "campus-life",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['공부', '운영시간']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CL-009",
+    "domain": "campus-life",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['프린터', '결제']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CL-010",
+    "domain": "campus-life",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['셔틀', '막차']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CL-011",
+    "domain": "campus-life",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['휴관', '학습공간']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "cross-domain datasets missing: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CL-012",
+    "domain": "campus-life",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['unknown']"
+        ]
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "CL-013",
+    "domain": "campus-life",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['캠퍼스', '도서관']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "required campus evidence missing: ['seoul', 'wise']",
+          "required published/effective date is missing",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CL-014",
+    "domain": "campus-life",
+    "case_types": [
+      "ambiguous",
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "DN-001",
+    "domain": "dining",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['상록원', '점심']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['meals', 'notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "DN-002",
+    "domain": "dining",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "DN-003",
+    "domain": "dining",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['카페', '주말']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "required campus evidence missing: ['bmc']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "DN-004",
+    "domain": "dining",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['채식', '메뉴']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['meals']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "DN-005",
+    "domain": "dining",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['편의점', '운영시간']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "DN-006",
+    "domain": "dining",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['식권', '결제']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "DN-007",
+    "domain": "dining",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "DN-008",
+    "domain": "dining",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['아침', '운영시간']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['meals', 'notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "DN-009",
+    "domain": "dining",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "DN-010",
+    "domain": "dining",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "DN-011",
+    "domain": "dining",
+    "case_types": [
+      "ambiguous",
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "DN-012",
+    "domain": "dining",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['unknown']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['공개되지', '확정할 수 없']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "DN-013",
+    "domain": "dining",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['캠퍼스', '메뉴']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['meals']",
+          "required campus evidence missing: ['seoul', 'wise']",
+          "required published/effective date is missing",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "DN-014",
+    "domain": "dining",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['가격']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "HS-001",
+    "domain": "housing",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "HS-002",
+    "domain": "housing",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['기숙사', '비용']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices', 'rules']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "HS-003",
+    "domain": "housing",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['퇴사', '짐']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "HS-004",
+    "domain": "housing",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['외박', '통금']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices', 'rules']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "HS-005",
+    "domain": "housing",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "HS-006",
+    "domain": "housing",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "HS-007",
+    "domain": "housing",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "HS-008",
+    "domain": "housing",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "answer citation markers do not link to transported sources",
+          "claim axis '추가모집' has no nearby citation",
+          "claim axis '기숙사' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": false,
+        "reasons": [
+          "follow-up policy grounded_next_steps requires a question"
+        ]
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "HS-009",
+    "domain": "housing",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required campus evidence missing: ['bmc']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "HS-010",
+    "domain": "housing",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['기숙사', '서류']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "HS-011",
+    "domain": "housing",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "cross-domain datasets missing: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "HS-012",
+    "domain": "housing",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['unknown']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['개인정보', '제공할 수 없']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "HS-013",
+    "domain": "housing",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['캠퍼스', '생활관']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['rules']",
+          "required campus evidence missing: ['seoul', 'wise']",
+          "required published/effective date is missing",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "HS-014",
+    "domain": "housing",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['마감', '생활관']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": false,
+        "reasons": [
+          "follow-up policy grounded_next_steps requires a question"
+        ]
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-001",
+    "domain": "career",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['추천채용', '마감']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CR-002",
+    "domain": "career",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['인턴십', '학점']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices', 'rules']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CR-003",
+    "domain": "career",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "claim axis '현장실습' has no nearby citation",
+          "claim axis '신청' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-004",
+    "domain": "career",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-005",
+    "domain": "career",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-006",
+    "domain": "career",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-007",
+    "domain": "career",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "CR-008",
+    "domain": "career",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['접수']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-009",
+    "domain": "career",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-010",
+    "domain": "career",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CR-011",
+    "domain": "career",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-012",
+    "domain": "career",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['unknown']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['발표 전', '확인할 수 없']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "CR-013",
+    "domain": "career",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['캠퍼스']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required campus evidence missing: ['seoul', 'wise']",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-014",
+    "domain": "career",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['취업지원', '일정']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "IN-001",
+    "domain": "international",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:e1abe76fe77b9744410d88f89ae8961e56079e9fd32e27fce9e24da6e5b275a4: source is not an official URL or a traceable trusted local dataset",
+          "wrong-campus sources present: ['unknown']",
+          "no required campus evidence present: ['bmc', 'seoul']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": true,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "IN-002",
+    "domain": "international",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "IN-003",
+    "domain": "international",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "answer citation markers do not link to transported sources",
+          "claim axis '어학연수' has no nearby citation",
+          "claim axis '자매대학' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "IN-004",
+    "domain": "international",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "IN-005",
+    "domain": "international",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['교환학생', '학점']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices', 'rules']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "IN-006",
+    "domain": "international",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "IN-007",
+    "domain": "international",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "IN-008",
+    "domain": "international",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['해외파견', '마감']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "IN-009",
+    "domain": "international",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['경영대']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "IN-010",
+    "domain": "international",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['교환학생', '면접']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "IN-011",
+    "domain": "international",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "cross-domain datasets missing: ['rules']"
+        ]
+      },
+      "followup": {
+        "passed": false,
+        "reasons": [
+          "meaningless or non-question follow-up"
+        ]
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.5,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "IN-012",
+    "domain": "international",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['직접 확인', '조회할 수 없']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "IN-013",
+    "domain": "international",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required campus evidence missing: ['seoul']",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "IN-014",
+    "domain": "international",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['국가']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-001",
+    "domain": "people-services",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['연락처']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:08a8b5c493aab7b56083c5d2c0dca3e98bf97b62840a92949c86fc7ecb28ca7e: source is not an official URL or a traceable trusted local dataset",
+          "answer citation markers do not link to transported sources",
+          "claim axis '수강신청' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-002",
+    "domain": "people-services",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['컴퓨터공학']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-003",
+    "domain": "people-services",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['학생서비스팀']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-004",
+    "domain": "people-services",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-005",
+    "domain": "people-services",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required campus evidence missing: ['bmc']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-006",
+    "domain": "people-services",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-007",
+    "domain": "people-services",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "PS-008",
+    "domain": "people-services",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required published/effective date is missing"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-009",
+    "domain": "people-services",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-010",
+    "domain": "people-services",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "source sha256:08a8b5c493aab7b56083c5d2c0dca3e98bf97b62840a92949c86fc7ecb28ca7e: source is not an official URL or a traceable trusted local dataset"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-011",
+    "domain": "people-services",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'staff']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['환불']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "cross-domain datasets missing: ['notices', 'staff']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty",
+          "claim axis '부서' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "PS-012",
+    "domain": "people-services",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['unknown']"
+        ]
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "PS-013",
+    "domain": "people-services",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required campus evidence missing: ['seoul']",
+          "required published/effective date is missing",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "PS-014",
+    "domain": "people-services",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['문의처']",
+          "answer has no complete explanatory sentence"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required published/effective date is missing"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CM-001",
+    "domain": "student-community",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['동아리', '모집']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CM-002",
+    "domain": "student-community",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['총학생회비', '내역']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CM-003",
+    "domain": "student-community",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CM-004",
+    "domain": "student-community",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CM-005",
+    "domain": "student-community",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CM-006",
+    "domain": "student-community",
+    "case_types": [
+      "basic"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required published/effective date is missing"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CM-007",
+    "domain": "student-community",
+    "case_types": [
+      "ambiguous"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "CM-008",
+    "domain": "student-community",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CM-009",
+    "domain": "student-community",
+    "case_types": [
+      "department_or_facility"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CM-010",
+    "domain": "student-community",
+    "case_types": [
+      "typo"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['동아리', '마감']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "required published/effective date is missing",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CM-011",
+    "domain": "student-community",
+    "case_types": [
+      "cross_domain"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['축제', '비교과']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "cross-domain datasets missing: ['notices', 'rules']",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CM-012",
+    "domain": "student-community",
+    "case_types": [
+      "not_answerable"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['unknown']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['공개되지', '확인할 수 없']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no required campus evidence present: ['bmc', 'seoul']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "CM-013",
+    "domain": "student-community",
+    "case_types": [
+      "wise_boundary"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['캠퍼스', '학생회']",
+          "answerable case used fallback",
+          "answerable case returned an implicit fallback answer"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "required official source is missing",
+          "no expected dataset present: ['notices']",
+          "required campus evidence missing: ['seoul', 'wise']",
+          "required published/effective date is missing",
+          "dated comparison evidence missing campuses: ['seoul', 'wise']",
+          "answer citation markers do not link to transported sources",
+          "transport citations_text is empty"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CM-014",
+    "domain": "student-community",
+    "case_types": [
+      "date"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-015",
+    "domain": "academic-calendar",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['2024']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "RG-015",
+    "domain": "registration",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['2024']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "GR-015",
+    "domain": "graduation",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['2024', '학위수여식']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "SC-015",
+    "domain": "scholarship",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AS-015",
+    "domain": "academic-status",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices', 'rules']"
+        ]
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "required answer axes missing: ['2024', '휴학']"
+        ]
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "no expected dataset present: ['notices']"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    }
+  },
+  {
+    "id": "CL-015",
+    "domain": "campus-life",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "HS-015",
+    "domain": "housing",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CR-015",
+    "domain": "career",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": false,
+        "reasons": [
+          "claim axis '2024' has no nearby citation",
+          "claim axis '현장실습' has no nearby citation"
+        ]
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "IN-015",
+    "domain": "international",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": false,
+        "reasons": [
+          "follow-up policy grounded_next_steps requires a question"
+        ]
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "CM-015",
+    "domain": "student-community",
+    "case_types": [
+      "historical_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false,
+    "rag_metrics": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  {
+    "id": "AC-016",
+    "domain": "academic-calendar",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "RG-016",
+    "domain": "registration",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "GR-016",
+    "domain": "graduation",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "SC-016",
+    "domain": "scholarship",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['확인되지 않습니다', '찾지 못했습니다']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": false,
+        "reasons": [
+          "meaningless or non-question follow-up",
+          "official-contact follow-up does not direct the user to an official path"
+        ]
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "AS-016",
+    "domain": "academic-status",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "CL-016",
+    "domain": "campus-life",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": false,
+        "reasons": [
+          "no expected app intent resolved: ['notices']"
+        ]
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "DN-016",
+    "domain": "dining",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": false,
+        "reasons": [
+          "row-specific refusal markers absent: ['확인되지 않습니다', '찾지 못했습니다']"
+        ]
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": false,
+        "reasons": [
+          "follow-up policy official_contact requires a question"
+        ]
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "HS-016",
+    "domain": "housing",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "CR-016",
+    "domain": "career",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": false,
+        "reasons": [
+          "official-contact follow-up does not direct the user to an official path"
+        ]
+      }
+    },
+    "all_axes_passed": false,
+    "wrong_campus": false
+  },
+  {
+    "id": "IN-016",
+    "domain": "international",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "PS-016",
+    "domain": "people-services",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  },
+  {
+    "id": "CM-016",
+    "domain": "student-community",
+    "case_types": [
+      "nonexistent_info"
+    ],
+    "axes": {
+      "intent": {
+        "passed": true,
+        "reasons": []
+      },
+      "answer": {
+        "passed": true,
+        "reasons": []
+      },
+      "source": {
+        "passed": true,
+        "reasons": []
+      },
+      "followup": {
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "all_axes_passed": true,
+    "wrong_campus": false
+  }
+]

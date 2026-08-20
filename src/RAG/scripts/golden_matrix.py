@@ -40,8 +40,15 @@ CASE_TYPES = {
     "cross_domain",
     "not_answerable",
     "wise_boundary",
+    # 아래 둘은 모든 도메인에 요구하지 않는다(REQUIRED_CASE_TYPES 참고).
+    "historical_info",
+    "nonexistent_info",
 }
-REQUIRED_CASE_TYPES = CASE_TYPES
+# 도메인마다 반드시 있어야 하는 유형. 새 두 유형은 코퍼스가 뒷받침할 때만
+# 넣는다 — 예를 들어 meals 코퍼스는 2주치뿐이라 dining의 과거 정보 문항은
+# 정답을 만들 수 없고, staff 명부에는 시점이 없다. 없는 정답을 지어내 채우면
+# 문항 수만 늘고 지표는 거짓이 된다.
+REQUIRED_CASE_TYPES = CASE_TYPES - {"historical_info", "nonexistent_info"}
 REQUIRED_COLUMNS = (
     "id",
     "question",
@@ -67,7 +74,9 @@ REQUIRED_COLUMNS = (
     "refusal_markers",
     "clarification_fields",
 )
-ALLOWED_CAMPUSES = {"seoul", "bmc", "wise"}
+# WISE is retained in source metadata for quarantine checks, but it is not an
+# answerable product campus and therefore cannot be an expected/allowed source.
+ALLOWED_CAMPUSES = {"seoul", "bmc"}
 ANSWERABILITY = {"answerable", "needs_clarification", "not_answerable"}
 FOLLOWUP_POLICIES = {"grounded_next_steps", "clarify", "official_contact", "none"}
 SOURCE_REQUIREMENTS = {"trusted_official", "official_contact", "no_source_required"}
@@ -76,6 +85,8 @@ CITATION_REQUIREMENTS = {"claim_source_links", "official_contact_source", "none"
 PRIVACY_REQUIREMENTS = {"none", "no_sensitive_disclosure"}
 MIN_QUESTIONS = 160
 MIN_PER_DOMAIN = 10
+# historical_info 문항이 실제로 과거를 지목하는지 확인할 때 쓴다.
+_EXPLICIT_YEAR_RE = re.compile(r"20\d{2}")
 
 
 @dataclass(frozen=True)
@@ -274,12 +285,49 @@ def validate_matrix(
             if row.privacy_requirement == "no_sensitive_disclosure" and not row.forbidden_pii_types:
                 errors.append(f"{label}: privacy refusal requires forbidden_pii_types")
         if "wise_boundary" in row.case_types:
-            if "wise" not in row.required_campuses or len(row.required_campuses) < 2:
-                errors.append(f"{label}: WISE comparison must require WISE and another campus")
-            if row.campus_requirement_mode != "all" or row.date_requirement != "campus_comparison_dates":
-                errors.append(f"{label}: WISE comparison requires all-campus dated evidence")
+            if row.answerability != "not_answerable":
+                errors.append(f"{label}: WISE boundary case must be out_of_scope/not_answerable")
+            if row.expected_app_intents != ("unknown",):
+                errors.append(f"{label}: WISE boundary case must resolve to unknown")
+            if row.expected_datasets or row.expected_source_types:
+                errors.append(f"{label}: WISE boundary case must not require retrieval sources")
+            if row.source_requirement != "no_source_required" or row.followup_policy != "none":
+                errors.append(f"{label}: WISE boundary case must not require sources or follow-ups")
+            if row.refusal_reason != "campus_out_of_scope" or not row.refusal_markers:
+                errors.append(f"{label}: WISE boundary case needs the campus_out_of_scope refusal contract")
+            if "wise" in row.allowed_campuses or "wise" in row.required_campuses:
+                errors.append(f"{label}: WISE must not be an allowed or required answer campus")
         if "cross_domain" in row.case_types and len(row.required_keywords) < 2:
             errors.append(f"{label}: cross-domain case must declare every answer axis")
+        if "historical_info" in row.case_types:
+            # 과거를 묻는다는 사실이 질문 안에 드러나야 한다. 연도가 없으면
+            # `extract_explicit_years`가 최신성 가중을 끄지 않아 이 문항은
+            # 검증하려던 경로를 아예 밟지 않는다.
+            if not _EXPLICIT_YEAR_RE.search(row.question):
+                errors.append(f"{label}: historical case must name an explicit year in the question")
+            if row.answerability != "answerable":
+                errors.append(f"{label}: historical case must be answerable from archived evidence")
+            if not any(_EXPLICIT_YEAR_RE.search(keyword) for keyword in row.required_keywords):
+                errors.append(f"{label}: historical case must require the year as an answer keyword")
+            if not any("현재" in claim or "지금" in claim for claim in row.forbidden_claims):
+                errors.append(f"{label}: historical case must forbid presenting the past as current")
+        if "nonexistent_info" in row.case_types:
+            # 자료 부재는 권한·개인정보 거절과 다르다. 같은 not_answerable이지만
+            # 처방이 정반대다 — 앞은 사람이 자료를 채워야 하고, 뒤는 채우면 안 된다.
+            if row.answerability != "not_answerable":
+                errors.append(f"{label}: absent-data case must be not_answerable")
+            if row.refusal_reason != "data_absent_in_corpus" or not row.refusal_markers:
+                errors.append(f"{label}: absent-data case needs the data_absent_in_corpus contract")
+            if row.required_keywords:
+                errors.append(
+                    f"{label}: absent-data case must not declare answer keywords "
+                    "(there is nothing to answer, so a keyword contract would pass a fabricated answer)"
+                )
+            if not row.expected_datasets:
+                errors.append(
+                    f"{label}: absent-data case must declare where it was searched, "
+                    "so retrieval runs and finding nothing is what gets verified"
+                )
         if row.answerability == "answerable":
             if not row.expected_datasets or not row.expected_source_types:
                 errors.append(f"{label}: answerable case needs datasets and source types")

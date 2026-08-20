@@ -566,7 +566,23 @@ def test_selector_failure_uses_safe_single_group_fallback(monkeypatch):
     assert all(f"문서 {index}" in fallback_context for index in range(1, 7))
 
 
-def test_empty_selector_decision_uses_safe_single_group_fallback(monkeypatch):
+def test_partially_matching_evidence_is_refused_when_the_selector_says_nothing_fits(
+    monkeypatch,
+):
+    """셀렉터 거절을 존중하면 부분 일치 근거는 살아남지 못한다 — 이게 그 대가다.
+
+    예전에는 어휘가 하나만 겹쳐도 되살렸다. 골든 190문항 검증에서 그 관대함의
+    대가가 드러나 정책을 바꿨다(doc/rag-v2-analysis.md 13.4): 자료 없는 질문의
+    올바른 거절이 2/12 → 10/12로 오른 대신 답할 수 있던 질문 약 13건이 답을 잃는다.
+
+    이 케이스가 그 손실의 전형이다. "재수강 조건"은 내용어가 두 개뿐이라
+    문서 제목이 "재수강 신청 안내"면 커버리지가 0.5로 문턱(0.6)에 걸린다.
+    짧은 한국어 질문은 대개 내용어가 둘이라 이 형태가 흔하고, 실제 트래픽에서도
+    "재수강 기준이 어떻게 돼?"가 15회 들어왔다.
+
+    되돌리려면 RAG_HONOR_SELECTOR_REFUSAL=0 또는 커버리지를 낮춘다. 다만 0.4로
+    낮추면 목표 지표가 10/12 → 6/12로 함께 내려간다(실측).
+    """
     shortlist = rag_service._build_balanced_shortlist([_frame("rules", count=3)])
     shortlist.loc[shortlist["candidate_id"] == "c1", "title"] = "재수강 신청 안내"
 
@@ -574,6 +590,23 @@ def test_empty_selector_decision_uses_safe_single_group_fallback(monkeypatch):
         return EvidenceSelectionDecision(groups=[])
 
     monkeypatch.setattr(rag_service, "select_evidence_groups", empty_selector)
+    selected, did_fallback = asyncio.run(
+        rag_service._select_evidence_for_answer("재수강 조건이 어떻게 돼?", shortlist, [])
+    )
+
+    assert did_fallback is True
+    assert selected.empty
+
+
+def test_selector_exception_still_keeps_partially_matching_evidence(monkeypatch):
+    """예외는 판정이 아니다. 셀렉터가 죽었을 때는 종전대로 관대하게 되살린다."""
+    shortlist = rag_service._build_balanced_shortlist([_frame("rules", count=3)])
+    shortlist.loc[shortlist["candidate_id"] == "c1", "title"] = "재수강 신청 안내"
+
+    async def broken_selector(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(rag_service, "select_evidence_groups", broken_selector)
     selected, did_fallback = asyncio.run(
         rag_service._select_evidence_for_answer("재수강 조건이 어떻게 돼?", shortlist, [])
     )

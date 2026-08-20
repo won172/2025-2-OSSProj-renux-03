@@ -22,11 +22,12 @@ from __future__ import annotations
 import csv
 import functools
 import re
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import pandas as pd
 
-from src.config import DATA_SOURCES
+from src.config import DATA_DIR, DATA_SOURCES
 
 # 학과명 안에서 표기가 흔들리는 구분기호. 이 자리만 유연하게 대조한다.
 _SEPARATOR_CLASS = r"[\s·∙‧•/\-]*"
@@ -74,9 +75,42 @@ def _department_pattern(name: str) -> re.Pattern[str] | None:
 
 
 def _iter_source_departments() -> List[str]:
-    """색인된 `major`의 출처인 수집 CSV에서 학과명을 읽는다."""
+    """색인 정본(SourceDocument)에서 학과명을 읽는다.
+
+    테스트와 명시적 마이그레이션 도구가 넘긴 별도 경로만 CSV를 사용한다.
+    운영 기본 경로는 과정 색인과 동일한 canonical payload를 읽어야 한다.
+    """
     path = DATA_SOURCES.get("courses_all")
-    if path is None or not path.exists():
+    if path is None:
+        return []
+
+    default_path = (DATA_DIR / "dongguk_courses_all.csv").resolve()
+    if Path(path).resolve() == default_path:
+        try:
+            from src.database import SessionLocal
+            from src.pipelines.ingest import load_canonical_source_frame
+
+            session = SessionLocal()
+            try:
+                frame = load_canonical_source_frame(session, "courses")
+            finally:
+                session.close()
+            if frame.empty:
+                return []
+            column = "department_name" if "department_name" in frame.columns else "major"
+            if column not in frame.columns:
+                return []
+            return [
+                str(value).strip()
+                for value in frame[column]
+                if str(value).strip() and str(value).strip().lower() not in {"nan", "none"}
+            ]
+        except Exception:
+            return []
+
+    # Explicit non-default paths are retained for isolated tests and one-time
+    # legacy migration diagnostics.
+    if not path.exists():
         return []
     try:
         # 학과명 컬럼만 읽는다 — 전체를 읽으면 수 MB를 불필요하게 파싱한다.

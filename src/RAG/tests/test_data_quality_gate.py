@@ -54,7 +54,14 @@ def test_quality_report_aggregates_failures_and_emits_retry_manifest_without_con
         )
         session.add(linked_notice)
         session.flush()
-        session.add(Chunk(chunk_id="notice-1-chunk", chunk_text="공지 본문", notice_id=linked_notice.id))
+        session.add(
+            Chunk(
+                chunk_id="notice-1-chunk",
+                chunk_text="공지 본문",
+                notice_id=linked_notice.id,
+                doc_id="notices:1",
+            )
+        )
         session.add_all([
             _document(1, last_indexed_at=None),
             _document(2, status="parse_failed", category="", parse_error="parser timeout"),
@@ -120,6 +127,39 @@ def test_quality_gate_passes_with_configurable_thresholds():
     assert report["gate_passed"] is True
 
 
+def test_quality_report_rejects_url_only_notice_linkage_without_canonical_doc_id():
+    session = _session()
+    try:
+        document = _document(1, last_indexed_at=datetime(2026, 8, 10))
+        notice = Notice(
+            board="학사",
+            title="레거시 공지",
+            category="학사",
+            detail_url=document.source_url,
+            content="공지 본문",
+        )
+        session.add_all([document, notice])
+        session.flush()
+        session.add(
+            Chunk(
+                chunk_id="legacy-url-linked-chunk",
+                chunk_text="공지 본문",
+                notice_id=notice.id,
+                doc_id=None,
+            )
+        )
+        session.commit()
+
+        report = build_source_document_quality_report(session)
+    finally:
+        session.close()
+
+    assert report["counts"]["active_chunk_linked"] == 0
+    assert report["counts"]["indexable_chunk_linked"] == 0
+    assert report["counts"]["index_mismatch"] == 1
+    assert report["retry_documents"][0]["reasons"] == ["index_mismatch"]
+
+
 def test_strict_mode_turns_quality_threshold_violation_into_readiness_failure(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -132,6 +172,11 @@ def test_strict_mode_turns_quality_threshold_violation_into_readiness_failure(
         lambda key: (pd.DataFrame({"chunk_id": [f"{key}-1"]}), object(), object(), [f"{key}-1"]),
     )
     monkeypatch.setattr(rag_service, "get_embedder", object)
+    monkeypatch.setattr(
+        rag_service,
+        "build_canonical_lineage_report",
+        lambda: {"gate_passed": True, "datasets": [], "violations": []},
+    )
     monkeypatch.setattr(
         rag_service,
         "build_source_document_quality_report",

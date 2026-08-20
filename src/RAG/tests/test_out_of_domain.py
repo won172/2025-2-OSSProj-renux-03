@@ -36,6 +36,15 @@ def test_알려진_범위밖_주제는_전용_문구를_유지한다():
         assert out_of_domain_reply(질문) == 전용
 
 
+def test_wise는_제품_범위_밖으로_전용_안내를_반환한다():
+    답 = out_of_domain_reply("WISE캠퍼스 휴학 규정 알려줘")
+
+    assert 답 == out_of_domain_reply("경주캠퍼스 학사일정 알려줘")
+    assert "WISE캠퍼스" in 답
+    assert "지원 범위" in 답
+    assert "서울캠퍼스" in 답
+
+
 def test_안내에_모델_지식이_섞이지_않는다():
     """생성이 아니라 고정 문자열이므로 질문 내용이 답에 반영되지 않아야 한다."""
     가 = out_of_domain_reply("샤갈")

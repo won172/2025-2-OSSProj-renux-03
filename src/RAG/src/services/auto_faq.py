@@ -155,15 +155,11 @@ def missing_from_corpus(question: str) -> List[str]:
     """
     from src.pipelines.ingest import DATASET_ARTIFACTS
     from src.search.fts_index import absent_terms
-    from src.search.hybrid import _QUERY_TITLE_STOPWORDS, _light_korean_tokenize
+    from src.search.hybrid import content_tokens
 
-    tokens = _light_korean_tokenize(question)
-    내용어 = [
-        t for t in tokens
-        if len(t) >= 2
-        and t not in _QUERY_TITLE_STOPWORDS
-        and not any(t != o and t in o for o in tokens)  # 더 긴 토큰의 조각 제외
-    ]
+    # 색인과 같은 토크나이저로 잘라야 한다. 다르면 조사가 붙은 형태로 조회해
+    # 코퍼스에 있는 낱말을 없다고 보고한다(Kiwi 전환 때 실제로 그랬다).
+    내용어 = content_tokens(question)
     if not 내용어:
         return []
 

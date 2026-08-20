@@ -8,7 +8,8 @@ from typing import Dict, Iterable, List, Tuple
 import json
 import argparse
 import logging
-import hashlib
+import os
+import tempfile
 
 import pandas as pd
 import re
@@ -33,10 +34,32 @@ from src.utils.preprocess import (
     make_doc_id,
     to_chunks,
 )
+from src.utils.notice_visibility import (
+    PUBLIC_VISIBILITY,
+    clean_department,
+    normalize_notice_visibility,
+)
 from src.services.notice_versioning import annotate_notice_versions
 from src.services.rule_versioning import annotate_rule_versions
 from src.services.retrieval_context import enrich_retrieval_fields
-from src.vectorstore.chroma_client import add_items, reset_collection, upsert_items, get_all_ids, delete_items, get_existing_ids
+from src.services.ingest_runtime import (
+    current_ingestion_context,
+    serialized_ingest,
+    serialized_ingest_write,
+)
+from src.pipelines.canonical import (
+    CANONICAL_PAYLOAD_SCHEMA_VERSION,
+    canonical_hash,
+    canonical_json,
+    source_document_key,
+)
+from src.vectorstore.chroma_client import (
+    add_items,
+    upsert_items,
+    get_all_ids,
+    delete_items,
+    update_item_metadatas,
+)
 from src.database import (
     SessionLocal, engine, init_db,
     Notice, Rule, Schedule, Course, Staff, Chunk, CustomKnowledge, SourceDocument, kst_now
@@ -155,7 +178,43 @@ def _train_lexical_indices(
     return vectorizer, matrix
 
 
+def _write_chunk_artifact_atomic(artifacts: DatasetArtifacts, chunks_df: pd.DataFrame) -> Path:
+    """Publish a complete chunk artifact with an atomic filesystem replace."""
+    artifacts.chunk_path.parent.mkdir(parents=True, exist_ok=True)
+    target = artifacts.chunk_path
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        chunks_df.astype(str).to_parquet(temporary, index=False)
+        os.replace(temporary, target)
+        return target
+    except Exception:
+        temporary.unlink(missing_ok=True)
+
+    csv_target = artifacts.csv_path
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{csv_target.name}.", suffix=".tmp", dir=csv_target.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        chunks_df.to_csv(temporary, index=False, encoding="utf-8-sig")
+        os.replace(temporary, csv_target)
+        return csv_target
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple[pd.DataFrame, object, object]:
+    with serialized_ingest_write(dataset=key, operation="persist_chunks"):
+        return _persist_chunks_unlocked(key, collection, chunks_df)
+
+
+def _persist_chunks_unlocked(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple[pd.DataFrame, object, object]:
     if chunks_df.empty:
         print(f"⚠️ Warning: No chunks generated for {key}")
         return chunks_df, None, None
@@ -170,25 +229,14 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
     ).to_dict(orient="records")
     metadatas = [{k: (v if v is not None else "") for k, v in m.items()} for m in metadatas]
 
-    # 1. 기존 ID 조회 (전체가 아닌, 현재 chunks_df에 있는 ID들만 확인)
     target_ids = chunks_df["chunk_id"].astype(str).tolist()
-    existing_ids = get_existing_ids(collection, target_ids)
-    
-    # 2. 신규 또는 업데이트가 필요한 청크 식별
-    # 여기서는 간단하게 existing_ids에 없는 것만 추가(Add)하는 전략을 사용하거나
-    # 항상 덮어쓰기(Upsert)를 할 수 있습니다. 
-    # 효율성을 위해 '없는 것만 추가' + '기존 것은 무시' 전략을 선택할 수도 있지만,
-    # 내용이 변경되었을 수 있으므로 Upsert가 안전합니다.
-    # 하지만 Upsert는 모든 청크에 대해 임베딩을 다시 계산해야 하므로 비용이 듭니다.
-    # 데이터 무결성을 위해 Upsert를 유지하되, 임베딩 계산을 최적화합니다.
-
-    # 임베딩 계산 (전체 다 계산)
-    # 최적화: 이미 존재하는 ID에 대해서는 임베딩 계산을 건너뛰고 싶다면?
-    # -> 내용이 바뀌었는지 알 수 없으므로 위험함.
-    # -> 하지만 chunk_id가 내용 해시를 포함한다면 건너뛰어도 됨.
-    # -> 현재 make_doc_id는 (제목, 날짜 등)만 포함하므로 내용 변경 감지 불가.
-    # -> 따라서 안전하게 전체 Upsert 수행.
-    
+    context_dataset, run_id = current_ingestion_context(key)
+    logging.info(
+        "ingest_stage_started dataset=%s run_id=%s stage=embedding rows=%s",
+        context_dataset,
+        run_id,
+        len(target_ids),
+    )
     embeddings = encode_texts(retrieval_text.tolist())
 
     upsert_items(
@@ -198,24 +246,34 @@ def _persist_chunks(key: str, collection: str, chunks_df: pd.DataFrame) -> Tuple
         metadatas=metadatas,
         embeddings=embeddings,
     )
+    logging.info(
+        "ingest_stage_completed dataset=%s run_id=%s stage=chroma_upsert rows=%s",
+        context_dataset,
+        run_id,
+        len(target_ids),
+    )
 
-    # 3. 파일 저장 (Parquet/CSV)
     artifacts = DATASET_ARTIFACTS[key]
-    artifacts.chunk_path.parent.mkdir(parents=True, exist_ok=True)
-
-    write_path = artifacts.chunk_path
-    try:
-        chunks_df.astype(str).to_parquet(write_path, index=False)
-    except Exception:
-        write_path = artifacts.csv_path
-        chunks_df.to_csv(write_path, index=False, encoding="utf-8-sig")
+    write_path = _write_chunk_artifact_atomic(artifacts, chunks_df)
     artifacts.chunk_path = write_path
+    logging.info(
+        "ingest_stage_completed dataset=%s run_id=%s stage=chunk_artifact rows=%s path=%s",
+        context_dataset,
+        run_id,
+        len(target_ids),
+        write_path,
+    )
 
-    # 4. BM25 학습 (전체 문서 길이 통계가 필요)
     vectorizer, matrix = _train_lexical_indices(
         key,
         retrieval_text.tolist(),
         chunks_df["chunk_id"].astype(str).tolist(),
+    )
+    logging.info(
+        "ingest_stage_completed dataset=%s run_id=%s stage=lexical rows=%s",
+        context_dataset,
+        run_id,
+        len(target_ids),
     )
     return chunks_df, vectorizer, matrix
 
@@ -226,25 +284,42 @@ def persist_dataset_artifacts_only(key: str, chunks_df: pd.DataFrame) -> Tuple[p
         print(f"⚠️ Warning: No chunks generated for {key}")
         return chunks_df, None, None
 
-    chunks_df = enrich_retrieval_fields(chunks_df)
-    retrieval_text = chunks_df["retrieval_text"].fillna("").astype(str)
-    artifacts = DATASET_ARTIFACTS[key]
-    artifacts.chunk_path.parent.mkdir(parents=True, exist_ok=True)
+    with serialized_ingest_write(dataset=key, operation="persist_dataset_artifacts_only"):
+        chunks_df = enrich_retrieval_fields(chunks_df)
+        retrieval_text = chunks_df["retrieval_text"].fillna("").astype(str)
+        artifacts = DATASET_ARTIFACTS[key]
+        write_path = _write_chunk_artifact_atomic(artifacts, chunks_df)
+        artifacts.chunk_path = write_path
 
-    write_path = artifacts.chunk_path
-    try:
-        chunks_df.astype(str).to_parquet(write_path, index=False)
-    except Exception:
-        write_path = artifacts.csv_path
-        chunks_df.to_csv(write_path, index=False, encoding="utf-8-sig")
-    artifacts.chunk_path = write_path
+        vectorizer, matrix = _train_lexical_indices(
+            key,
+            retrieval_text.tolist(),
+            chunks_df["chunk_id"].astype(str).tolist(),
+        )
+        return chunks_df, vectorizer, matrix
 
-    vectorizer, matrix = _train_lexical_indices(
-        key,
-        retrieval_text.tolist(),
-        chunks_df["chunk_id"].astype(str).tolist(),
-    )
-    return chunks_df, vectorizer, matrix
+
+def update_collection_metadata_from_frame(key: str, chunks_df: pd.DataFrame) -> None:
+    """Refresh Chroma metadata for an already aligned corpus without embedding.
+
+    This is used when a relational lineage field changes (for example a legacy
+    manual notice receives its canonical ``document_key``).  The caller must
+    first prove that the collection contains exactly the frame's chunk IDs;
+    this helper deliberately does not create or delete vectors.
+    """
+    if chunks_df.empty:
+        return
+    with serialized_ingest_write(dataset=key, operation="update_collection_metadata"):
+        metadatas = chunks_df.drop(
+            columns=["chunk_text", "retrieval_text"],
+            errors="ignore",
+        ).to_dict(orient="records")
+        metadatas = [{key: (value if value is not None else "") for key, value in item.items()} for item in metadatas]
+        update_item_metadatas(
+            DATASET_ARTIFACTS[key].collection,
+            chunks_df["chunk_id"].astype(str).tolist(),
+            metadatas,
+        )
 
 
 def _persist_replacing_collection(
@@ -258,13 +333,27 @@ def _persist_replacing_collection(
     upsert가 성공하기 전에는 기존 벡터를 보존하고, 모든 파생 아티팩트 생성까지
     끝난 뒤에만 고아 ID를 정리한다.
     """
-    previous_ids = set(get_all_ids(collection))
-    result = _persist_chunks(key, collection, chunks_df)
-    current_ids = set(chunks_df["chunk_id"].astype(str))
-    stale_ids = sorted(previous_ids - current_ids)
-    if stale_ids:
-        delete_items(collection, stale_ids)
-    return result
+    with serialized_ingest_write(dataset=key, operation="replace_collection"):
+        previous_ids = set(get_all_ids(collection))
+        result = _persist_chunks(key, collection, chunks_df)
+        current_ids = set(chunks_df["chunk_id"].astype(str))
+        persisted_ids = set(get_all_ids(collection))
+        missing_ids = sorted(current_ids - persisted_ids)
+        if missing_ids:
+            raise RuntimeError(
+                f"{key} Chroma verification failed before stale deletion: "
+                f"missing={len(missing_ids)}"
+            )
+        stale_ids = sorted(previous_ids - current_ids)
+        if stale_ids:
+            delete_items(collection, stale_ids)
+        final_ids = set(get_all_ids(collection))
+        if final_ids != current_ids:
+            raise RuntimeError(
+                f"{key} Chroma replacement verification failed: "
+                f"expected={len(current_ids)} actual={len(final_ids)}"
+            )
+        return result
 
 
 def _save_chunks_to_sqlite(chunks_df: pd.DataFrame, source_key: str):
@@ -283,9 +372,407 @@ def _save_chunks_to_sqlite(chunks_df: pd.DataFrame, source_key: str):
             
     # 저장할 데이터프레임
     to_save = chunks_df[cols].copy()
+
+    # SQLite와 Chroma는 chunk_id를 전역 고유 키로 사용한다.  특히 학사일정처럼
+    # 서로 다른 연도에 같은 제목/기간이 반복될 수 있는 데이터는, 파생 ID를
+    # 만들기 전에 정본 document_key를 붙이지 않으면 여기서 늦게 실패한다.
+    # 쓰기 전에 명시적으로 검사해 부분 적재보다 원인을 먼저 드러낸다.
+    chunk_ids = to_save["chunk_id"].astype(str).str.strip()
+    duplicate_count = int(chunk_ids.duplicated(keep=False).sum())
+    if duplicate_count:
+        raise ValueError(
+            f"{source_key} generated {duplicate_count} rows with duplicate chunk_id values"
+        )
     
     # 호출자가 이미 기존 데이터를 삭제했다고 가정
     to_save.to_sql("chunks", con=engine, if_exists="append", index=False)
+
+
+def _unique_source_id(base: str, payload: dict, seen: dict[str, int]) -> str:
+    """Make a deterministic source id when a legacy snapshot has duplicate keys."""
+    base = str(base or "").strip() or f"row:{canonical_hash(payload)[:16]}"
+    occurrence = seen.get(base, 0)
+    seen[base] = occurrence + 1
+    return base if occurrence == 0 else f"{base}#{occurrence + 1}"
+
+
+def _store_source_documents(
+    session: Session,
+    dataset: str,
+    records: Iterable[dict],
+    *,
+    complete_snapshot: bool = True,
+) -> int:
+    """Persist one dataset's canonical payloads in the current DB transaction."""
+    materialized = [record for record in records if str(record.get("source_id", "")).strip()]
+    if not materialized:
+        return 0
+
+    existing = {
+        document.source_id: document
+        for document in session.query(SourceDocument)
+        .filter(SourceDocument.dataset == dataset)
+        .all()
+    }
+    seen: set[str] = set()
+    now = kst_now()
+
+    for record in materialized:
+        source_id = str(record["source_id"]).strip()
+        payload = dict(record.get("payload") or {})
+        document = existing.get(source_id)
+        if document is None:
+            document = SourceDocument(
+                dataset=dataset,
+                source_type=str(record.get("source_type") or "legacy_snapshot"),
+                source_id=source_id,
+                document_key=source_document_key(dataset, source_id),
+            )
+            session.add(document)
+            existing[source_id] = document
+
+        document.source_type = str(record.get("source_type") or document.source_type or "legacy_snapshot")
+        document.source_url = str(record.get("source_url") or "")
+        document.title = str(record.get("title") or payload.get("title") or "")
+        document.category = str(record.get("category") or payload.get("category") or dataset)
+        document.published_at = str(record.get("published_at") or payload.get("published_at") or "")
+        document.status = str(record.get("status") or "active")
+        # Relational ids and collection timestamps are projections/bookkeeping;
+        # they must not create a new content revision.
+        document.content_hash = canonical_hash(
+            payload,
+            exclude_fields={"db_id", "collected_at", "ingestion_run_id"},
+        )
+        document.schema_version = CANONICAL_PAYLOAD_SCHEMA_VERSION
+        document.raw_payload_json = canonical_json(record.get("raw_payload") or payload)
+        document.normalized_payload_json = canonical_json(payload)
+        document.collected_at = now
+        document.last_parsed_at = now
+        document.parse_error = str(record.get("parse_error") or "") or None
+        document.miss_count = 0
+        seen.add(source_id)
+
+    if complete_snapshot:
+        for document in existing.values():
+            if document.source_id not in seen and document.status == "active":
+                document.status = "hidden"
+                document.miss_count = int(document.miss_count or 0) + 1
+
+    session.commit()
+    return len(seen)
+
+
+def _canonical_source_payloads(session: Session, dataset: str) -> list[dict]:
+    """Read active canonical source payloads; never reads a CSV artifact."""
+    documents = (
+        session.query(SourceDocument)
+        .filter(
+            SourceDocument.dataset == dataset,
+            SourceDocument.status.in_(["active", "updated"]),
+        )
+        .order_by(SourceDocument.id.asc())
+        .all()
+    )
+    payloads: list[dict] = []
+    for document in documents:
+        try:
+            payload = json.loads(document.normalized_payload_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            payload.setdefault("document_key", document.document_key)
+            payloads.append(payload)
+    return payloads
+
+
+def _store_rule_source_documents(session: Session, frame: pd.DataFrame) -> int:
+    seen: dict[str, int] = {}
+    records = []
+    for _, row in frame.fillna("").iterrows():
+        payload = row.to_dict()
+        payload.pop("db_object", None)
+        source_type = _first_nonempty(row, ["source_type", "문서유형"]) or "rules_text"
+        entry_year = _first_nonempty(row, ["entry_year", "학번", "입학년도"])
+        section = _first_nonempty(row, ["section", "섹션", "section_name"])
+        relative_dir = _first_nonempty(row, ["relative_dir", "경로", "folder"])
+        filename = _first_nonempty(row, ["filename", "파일명", "규정명", "title"])
+        text = _first_nonempty(row, ["text", "내용", "본문", "article", "조문", "rule_text"])
+        base = ":".join(part for part in (relative_dir, filename, entry_year, section) if part)
+        source_id = _unique_source_id(base, payload, seen)
+        records.append({
+            "source_id": source_id,
+            "source_type": source_type,
+            "source_url": _first_nonempty(row, ["source_url", "url", "원문URL"]),
+            "title": _first_nonempty(row, ["title", "규정명", "filename", "파일명"]),
+            "category": section or "규정",
+            "published_at": _first_nonempty(row, ["published_at", "게시일", "기준일"]),
+            "status": "active" if text else "parse_failed",
+            "parse_error": None if text else "empty rule text",
+            "payload": payload,
+        })
+    return _store_source_documents(session, "rules", records)
+
+
+def reconcile_rule_source_statuses(session: Session) -> int:
+    """Exclude legacy empty rule payloads from the indexable canonical set."""
+    changed = 0
+    documents = session.query(SourceDocument).filter(SourceDocument.dataset == "rules").all()
+    for document in documents:
+        try:
+            payload = json.loads(document.normalized_payload_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            payload = {}
+        text = _first_nonempty(
+            payload if isinstance(payload, dict) else {},
+            ["text", "내용", "본문", "article", "조문", "rule_text"],
+        )
+        if not text and document.status in {"active", "updated"}:
+            document.status = "parse_failed"
+            document.parse_error = "empty rule text"
+            changed += 1
+        elif (
+            text
+            and document.status == "parse_failed"
+            and document.parse_error == "empty rule text"
+        ):
+            document.status = "active"
+            document.parse_error = None
+            changed += 1
+    if changed:
+        session.commit()
+    return changed
+
+
+def _store_schedule_source_documents(session: Session, frame: pd.DataFrame) -> int:
+    seen: dict[str, int] = {}
+    records = []
+    for _, row in frame.iterrows():
+        obj = row.get("db_object")
+        payload = {
+            "db_id": getattr(obj, "id", row.get("db_id", "")),
+            "title": str(getattr(obj, "title", row.get("title", "")) or "").strip(),
+            "start_date": str(getattr(obj, "start_date", row.get("start_date", "")) or "").strip(),
+            "end_date": str(getattr(obj, "end_date", row.get("end_date", "")) or "").strip(),
+            "category": str(getattr(obj, "category", row.get("category", "")) or "").strip(),
+            "department": str(getattr(obj, "department", row.get("department", "")) or "").strip(),
+            "content": str(getattr(obj, "content", row.get("content", "")) or "").strip(),
+            "academic_year": str(row.get("학년도", row.get("academic_year", "")) or "").strip(),
+        }
+        base = ":".join(
+            part for part in (
+                payload["start_date"],
+                payload["end_date"],
+                payload["category"],
+                payload["department"],
+                payload["title"],
+            ) if part
+        )
+        source_id = _unique_source_id(base, payload, seen)
+        records.append({
+            "source_id": source_id,
+            "source_type": "academic_schedule",
+            "title": payload["title"],
+            "category": payload["category"] or "schedule",
+            "published_at": payload["start_date"],
+            "payload": payload,
+        })
+    return _store_source_documents(session, "schedule", records)
+
+
+def _store_course_source_documents(session: Session, frame: pd.DataFrame) -> int:
+    seen: dict[str, int] = {}
+    records = []
+    for _, row in frame.fillna("").iterrows():
+        payload = row.to_dict()
+        department = _first_nonempty(row, ["department_name", "major", "department", "학과", "학과명"])
+        course_code = _first_nonempty(row, ["course_code", "학수번호", "과목코드"])
+        title = _first_nonempty(row, ["title", "course_name", "교과목명", "국문교과목명", "과목명"])
+        base = ":".join(
+            part for part in (
+                department,
+                course_code or title,
+                _first_nonempty(row, ["curriculum_year", "교육과정연도", "학년도"]),
+                _first_nonempty(row, ["section_title", "구분"]),
+                _first_nonempty(row, ["_source_table", "source_type"]),
+            ) if part
+        )
+        source_id = _unique_source_id(base, payload, seen)
+        records.append({
+            "source_id": source_id,
+            "source_type": _first_nonempty(row, ["source_type", "_source_table"]) or "course_catalog",
+            "source_url": _first_nonempty(row, ["curriculum_url", "source_url", "url"]),
+            "title": title,
+            "category": department or "courses",
+            "payload": payload,
+        })
+    return _store_source_documents(session, "courses", records)
+
+
+def _store_staff_source_documents(session: Session, frame: pd.DataFrame) -> int:
+    seen: dict[str, int] = {}
+    records = []
+    for _, row in frame.fillna("").iterrows():
+        payload = row.to_dict()
+        department = _first_nonempty(row, ["조직(트리)", "department"])
+        name = _first_nonempty(row, ["성명", "이름", "name"])
+        position = _first_nonempty(row, ["직위", "position"])
+        phone = _first_nonempty(row, ["전화번호", "phone"])
+        email = _first_nonempty(row, ["이메일", "email"])
+        base = ":".join(part for part in (department, name, position, phone, email) if part)
+        source_id = _unique_source_id(base, payload, seen)
+        records.append({
+            "source_id": source_id,
+            "source_type": "staff_directory",
+            "title": f"{department} - {name}".strip(" -") or "교직원",
+            "category": department or "staff",
+            "payload": payload,
+        })
+    return _store_source_documents(session, "staff", records)
+
+
+def _backfill_static_source_documents(session: Session, dataset: str) -> int:
+    """Bootstrap canonical documents from the existing relational projection once."""
+    if session.query(SourceDocument.id).filter(SourceDocument.dataset == dataset).first():
+        return 0
+
+    if dataset == "rules":
+        frame = pd.DataFrame([
+            {
+                "db_id": row.id,
+                "filename": row.filename or "",
+                "relative_dir": row.relative_dir or "",
+                "text": row.full_text or "",
+                "title": row.title or row.filename or "",
+                "source_type": row.source_type or "rules_text",
+                "source_url": row.source_url or "",
+                "source_page_url": row.source_page_url or "",
+                "source_version": row.source_version or "",
+                "published_at": row.published_at or "",
+            }
+            for row in session.query(Rule).order_by(Rule.id.asc()).all()
+            if str(row.full_text or "").strip()
+        ])
+        return _store_rule_source_documents(session, frame) if not frame.empty else 0
+
+    if dataset == "schedule":
+        frame = pd.DataFrame([
+            {
+                "db_id": row.id,
+                "title": row.title or "",
+                "start_date": row.start_date or "",
+                "end_date": row.end_date or "",
+                "category": row.category or "",
+                "department": row.department or "",
+                "content": row.content or "",
+            }
+            for row in session.query(Schedule).order_by(Schedule.id.asc()).all()
+        ])
+        return _store_schedule_source_documents(session, frame) if not frame.empty else 0
+
+    if dataset == "courses":
+        rows = []
+        for row in session.query(Course).order_by(Course.id.asc()).all():
+            try:
+                payload = json.loads(row.raw_data or "{}")
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload.update({
+                "db_id": row.id,
+                "course_code": row.course_code or payload.get("course_code", ""),
+                "title": row.title or payload.get("title", ""),
+                "description": row.description or payload.get("description", ""),
+                "_source_table": row.source_table or payload.get("_source_table", ""),
+            })
+            rows.append(payload)
+        frame = pd.DataFrame(rows).fillna("").astype(str)
+        return _store_course_source_documents(session, frame) if not frame.empty else 0
+
+    if dataset == "staff":
+        rows = []
+        for row in session.query(Staff).order_by(Staff.id.asc()).all():
+            try:
+                payload = json.loads(row.raw_data or "{}")
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload.update({
+                "db_id": row.id,
+                "조직(트리)": row.department or payload.get("조직(트리)", ""),
+                "성명": row.name or payload.get("성명", ""),
+                "직위": row.position or payload.get("직위", ""),
+                "담당업무": row.role or payload.get("담당업무", ""),
+                "전화번호": row.phone or payload.get("전화번호", ""),
+                "이메일": row.email or payload.get("이메일", ""),
+            })
+            rows.append(payload)
+        frame = pd.DataFrame(rows).fillna("").astype(str)
+        return _store_staff_source_documents(session, frame) if not frame.empty else 0
+
+    raise ValueError(f"Unsupported static canonical dataset: {dataset}")
+
+
+def load_canonical_source_frame(session: Session, dataset: str) -> pd.DataFrame:
+    """Return a dataset frame sourced only from active SourceDocument payloads."""
+    if not session.query(SourceDocument.id).filter(SourceDocument.dataset == dataset).first():
+        _backfill_static_source_documents(session, dataset)
+    payloads = _canonical_source_payloads(session, dataset)
+    return pd.DataFrame(payloads).fillna("") if payloads else pd.DataFrame()
+
+
+def backfill_static_source_documents(
+    datasets: Iterable[str] = ("rules", "schedule", "courses", "staff"),
+) -> dict[str, int]:
+    """Create missing static canonical documents from existing DB projections."""
+    init_db()
+    session = SessionLocal()
+    try:
+        result = {
+            dataset: _backfill_static_source_documents(session, dataset)
+            for dataset in datasets
+        }
+        return result
+    finally:
+        session.close()
+
+
+def normalize_existing_meal_documents() -> int:
+    """Upgrade legacy meal payload serialization and hashes in place."""
+    session = SessionLocal()
+    changed = 0
+    try:
+        documents = (
+            session.query(SourceDocument)
+            .filter(SourceDocument.dataset == "meals")
+            .order_by(SourceDocument.id.asc())
+            .all()
+        )
+        for document in documents:
+            try:
+                payload = json.loads(document.normalized_payload_json or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            payload.pop("document_key", None)
+            canonical_payload = canonical_json(payload)
+            digest = canonical_hash(payload)
+            if (
+                document.normalized_payload_json != canonical_payload
+                or document.content_hash != digest
+                or document.schema_version != CANONICAL_PAYLOAD_SCHEMA_VERSION
+            ):
+                document.normalized_payload_json = canonical_payload
+                document.raw_payload_json = document.raw_payload_json or canonical_payload
+                document.content_hash = digest
+                document.schema_version = CANONICAL_PAYLOAD_SCHEMA_VERSION
+                changed += 1
+        session.commit()
+        return changed
+    finally:
+        session.close()
 
 
 def _first_nonempty(row, keys: Iterable[str]) -> str:
@@ -505,6 +992,12 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
             continue
         
         topic_type = row.get(column["topic"], "")
+        department = clean_department(row.get("department") or row.get("학과"))
+        visibility = normalize_notice_visibility(
+            row.get("visibility"),
+            department,
+            default=PUBLIC_VISIBILITY,
+        )
         published_date = row.get("clean_date", "")
         apply_deadline = _extract_notice_apply_deadline(
             title,
@@ -543,6 +1036,8 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 "title": title,
                 "text": text_content,
                 "topics": row.get(column["topic"], ""),
+                "department": department,
+                "visibility": visibility,
                 "category": row.get("카테고리", ""),
                 "category_original": row.get("카테고리원본", row.get("카테고리", "")),
                 "category_source": row.get("카테고리출처", "list" if row.get("카테고리") else "missing"),
@@ -578,6 +1073,7 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
     return chunks_df
 
 
+@serialized_ingest("notices")
 def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
     # Normal operation is strictly SQLite → derived indexes.  CSV remains only
     # as an explicit legacy bootstrap path when no canonical notice exists.
@@ -656,8 +1152,9 @@ def ingest_notices() -> Tuple[pd.DataFrame, object, object]:
     chunks_df = build_notice_chunks(raw_df)
     _save_chunks_to_sqlite(chunks_df, "notices")
     
-    reset_collection(DATASET_ARTIFACTS["notices"].collection)
-    return _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, chunks_df)
+    return _persist_replacing_collection(
+        "notices", DATASET_ARTIFACTS["notices"].collection, chunks_df
+    )
 
 
 def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
@@ -685,11 +1182,14 @@ def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
         .order_by(Notice.id.asc(), Chunk.position.asc(), Chunk.id.asc())
     )
     for chunk, notice in query_notices.all():
+        notice_source_url = str(
+            notice.detail_url or f"manual://notice/{notice.id}"
+        ).strip()
         doc_id, position = _chunk_parent_identity(
             chunk,
             (
-                source_documents_by_url[str(notice.detail_url)].document_key
-                if str(notice.detail_url) in source_documents_by_url
+                source_documents_by_url[notice_source_url].document_key
+                if notice_source_url in source_documents_by_url
                 else f"notice:{notice.id}"
             ),
             fallback_positions,
@@ -712,7 +1212,7 @@ def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
                     notice.content,
                     notice.published_date,
                 ),
-                "url": notice.detail_url,
+                "url": notice_source_url,
                 "attachments": notice.attachments,
                 # 본문·첨부가 모두 없으면 근거로 쓸 수 없다(공지의 25.6%가 본문 0자).
                 "has_substantive_body": (
@@ -730,6 +1230,12 @@ def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
                 ),
                 "notice_id": notice.id,
                 "category": notice.category,
+                "department": clean_department(notice.department),
+                "visibility": normalize_notice_visibility(
+                    notice.visibility,
+                    notice.department,
+                    default=PUBLIC_VISIBILITY,
+                ),
                 "question": None,
                 "answer": None,
                 "custom_knowledge_id": None,
@@ -808,7 +1314,10 @@ def build_rule_chunks(df: pd.DataFrame) -> pd.DataFrame:
         page_label = _first_nonempty(row, ["page_label", "인쇄페이지"])
         published_at = _first_nonempty(row, ["published_at", "게시일", "기준일"])
         title = _first_nonempty(row, ["title", "규정명", "filename", "파일명"]) or text[:80] or "학칙 문서"
-        doc_id = make_doc_id("rules", rel_dir, filename or title, entry_year, section, college_name)
+        doc_id = (
+            str(row.get("document_key") or "").strip()
+            or make_doc_id("rules", rel_dir, filename or title, entry_year, section, college_name)
+        )
         docs.append(
             {
                 "doc_id": doc_id,
@@ -860,6 +1369,7 @@ def _entry_year_guide_cache_is_stale(output_path: Path, dependencies: Iterable[P
     )
 
 
+@serialized_ingest("rules")
 def ingest_rules(*, force_source_reload: bool = False) -> Tuple[pd.DataFrame, object, object]:
     session = SessionLocal()
     try:
@@ -925,10 +1435,14 @@ def ingest_rules(*, force_source_reload: bool = False) -> Tuple[pd.DataFrame, ob
         session.add_all(rule_objs)
         session.commit()
         df["db_id"] = [obj.id for obj in rule_objs]
+        _store_rule_source_documents(session, df)
+        canonical_frame = load_canonical_source_frame(session, "rules")
     finally:
         session.close()
-        
-    chunks_df = build_rule_chunks(df)
+
+    if canonical_frame.empty:
+        raise RuntimeError("Canonical rules source is empty after source persistence.")
+    chunks_df = build_rule_chunks(canonical_frame)
     _save_chunks_to_sqlite(chunks_df, "rules")
     return _persist_replacing_collection(
         "rules",
@@ -942,35 +1456,73 @@ def ingest_rules(*, force_source_reload: bool = False) -> Tuple[pd.DataFrame, ob
 def build_schedule_chunks(df: pd.DataFrame) -> pd.DataFrame:
     docs: List[dict] = []
     for _, row in df.iterrows():
-        # ingest_schedule에서 할당한 객체 사용
+        # 신규 수집 프레임은 SQLAlchemy 객체를 갖고 있지만, 재색인은
+        # SourceDocument 정본 payload만 읽는다. 두 입력을 같은 투영기로 합친다.
         obj = row.get("db_object")
-        if not obj: continue
+        if obj is not None:
+            schedule_id = obj.id
+            title = obj.title
+            start_date = obj.start_date
+            end_date = obj.end_date
+            category = obj.category
+            department = obj.department
+            content = obj.content
+        else:
+            schedule_id = row.get("db_id")
+            title = row.get("title", "")
+            start_date = row.get("start_date", "")
+            end_date = row.get("end_date", "")
+            category = row.get("category", "")
+            department = row.get("department", "")
+            content = row.get("content", "")
 
-        doc_id = make_doc_id("schedule", obj.start_date, obj.end_date, obj.content)
+        title = str(title or "").strip()
+        start_date = str(start_date or "").strip()
+        end_date = str(end_date or "").strip()
+        category = str(category or "").strip()
+        department = str(department or "").strip()
+        content = str(content or "").strip()
+        academic_year = _first_nonempty(row, ["학년도", "academic_year"])
+        if not title and not content:
+            continue
+
+        doc_id = (
+            str(row.get("document_key") or "").strip()
+            or make_doc_id(
+                "schedule",
+                academic_year,
+                start_date,
+                end_date,
+                category,
+                department,
+                title,
+                content,
+            )
+        )
         
         # 학사일정 키워드와 날짜 정보를 텍스트에 포함
-        date_str = f"{obj.start_date}"
-        if obj.end_date and obj.end_date != obj.start_date:
-            date_str += f" ~ {obj.end_date}"
+        date_str = f"{start_date}"
+        if end_date and end_date != start_date:
+            date_str += f" ~ {end_date}"
         
-        rich_text = f"학사일정: {obj.title}\n\n{obj.content}\n\n기간: {date_str}"
-        if obj.department:
-            rich_text += f"\n\n주관부서: {obj.department}"
+        rich_text = f"학사일정: {title}\n\n{content}\n\n기간: {date_str}"
+        if department:
+            rich_text += f"\n\n주관부서: {department}"
 
         docs.append(
             {
                 "doc_id": doc_id,
-                "title": obj.title,
+                "title": title,
                 "text": rich_text,
-                "schedule_start": obj.start_date,
-                "schedule_end": obj.end_date,
-                "category": obj.category,
-                "department": obj.department,
-                "topics": obj.category or "schedule",
+                "schedule_start": start_date,
+                "schedule_end": end_date,
+                "category": category,
+                "department": department,
+                "topics": category or "schedule",
                 "source": "schedule",
                 "url": "",
-                "published_at": obj.start_date,
-                "schedule_id": obj.id,
+                "published_at": start_date,
+                "schedule_id": schedule_id,
             }
         )
 
@@ -984,7 +1536,12 @@ def build_schedule_chunks(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(chunks)
 
 
-def ingest_schedule(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, object, object]:
+@serialized_ingest("schedule")
+def ingest_schedule(
+    collected_df: pd.DataFrame | None = None,
+    *,
+    refresh_from_csv: bool = False,
+) -> Tuple[pd.DataFrame, object, object]:
     session = SessionLocal()
     try:
         if (
@@ -998,11 +1555,13 @@ def ingest_schedule(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, ob
     finally:
         session.close()
 
-    path = DATA_SOURCES["schedule"]
-    if not path.exists():
-        raise FileNotFoundError(f"Schedule CSV not found: {path}")
-
-    df = pd.read_csv(path).fillna("").astype(str)
+    if collected_df is None:
+        path = DATA_SOURCES["schedule"]
+        if not path.exists():
+            raise FileNotFoundError(f"Schedule CSV not found: {path}")
+        df = pd.read_csv(path).fillna("").astype(str)
+    else:
+        df = collected_df.copy().fillna("").astype(str)
     
     session = SessionLocal()
     try:
@@ -1066,20 +1625,29 @@ def ingest_schedule(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, ob
             ms_df = pd.DataFrame([{"db_object": ms}])
             df = pd.concat([df, ms_df], ignore_index=True)
 
-        chunks_df = build_schedule_chunks(df)
+        _store_schedule_source_documents(session, df)
+        # SourceDocument가 생성한 canonical document_key를 다시 읽어 같은
+        # 정본으로부터 파생 청크를 만든다.  수집 프레임을 바로 투영하면
+        # 학년도가 다른 동일 일정의 fallback make_doc_id가 충돌하고,
+        # 파생 doc_id와 canonical lineage도 서로 달라진다.
+        canonical_frame = load_canonical_source_frame(session, "schedule")
+        chunks_df = build_schedule_chunks(canonical_frame)
     finally:
         session.close()
 
     _save_chunks_to_sqlite(chunks_df, "schedule")
-    reset_collection(DATASET_ARTIFACTS["schedule"].collection)
-    return _persist_chunks("schedule", DATASET_ARTIFACTS["schedule"].collection, chunks_df)
+    return _persist_replacing_collection(
+        "schedule",
+        DATASET_ARTIFACTS["schedule"].collection,
+        chunks_df,
+    )
 
 
 # --- Courses ---
 
 def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
     docs: List[dict] = []
-    ignored_exact = {"_source_table", "db_id", "db_object", "major"}
+    ignored_exact = {"_source_table", "db_id", "db_object", "major", "document_key"}
     title_candidates = ["국문교과목명", "과목명", "course_name", "교과목명", "title", "교과목"]
     
     for _, row in combined.iterrows():
@@ -1093,13 +1661,16 @@ def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
         grade = _first_nonempty(row, ["recommended_grades", "grade", "이수대상", "학년"])
         semester = _first_nonempty(row, ["offered_semesters", "semester", "개설학기", "학기"])
         course_type = _first_nonempty(row, ["course_type", "전공구분", "이수구분"])
-        doc_id = make_doc_id(
-            "courses",
-            major_name,
-            code or title,
-            curriculum_url,
-            row.get("section_title", ""),
-            row.get("_source_table"),
+        doc_id = (
+            str(row.get("document_key") or "").strip()
+            or make_doc_id(
+                "courses",
+                major_name,
+                code or title,
+                curriculum_url,
+                row.get("section_title", ""),
+                row.get("_source_table"),
+            )
         )
 
         text_parts: List[str] = []
@@ -1205,6 +1776,7 @@ def _load_general_courses_df(path: Path) -> pd.DataFrame:
     return df
 
 
+@serialized_ingest("courses")
 def ingest_courses(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, object, object]:
     session = SessionLocal()
     try:
@@ -1288,6 +1860,7 @@ def ingest_courses(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, obj
         session.add_all(course_objs)
         session.commit()
         combined["db_id"] = [obj.id for obj in course_objs]
+        _store_course_source_documents(session, combined)
     finally:
         session.close()
         
@@ -1295,15 +1868,16 @@ def ingest_courses(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, obj
     _save_chunks_to_sqlite(chunks_df, "courses")
     # 교과 doc_id는 내용 기반이라 텍스트가 바뀌면 새 ID가 생긴다 —
     # 컬렉션을 리셋하지 않으면 옛 청크가 고아로 남아 검색을 오염시킴(staff/schedule과 동일 패턴).
-    reset_collection(DATASET_ARTIFACTS["courses"].collection)
-    return _persist_chunks("courses", DATASET_ARTIFACTS["courses"].collection, chunks_df)
+    return _persist_replacing_collection(
+        "courses", DATASET_ARTIFACTS["courses"].collection, chunks_df
+    )
 
 
 # --- Staff ---
 
 def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
     docs = []
-    exclude_cols = {"조직(트리)", "db_id", "raw_data"}
+    exclude_cols = {"조직(트리)", "db_id", "raw_data", "document_key"}
     
     for _, row in df.iterrows():
         # row는 명명 컬럼([조직(트리), 성명, 직위, 담당업무, 전화번호]) 또는
@@ -1344,7 +1918,10 @@ def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
         if phone_number:
             full_text += f"\n\n전화번호: {phone_number}"
         
-        doc_id = make_doc_id("staff", dept, full_text)
+        doc_id = (
+            str(row.get("document_key") or "").strip()
+            or make_doc_id("staff", dept, full_text)
+        )
         
         docs.append({
             "doc_id": doc_id,
@@ -1372,6 +1949,7 @@ def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(chunks)
 
 
+@serialized_ingest("staff")
 def ingest_staff(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, object, object]:
     """교직원 명부를 적재한다.
 
@@ -1446,13 +2024,15 @@ def ingest_staff(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, objec
         session.add_all(staff_objs)
         session.commit()
         df["db_id"] = [obj.id for obj in staff_objs]
+        _store_staff_source_documents(session, df)
     finally:
         session.close()
         
     chunks_df = build_staff_chunks(df)
     _save_chunks_to_sqlite(chunks_df, "staff")
-    reset_collection(DATASET_ARTIFACTS["staff"].collection)
-    return _persist_chunks("staff", DATASET_ARTIFACTS["staff"].collection, chunks_df)
+    return _persist_replacing_collection(
+        "staff", DATASET_ARTIFACTS["staff"].collection, chunks_df
+    )
 
 
 # --- Meals (학식 식단) ---
@@ -1482,7 +2062,10 @@ def build_meal_chunks(df: pd.DataFrame) -> pd.DataFrame:
             body = menu_text
         rich_text = f"{date_label} {restaurant} 학식 식단 메뉴\n\n{body}"
 
-        doc_id = make_doc_id("meals", meal_date, restaurant)
+        doc_id = (
+            str(row.get("document_key") or "").strip()
+            or make_doc_id("meals", meal_date, restaurant)
+        )
         docs.append(
             {
                 "doc_id": doc_id,
@@ -1532,9 +2115,9 @@ def store_meals_in_db(df: pd.DataFrame) -> int:
             if not source_id.strip(":"):
                 continue
             seen.add(source_id)
-            document_key = f"meals:{source_id}"
-            payload = json.dumps(row, ensure_ascii=False, sort_keys=True)
-            digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()
+            document_key = source_document_key("meals", source_id)
+            payload = canonical_json(row)
+            digest = canonical_hash(row)
             document = (
                 session.query(SourceDocument)
                 .filter(SourceDocument.dataset == "meals", SourceDocument.source_id == source_id)
@@ -1554,7 +2137,7 @@ def store_meals_in_db(df: pd.DataFrame) -> int:
             document.published_at = row.get("date", "").strip()
             document.status = "active"
             document.content_hash = digest
-            document.schema_version = 1
+            document.schema_version = CANONICAL_PAYLOAD_SCHEMA_VERSION
             document.raw_payload_json = payload
             document.normalized_payload_json = payload
             document.collected_at = now
@@ -1588,12 +2171,14 @@ def load_meals_from_db() -> pd.DataFrame:
             except (TypeError, json.JSONDecodeError):
                 continue
             if isinstance(payload, dict):
+                payload.setdefault("document_key", document.document_key)
                 rows.append(payload)
         return pd.DataFrame(rows).fillna("").astype(str) if rows else pd.DataFrame()
     finally:
         session.close()
 
 
+@serialized_ingest("meals")
 def ingest_meals(collected_df: pd.DataFrame | None = None) -> Tuple[pd.DataFrame, object, object]:
     """Build the meals index exclusively from SQLite canonical documents.
 
@@ -1617,10 +2202,12 @@ def ingest_meals(collected_df: pd.DataFrame | None = None) -> Tuple[pd.DataFrame
     if chunks_df.empty:
         print("⚠️ Warning: No meal chunks generated; preserving existing meals index")
         return chunks_df, None, None
-    reset_collection(DATASET_ARTIFACTS["meals"].collection)
-    return _persist_chunks("meals", DATASET_ARTIFACTS["meals"].collection, chunks_df)
+    return _persist_replacing_collection(
+        "meals", DATASET_ARTIFACTS["meals"].collection, chunks_df
+    )
 
 
+@serialized_ingest("all")
 def ingest_all() -> Dict[str, Tuple[pd.DataFrame, object, object]]:
     # DB 테이블 생성/확인
     init_db()
@@ -1636,6 +2223,7 @@ def ingest_all() -> Dict[str, Tuple[pd.DataFrame, object, object]]:
     return results
 
 
+@serialized_ingest("reindex")
 def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, object, object]]:
     """SQLite DB에 저장된 데이터를 기반으로 ChromaDB 인덱스와 TF-IDF를 재구축합니다."""
     session = SessionLocal()
@@ -1647,33 +2235,20 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
             print("🔄 Re-indexing notices from DB...")
             df = build_notice_index_frame_from_session(session)
             if not df.empty:
-                reset_collection(DATASET_ARTIFACTS["notices"].collection)
-                results["notices"] = _persist_chunks("notices", DATASET_ARTIFACTS["notices"].collection, df)
+                results["notices"] = _persist_replacing_collection(
+                    "notices", DATASET_ARTIFACTS["notices"].collection, df
+                )
         
         # 2. Rules
         if not target or target == "rules":
             print("🔄 Re-indexing rules from DB...")
-            rule_rows = [
-                {
-                    "text": rule.full_text,
-                    "filename": rule.filename,
-                    "relative_dir": rule.relative_dir,
-                    "db_id": rule.id,
-                    "title": rule.title or rule.filename,
-                    "source_type": rule.source_type or "rules_text",
-                    "source_url": rule.source_url or "",
-                    "source_page_url": rule.source_page_url or "",
-                    "source_version": rule.source_version or "",
-                    "published_at": rule.published_at or "",
-                }
-                for rule in session.query(Rule).order_by(Rule.id.asc()).all()
-                if str(rule.full_text or "").strip()
-            ]
-            if rule_rows:
+            reconcile_rule_source_statuses(session)
+            rule_frame = load_canonical_source_frame(session, "rules")
+            if not rule_frame.empty:
                 # Rule.full_text가 정본이다. 기존 300자 파생 청크를 다시 이어 붙이면
                 # overlap과 줄바꿈 오차가 누적되므로 정본에서 600자로 직접 재분할한다.
                 df = _canonicalize_campus_scope_frame(
-                    build_rule_chunks(pd.DataFrame(rule_rows))
+                    build_rule_chunks(rule_frame)
                 )
                 session.query(Chunk).filter(Chunk.rule_id.isnot(None)).delete(
                     synchronize_session=False
@@ -1700,120 +2275,55 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
         # 3. Schedule
         if not target or target == "schedule":
             print("🔄 Re-indexing schedule from DB...")
-            query = (
-                session.query(Chunk, Schedule)
-                .join(Schedule, Chunk.schedule_id == Schedule.id)
-                .order_by(Schedule.id.asc(), Chunk.position.asc(), Chunk.id.asc())
-            )
-            data = []
-            fallback_positions = {}
-            for chunk, sch in query.all():
-                doc_id, position = _chunk_parent_identity(
-                    chunk, f"schedule:{sch.id}", fallback_positions,
+            schedule_frame = load_canonical_source_frame(session, "schedule")
+            if not schedule_frame.empty:
+                df = _canonicalize_campus_scope_frame(
+                    build_schedule_chunks(schedule_frame)
                 )
-                data.append({
-                    "chunk_id": chunk.chunk_id,
-                    "chunk_text": chunk.chunk_text,
-                    "doc_id": doc_id,
-                    "position": position,
-                    "title": sch.title,
-                    "schedule_start": sch.start_date,
-                    "schedule_end": sch.end_date,
-                    "category": sch.category,
-                    "department": sch.department,
-                    "topics": sch.category or "schedule",
-                    "source": "schedule",
-                    "url": "",
-                    "published_at": sch.start_date,
-                    "schedule_id": sch.id
-                })
-            if data:
-                df = _canonicalize_campus_scope_frame(pd.DataFrame(data))
-                reset_collection(DATASET_ARTIFACTS["schedule"].collection)
-                results["schedule"] = _persist_chunks("schedule", DATASET_ARTIFACTS["schedule"].collection, df)
+                session.query(Chunk).filter(Chunk.schedule_id.isnot(None)).delete(
+                    synchronize_session=False
+                )
+                session.commit()
+                _save_chunks_to_sqlite(df, "schedule")
+                results["schedule"] = _persist_replacing_collection(
+                    "schedule",
+                    DATASET_ARTIFACTS["schedule"].collection,
+                    df,
+                )
 
         # 4. Courses
         if not target or target == "courses":
             print("🔄 Re-indexing courses from DB...")
-            query = (
-                session.query(Chunk, Course)
-                .join(Course, Chunk.course_id == Course.id)
-                .order_by(Course.id.asc(), Chunk.position.asc(), Chunk.id.asc())
-            )
-            data = []
-            fallback_positions = {}
-            for chunk, course in query.all():
-                doc_id, position = _chunk_parent_identity(
-                    chunk, f"course:{course.id}", fallback_positions,
+            course_frame = load_canonical_source_frame(session, "courses")
+            if not course_frame.empty:
+                df = _canonicalize_campus_scope_frame(build_course_chunks(course_frame))
+                session.query(Chunk).filter(Chunk.course_id.isnot(None)).delete(
+                    synchronize_session=False
                 )
-                try:
-                    raw_data = json.loads(course.raw_data) if course.raw_data else {}
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    raw_data = {}
-                
-                data.append({
-                    "chunk_id": chunk.chunk_id,
-                    "chunk_text": chunk.chunk_text,
-                    "doc_id": doc_id,
-                    "position": position,
-                    "title": course.title,
-                    "course_code": course.course_code,
-                    "source_table": course.source_table,
-                    "topics": course.source_table,
-                    "source": "courses",
-                    "url": "",
-                    "published_at": "",
-                    "course_id": course.id,
-                    "major": raw_data.get("major", ""),
-                    "college_name": raw_data.get("college_name", ""),
-                    "credit": raw_data.get("credit_value") or raw_data.get("credit", ""),
-                    "grade": raw_data.get("recommended_grades") or raw_data.get("grade", ""),
-                    "semester": raw_data.get("offered_semesters") or raw_data.get("semester", ""),
-                    "course_type": raw_data.get("course_type", ""),
-                    "curriculum_year": raw_data.get("curriculum_year", ""),
-                    "source_page": raw_data.get("source_page", ""),
-                    "source_type": raw_data.get("source_type", ""),
-                    "source_priority": raw_data.get("source_priority", ""),
-                    "course_code_conflict": raw_data.get("course_code_conflict", False),
-                    "availability_status": raw_data.get("availability_status", "curriculum_only"),
-                    "data_quality_score": raw_data.get("data_quality_score", ""),
-                    "collection_status": raw_data.get("collection_status", ""),
-                })
-            if data:
-                df = _canonicalize_campus_scope_frame(pd.DataFrame(data))
-                reset_collection(DATASET_ARTIFACTS["courses"].collection)
-                results["courses"] = _persist_chunks("courses", DATASET_ARTIFACTS["courses"].collection, df)
+                session.commit()
+                _save_chunks_to_sqlite(df, "courses")
+                results["courses"] = _persist_replacing_collection(
+                    "courses",
+                    DATASET_ARTIFACTS["courses"].collection,
+                    df,
+                )
 
         # 5. Staff (New)
         if not target or target == "staff":
             print("🔄 Re-indexing staff from DB...")
-            query = (
-                session.query(Chunk, Staff)
-                .join(Staff, Chunk.staff_id == Staff.id)
-                .order_by(Staff.id.asc(), Chunk.position.asc(), Chunk.id.asc())
-            )
-            data = []
-            fallback_positions = {}
-            for chunk, staff in query.all():
-                doc_id, position = _chunk_parent_identity(
-                    chunk, f"staff:{staff.id}", fallback_positions,
+            staff_frame = load_canonical_source_frame(session, "staff")
+            if not staff_frame.empty:
+                df = _canonicalize_campus_scope_frame(build_staff_chunks(staff_frame))
+                session.query(Chunk).filter(Chunk.staff_id.isnot(None)).delete(
+                    synchronize_session=False
                 )
-                data.append({
-                    "chunk_id": chunk.chunk_id,
-                    "chunk_text": chunk.chunk_text,
-                    "doc_id": doc_id,
-                    "position": position,
-                    "title": f"{staff.department} - {staff.name}",
-                    "topics": staff.department,
-                    "source": "staff",
-                    "url": "",
-                    "published_at": "",
-                    "staff_id": staff.id
-                })
-            if data:
-                df = _canonicalize_campus_scope_frame(pd.DataFrame(data))
-                reset_collection(DATASET_ARTIFACTS["staff"].collection)
-                results["staff"] = _persist_chunks("staff", DATASET_ARTIFACTS["staff"].collection, df)
+                session.commit()
+                _save_chunks_to_sqlite(df, "staff")
+                results["staff"] = _persist_replacing_collection(
+                    "staff",
+                    DATASET_ARTIFACTS["staff"].collection,
+                    df,
+                )
 
         # 6. Meals — unlike the old implementation, this is now a first-class
         # SQLite-backed corpus and can be rebuilt without a CSV snapshot.
@@ -1824,8 +2334,9 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
                 df = build_meal_chunks(meals_df)
                 if not df.empty:
                     df = _canonicalize_campus_scope_frame(df)
-                    reset_collection(DATASET_ARTIFACTS["meals"].collection)
-                    results["meals"] = _persist_chunks("meals", DATASET_ARTIFACTS["meals"].collection, df)
+                    results["meals"] = _persist_replacing_collection(
+                        "meals", DATASET_ARTIFACTS["meals"].collection, df
+                    )
 
     finally:
         session.close()
@@ -1897,6 +2408,10 @@ __all__ = [
     "ingest_courses",
     "ingest_staff",
     "ingest_meals",
+    "load_canonical_source_frame",
+    "backfill_static_source_documents",
+    "normalize_existing_meal_documents",
+    "update_collection_metadata_from_frame",
     "ingest_all",
     "SessionLocal",
     "reindex_from_db",

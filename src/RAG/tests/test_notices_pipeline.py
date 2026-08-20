@@ -6,10 +6,16 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.crawlers import dongguk_notices  # noqa: E402
+from src.database import Base, IngestionRun, SourceDocument  # noqa: E402
+from src.pipelines import notices_sync  # noqa: E402
+from scripts import update_notices  # noqa: E402
 from src.pipelines.ingest import (  # noqa: E402
     _extract_notice_apply_deadline,
     build_notice_chunks,
@@ -129,6 +135,172 @@ def test_collect_board_keeps_notice_when_detail_fetch_fails(monkeypatch):
     assert df.iloc[0]["제목"] == "상세 본문이 없는 공지"
     assert df.iloc[0]["본문"] == ""
     assert df.iloc[0]["상세URL"].endswith("/article/GENERALNOTICES/detail/77")
+
+
+def test_crawl_notices_fails_when_every_board_list_is_unreachable(monkeypatch):
+    def fail_list(*_args, **_kwargs):
+        raise RuntimeError("dns unavailable")
+
+    monkeypatch.setattr(dongguk_notices, "fetch_notice_list", fail_list)
+
+    with pytest.raises(dongguk_notices.NoticeCrawlError, match="모두 목록 수집에 실패"):
+        dongguk_notices.crawl_notices(
+            boards=["일반공지", "학사공지"],
+            max_pages=1,
+            delay=0,
+            request_retries=1,
+        )
+
+
+def test_crawl_notices_allows_zero_new_rows_when_board_was_reachable(monkeypatch):
+    def fake_fetch_notice_list(board_code: str, page: int = 1, **_request_limits):
+        return [
+            {
+                "article_id": 77,
+                "title": "이미 수집된 공지",
+                "category": "일반",
+                "posted_at": date(2026, 8, 10),
+                "views": 1,
+                "is_pinned": False,
+            }
+        ]
+
+    monkeypatch.setattr(dongguk_notices, "fetch_notice_list", fake_fetch_notice_list)
+
+    frame = dongguk_notices.crawl_notices(
+        boards=["일반공지"],
+        max_pages=1,
+        delay=0,
+        known_ids_by_board={"일반공지": {77}},
+    )
+
+    assert frame.empty
+    assert frame.attrs["crawl_status"] == "success"
+    assert frame.attrs["crawl_incomplete_boards"] == []
+    assert frame.attrs["crawl_diagnostics"][0]["list_rows_seen"] == 1
+
+
+def test_incomplete_crawl_never_hides_unseen_source_documents(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    seed = session_factory()
+    try:
+        seed.add(
+            SourceDocument(
+                dataset="notices",
+                source_type="html_notice",
+                source_id="GENERALNOTICES:1",
+                source_url="https://www.dongguk.edu/article/GENERALNOTICES/detail/1",
+                document_key="notices:GENERALNOTICES:1",
+                title="기존 공지",
+                category="일반",
+                status="active",
+                miss_count=0,
+            )
+        )
+        seed.commit()
+    finally:
+        seed.close()
+
+    monkeypatch.setattr(notices_sync, "SessionLocal", session_factory)
+    frame = pd.DataFrame(columns=["게시판", "게시판코드", "원문글ID", "상세URL"])
+    frame.attrs["crawl_incomplete_boards"] = ["일반공지"]
+
+    result = notices_sync.collect_notice_documents(
+        frame,
+        allow_missing_detection=True,
+    )
+
+    verification = session_factory()
+    try:
+        document = verification.query(SourceDocument).one()
+        run = verification.query(IngestionRun).one()
+        assert document.status == "active"
+        assert document.miss_count == 0
+        assert run.status == "partial_success"
+        assert "missing detection disabled" in str(run.error_summary)
+        assert result.crawl_incomplete_boards == ["일반공지"]
+    finally:
+        verification.close()
+
+
+def test_pre_collection_failure_is_persisted_in_ingestion_history(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(notices_sync, "SessionLocal", session_factory)
+
+    run_id = notices_sync.record_notice_ingestion_failure(
+        "all boards unreachable",
+        stage="crawl",
+    )
+
+    verification = session_factory()
+    try:
+        run = verification.query(IngestionRun).one()
+        assert run.id == run_id
+        assert run.dataset == "notices"
+        assert run.status == "failed"
+        assert run.finished_at is not None
+        assert run.error_summary == "crawl: all boards unreachable"
+    finally:
+        verification.close()
+
+
+def test_notice_cli_records_crawl_failure_and_returns_failure(monkeypatch):
+    recorded: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(update_notices, "load_known_article_ids_by_board", lambda: {})
+    monkeypatch.setattr(
+        update_notices,
+        "crawl_notices",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("dns unavailable")),
+    )
+    monkeypatch.setattr(
+        update_notices,
+        "record_notice_ingestion_failure",
+        lambda error, stage: recorded.append((stage, str(error))) or 99,
+    )
+
+    succeeded = update_notices._run_once(
+        ["일반공지"],
+        max_pages=1,
+        delay=0,
+        earliest_year=2026,
+        mode="collect-only",
+    )
+
+    assert succeeded is False
+    assert recorded == [("crawl", "dns unavailable")]
+
+
+def test_notice_cli_returns_failure_for_partial_crawl(monkeypatch):
+    frame = pd.DataFrame()
+    monkeypatch.setattr(update_notices, "load_known_article_ids_by_board", lambda: {})
+    monkeypatch.setattr(update_notices, "crawl_notices", lambda **_kwargs: frame)
+    monkeypatch.setattr(
+        update_notices,
+        "sync_notices",
+        lambda *_args, **_kwargs: {
+            "seen": 2,
+            "new": 1,
+            "updated": 0,
+            "deleted": 0,
+            "failed": 0,
+            "incomplete_boards": 1,
+        },
+    )
+
+    succeeded = update_notices._run_once(
+        ["일반공지"],
+        max_pages=1,
+        delay=0,
+        earliest_year=2026,
+        mode="collect-only",
+    )
+
+    assert succeeded is False
 
 
 def test_build_notice_chunks_indexes_title_when_body_is_empty():

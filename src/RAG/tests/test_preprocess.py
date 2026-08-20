@@ -108,3 +108,44 @@ def test_to_chunks_includes_title_prefix():
     docs = [{"doc_id": "d1", "title": "장학 공지", "text": "신청 기간 안내"}]
     chunks = to_chunks(docs, chunk_size=100, include_title=True)
     assert chunks[0]["chunk_text"].startswith("[장학 공지]")
+
+
+# ---------- 숫자 값 보존 (회귀) ----------
+
+def test_normalize_whitespace_keeps_gpa_thresholds_intact():
+    """평점 기준이 쪼개지면 장학·졸업·학사경고 답변의 핵심 수치가 무너진다.
+
+    이 규칙이 없던 동안 코퍼스의 40.8%(13,250/32,508 청크)에서 숫자가 갈라져
+    있었다. "평점 3.5 이상"이 "평점 3. 5 이상"으로 임베딩되고 근거 텍스트로도
+    그대로 LLM에 들어갔다.
+    """
+    assert normalize_whitespace("평점 3.5 이상") == "평점 3.5 이상"
+    assert normalize_whitespace("평균 학점이 2.0 미만인 경우") == "평균 학점이 2.0 미만인 경우"
+
+
+def test_normalize_whitespace_keeps_amounts_and_ratios_intact():
+    assert normalize_whitespace("등록금 1,250,000원") == "등록금 1,250,000원"
+    assert normalize_whitespace("비율 1/2 기준") == "비율 1/2 기준"
+
+
+def test_normalize_whitespace_keeps_numeric_dates_intact():
+    assert normalize_whitespace("개정 2004.04.03, 2023.11.21") == "개정 2004.04.03, 2023.11.21"
+    assert normalize_whitespace("<개정 ’06.12.15>") == "<개정 ’06.12.15>"
+
+
+def test_normalize_whitespace_still_breaks_sentences():
+    """숫자 보호가 문장 분리를 죽이면 안 된다 — 그건 이 규칙의 원래 목적이다."""
+    assert normalize_whitespace("신청하세요. 감사합니다.") == "신청하세요.\n감사합니다."
+    assert normalize_whitespace("끝났다. 2026년에는 달라진다.") == "끝났다.\n2026년에는 달라진다."
+
+
+def test_normalize_whitespace_still_breaks_numbered_lists():
+    assert normalize_whitespace("1. 신청 대상 2. 신청 기간") == "1.\n신청 대상 2.\n신청 기간"
+
+
+def test_normalize_whitespace_breaks_after_a_phone_number_sentence():
+    """전화번호 뒤 마침표는 문장 끝이다(오른쪽이 숫자가 아니므로 분리된다)."""
+    assert (
+        normalize_whitespace("문의: 02-2260-3699. 학사지원팀입니다.")
+        == "문의: 02-2260-3699.\n학사지원팀입니다."
+    )

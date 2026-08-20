@@ -12,9 +12,10 @@ The CSV columns are validated by `scripts/golden_matrix.py`. Multi-value fields
 use `;` as the separator.
 
 - `expected_intent`: one or more acceptable intent identifiers.
-- `allowed_campuses`: campuses that may support this case (`seoul`, `bmc`, or
-  explicitly requested `wise`). A result source labelled `shared` is accepted
-  only when both Seoul and BMC are allowed.
+- `allowed_campuses`: campuses that may support this case (`seoul` or `bmc`).
+  WISE is retained only as a quarantine label and is never an allowed answer
+  campus. A result source labelled `shared` is accepted only when both Seoul
+  and BMC are allowed.
 - `expected_source_types`: at least one required source type for an answerable
   case.
 - `required_keywords`: deterministic answer-completeness evidence. This is a
@@ -27,7 +28,8 @@ use `;` as the separator.
 
 The validator also rejects missing domains, fewer than 160 total questions,
 fewer than 10 questions in a domain, duplicate IDs/questions, and prompts copied
-with only numbers or dates changed.
+with only numbers or dates changed. The `wise_boundary` case type expects a
+deterministic out-of-scope response with no retrieval source or follow-up.
 
 ```bash
 python scripts/golden_matrix.py --json
@@ -39,7 +41,7 @@ Model outputs are JSONL rows conforming to `golden_result.schema.json`. The
 evaluator writes per-question details plus domain-level JSON and Markdown
 reports. The gate is intentionally strict: every declared result must be
 present and pass intent, answer, source, and follow-up contracts; WISE evidence
-in a Seoul/BMC-only case is always fatal.
+in any product answer is always fatal.
 
 ```bash
 python scripts/evaluate_golden_matrix.py \

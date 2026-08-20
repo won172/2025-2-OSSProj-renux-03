@@ -56,6 +56,78 @@ def _patch_direct_path(monkeypatch):
     return saved_logs
 
 
+def _patch_wise_boundary(monkeypatch):
+    saved_logs = []
+    monkeypatch.setattr(
+        rag_service,
+        "_save_rag_evaluation_log",
+        lambda *args, **kwargs: saved_logs.append((args, kwargs)),
+    )
+    monkeypatch.setattr(rag_service, "append_manual_history", lambda *_args: None)
+    monkeypatch.setattr(
+        rag_service,
+        "get_recent_history_text",
+        lambda *_args: pytest.fail("WISE 요청은 대화 이력을 읽기 전에 거절되어야 합니다."),
+    )
+    monkeypatch.setattr(
+        rag_service,
+        "_chat_course_recommendation",
+        lambda *_args: pytest.fail("WISE 요청은 학과 추천 경로로 들어가면 안 됩니다."),
+    )
+    return saved_logs
+
+
+@pytest.mark.asyncio
+async def test_nonstream_wise_request_is_rejected_before_product_routes(monkeypatch):
+    saved_logs = _patch_wise_boundary(monkeypatch)
+    request = SimpleNamespace(state=SimpleNamespace(request_id="wise-nonstream"))
+
+    response = await rag_service.ask(
+        rag_service.AskRequest(question="WISE캠퍼스 휴학 규정 알려줘"),
+        request,
+    )
+
+    assert response.route == ["unknown"]
+    assert response.sources == []
+    assert response.fallback_triggered is True
+    assert response.fallback_reason == rag_service.FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE
+    assert "WISE캠퍼스" in response.answer
+    assert saved_logs[0][0][6:8] == (
+        True,
+        rag_service.FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_wise_request_is_rejected_before_product_routes(monkeypatch):
+    _patch_wise_boundary(monkeypatch)
+    request = SimpleNamespace(state=SimpleNamespace(request_id="wise-stream"))
+
+    response = await rag_service.ask_stream(
+        rag_service.AskRequest(question="경주캠퍼스 학사일정 알려줘"),
+        request,
+    )
+    body = ""
+    async for item in response.body_iterator:
+        body += item.decode() if isinstance(item, bytes) else item
+    payloads = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
+
+    assert [item["type"] for item in payloads] == [
+        "metadata",
+        "text",
+        "completion",
+        "done",
+    ]
+    assert payloads[0]["route"] == ["unknown"]
+    assert payloads[0]["fallback_reason"] == rag_service.FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE
+    assert "WISE캠퍼스" in payloads[1]["content"]
+    assert payloads[2]["sources"] == []
+
+
 def test_old_year_kpi_ignores_years_explicitly_requested_by_user():
     assert rag_service._mentions_unrequested_historical_year(
         "수강신청 기간 알려줘",

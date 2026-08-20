@@ -7,6 +7,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,3 +93,30 @@ def test_기간_일정은_시작과_종료를_함께_쓴다():
 def test_시작일이_없으면_종료일만_표기한다():
     assert format_schedule_period(None, "2026-08-02") == "2026-08-02"
     assert format_schedule_period("", "") == ""
+
+
+def test_홈_브리핑과_직접답변은_학식_csv가_아닌_정본을_읽는다(monkeypatch):
+    import api.rag_service as rag_service
+
+    today = rag_service.kst_now().strftime("%Y-%m-%d")
+    canonical = pd.DataFrame([
+        {
+            "date": today,
+            "restaurant": "학생식당",
+            "menu_text": "[중식] 김치찌개",
+            "is_closed": "0",
+        }
+    ])
+    monkeypatch.setattr(rag_service, "load_meals_from_db", lambda: canonical)
+
+    def fail_if_csv_is_used(*args, **kwargs):
+        raise AssertionError("학식 런타임 경로가 CSV를 읽었습니다")
+
+    monkeypatch.setattr(rag_service.pd, "read_csv", fail_if_csv_is_used)
+
+    assert rag_service._briefing_meals() == [
+        {"corner": "학생식당 중식", "menu": "김치찌개"}
+    ]
+    rows = rag_service._load_meal_rows_for_direct_answer()
+    assert len(rows) == 1
+    assert rows[0].restaurant == "학생식당"

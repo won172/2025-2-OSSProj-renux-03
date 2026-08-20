@@ -116,7 +116,7 @@ def test_distinctive_compound_can_ground_a_concise_followup_and_lineage():
     assert details == [{"question": question, "source_refs": [source_reference(sources[0])]}]
 
 
-def test_wise_followup_is_allowed_only_in_wise_scope_when_source_supports_it():
+def test_wise_followup_is_rejected_even_when_legacy_context_marks_wise_scope():
     wise_sources = [{
         "source": "rules",
         "title": "WISE캠퍼스 휴학 규정",
@@ -132,7 +132,7 @@ def test_wise_followup_is_allowed_only_in_wise_scope_when_source_supports_it():
         supported_domains=["rules"],
         count=3,
     )
-    assert result == ["WISE캠퍼스 휴학 신청 서류는 무엇인가요?"]
+    assert result == []
 
 
 def test_answer_paths_do_not_wait_for_followup_generation():

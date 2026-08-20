@@ -108,6 +108,16 @@ def _validated_candidate_fingerprint(status: int, payload: dict[str, Any]) -> di
     return payload
 
 
+def _candidate_ready(status: int, payload: dict[str, Any]) -> bool:
+    """A release candidate must attest readiness, not merely answer requests."""
+    return (
+        status == 200
+        and isinstance(payload, dict)
+        and payload.get("status") == "ready"
+        and payload.get("ready", True) is True
+    )
+
+
 def _normalize_source(source: dict[str, Any]) -> dict[str, Any]:
     return normalized_source_contract(source)
 
@@ -309,6 +319,23 @@ def main(argv: list[str] | None = None) -> int:
         ready_status, ready_payload = _request_json(f"{base_url}/ready", None, min(args.timeout, 30), headers)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         ready_status, ready_payload = 0, {"error": f"{type(exc).__name__}: {exc}"}
+    if not _candidate_ready(ready_status, ready_payload):
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        readiness_record = {
+            "schema_version": 1,
+            "endpoint_ready_status": ready_status,
+            "payload": ready_payload,
+        }
+        (args.output_dir / "readiness.json").write_text(
+            json.dumps(readiness_record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(
+            f"Candidate readiness gate failed with HTTP {ready_status}; "
+            "golden requests were not sent.",
+            file=sys.stderr,
+        )
+        return 5
     try:
         fingerprint_status, fingerprint_payload = _request_json(
             f"{base_url}/evaluation/fingerprint",
@@ -369,6 +396,7 @@ def main(argv: list[str] | None = None) -> int:
     complete = not selected_ids and len(results) == len(all_cases) and not failures
     release_eligible = (
         complete
+        and _candidate_ready(ready_status, ready_payload)
         and not dirty
         and commit_sha != "unavailable"
         and candidate_fingerprint["build_revision"] == commit_sha

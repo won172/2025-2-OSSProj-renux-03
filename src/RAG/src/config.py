@@ -5,8 +5,25 @@ import os
 from pathlib import Path
 from typing import Dict
 
+from dotenv import load_dotenv
+
 # 주요 파일 시스템 경로를 정의한다.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _load_project_env(base_dir: Path = BASE_DIR) -> bool:
+    """Load the local RAG `.env` without overriding deployed environment values.
+
+    Docker Compose and production secret managers inject real environment
+    variables before Python starts.  Local Python/pytest commands do not, so
+    they previously ignored the existing `src/RAG/.env`.  An explicit path
+    avoids current-working-directory dependent behavior.
+    """
+    return bool(load_dotenv(dotenv_path=base_dir / ".env", override=False))
+
+
+_load_project_env()
+
 DATA_DIR = BASE_DIR / "data"
 ARTIFACT_DIR = BASE_DIR / "artifacts"
 CHROMA_DIR = ARTIFACT_DIR / "db_chroma"
@@ -129,16 +146,6 @@ ACTIVE_NOTICE_UNKNOWN_MAX_AGE_DAYS = int(
 # 컨텍스트 관련 설정
 MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "4000"))
 
-# LLM 라우터가 각 데이터셋의 역할을 이해하는 데 사용하는 설명
-LLM_ROUTER_DESCRIPTIONS = {
-    "notices": "학교 생활 전반에 걸친 공지사항, 모집, 발표, 장학금, 등록금, 입시, 휴학, 복학 관련 안내입니다.",
-    "rules": "학사 운영, 졸업, 성적, 징계 등 학교의 공식적인 학칙, 규정, 시행세칙에 대한 정보입니다.",
-    "schedule": "수강신청, 개강, 종강, 방학, 시험 등 주요 학사일정에 대한 정보입니다.",
-    "courses": "개설된 교과목, 수업, 강의, 전공, 선수과목, 학점, 이수구분 등 교과 과정에 대한 상세 정보입니다.",
-    "staff": "교직원, 교수, 행정 부서의 연락처, 담당 업무 정보입니다.",
-    "meals": "학생식당(상록원 1/2/3층, 솥앤누들, 누리터, 경영관 D-Flex) 학식 식단, 오늘/이번주 메뉴, 중식·석식, 가격 정보입니다.",
-}
-
 # OpenAI/LLM 기본 설정.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # 질의분석/라우터용 (항상 OpenAI)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -154,7 +161,6 @@ RAG_NOTICE_IMAGE_OCR_MAX_BYTES = int(
 RAG_NOTICE_IMAGE_OCR_MIN_TEXT_CHARS = int(
     os.getenv("RAG_NOTICE_IMAGE_OCR_MIN_TEXT_CHARS", "20")
 )
-RAG_ROUTER_CACHE_TTL_SECONDS = int(os.getenv("RAG_ROUTER_CACHE_TTL_SECONDS", "300"))
 RAG_SEMANTIC_CACHE_ENABLED = os.getenv("RAG_SEMANTIC_CACHE_ENABLED", "0") == "1"
 RAG_SEMANTIC_CACHE_THRESHOLD = float(os.getenv("RAG_SEMANTIC_CACHE_THRESHOLD", "0.97"))
 RAG_SEMANTIC_CACHE_TTL_SECONDS = int(os.getenv("RAG_SEMANTIC_CACHE_TTL_SECONDS", "1800"))
@@ -174,6 +180,11 @@ OPENAI_QUERY_ANALYSIS_MODEL = os.getenv(
     "OPENAI_QUERY_ANALYSIS_MODEL",
     OPENAI_MODEL,
 )
+# ⚠️ 라우팅은 LLM을 쓰지 않는다(src/services/router.py 참고). 이 값은 아무 모델도
+# 호출하지 않으며, 오직 골든 실행 매니페스트의 required 필드
+# `runtime_config.router_model`을 채우기 위해 남아 있다
+# (tests/golden_run_manifest.schema.json). 매니페스트에서 이 필드를 걷어낼 때
+# 함께 지운다 — 릴리스 계약 변경이라 별도 판단이 필요하다.
 OPENAI_ROUTER_MODEL = os.getenv("OPENAI_ROUTER_MODEL", OPENAI_MODEL)
 OPENAI_EVIDENCE_MODEL = os.getenv("OPENAI_EVIDENCE_MODEL", OPENAI_CHAT_MODEL)
 OPENAI_GROUNDING_MODEL = os.getenv("OPENAI_GROUNDING_MODEL", OPENAI_CHAT_MODEL)
@@ -212,10 +223,12 @@ RAG_GROUNDING_FAILURE_POLICY = os.getenv(
     "RAG_GROUNDING_FAILURE_POLICY",
     "replace",
 ).strip().lower()
-# grounding 실패 시 이미 전송한 토큰을 회수할 수 없으므로, 검증을 켠 스트림은 기본적으로
-# 생성 결과를 메모리에 모아 검증한 뒤 한 번에 내보낸다.
+# 스트림은 기본적으로 생성 토큰을 즉시 내보낸다. 켜면 생성 결과를 메모리에 모아
+# grounding 검증을 마친 뒤 한 번에 내보내므로, 사용자는 생성+검증이 모두 끝날 때까지
+# (실측 6초 이상) 빈 화면을 본다. 끈 상태에서 검증이 실패하면 이미 보낸 토큰을 회수할 수
+# 없으므로 답변 뒤에 정정 문구를 덧붙인다(_apply_grounding_failure_policy).
 RAG_STREAM_BUFFER_UNTIL_GROUNDED = (
-    os.getenv("RAG_STREAM_BUFFER_UNTIL_GROUNDED", "1") == "1"
+    os.getenv("RAG_STREAM_BUFFER_UNTIL_GROUNDED", "0") == "1"
 )
 # 질의 분석의 intent와 안전한 키워드 보강으로 필요한 데이터셋만 검색한다.
 # 장애 진단 등에서만 환경변수로 전체 검색을 명시적으로 켤 수 있다.
@@ -236,6 +249,25 @@ RAG_EVIDENCE_CANDIDATES_PER_DATASET = int(os.getenv("RAG_EVIDENCE_CANDIDATES_PER
 RAG_EVIDENCE_MAX_CANDIDATES = int(os.getenv("RAG_EVIDENCE_MAX_CANDIDATES", "18"))
 RAG_EVIDENCE_TEXT_CHARS = int(os.getenv("RAG_EVIDENCE_TEXT_CHARS", "700"))
 RAG_EVIDENCE_TIMEOUT_SECONDS = int(os.getenv("RAG_EVIDENCE_TIMEOUT_SECONDS", "20"))
+# 근거 셀렉터가 "관련 있는 것이 없다"고 판정했을 때 그 판정을 존중할지.
+#
+# 종전에는 무조건 뒤집고 느슨한 어휘 폴백으로 문서를 되살렸다. 골든 190문항
+# 실측에서 그렇게 되살린 41건 중 34건(83%)이 결국 grounding 가드로 거절됐다 —
+# 생성·검증 LLM을 두 번 더 태우고(p50 약 3.2초) 같은 결론에 도달한 셈이다.
+# 켜면 어휘 근거가 뚜렷한 후보만 되살리고, 없으면 곧바로 "찾지 못했습니다"로 간다.
+#
+# 골든 190문항 검증 결과(doc/rag-v2-analysis.md 13.4)를 보고 켜기로 결정했다.
+#   자료 없는 질문의 올바른 거절   2/12 → 10/12
+#   답할 수 있던 질문의 답변 손실   약 13건
+#   낭비되던 생성·검증 LLM 왕복     24~27건 감소
+# 실행 간 노이즈 바닥은 3건이므로 두 효과 모두 실재한다. 잘못된 답을 줄이는 쪽을
+# 택한 **제품 판단**이며, 답변 커버리지를 우선하려면 0으로 되돌리면 된다.
+RAG_HONOR_SELECTOR_REFUSAL = os.getenv("RAG_HONOR_SELECTOR_REFUSAL", "1") == "1"
+# 셀렉터 거절을 뒤집으려면 후보가 질문 내용어의 이 비율 이상을 담아야 한다.
+# 실측: 실제 답변으로 이어진 건들의 커버리지 중앙값 0.67, 가드로 끝난 건들 0.40.
+RAG_SELECTOR_REFUSAL_MIN_COVERAGE = float(
+    os.getenv("RAG_SELECTOR_REFUSAL_MIN_COVERAGE", "0.6")
+)
 
 # 데이터 자동 갱신 스케줄러 (rag-service 프로세스 내 APScheduler).
 # 이미 로드된 임베딩 모델을 재사용하고 Chroma 클라이언트를 단일 프로세스가 소유하므로
@@ -253,6 +285,15 @@ RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS = float(
     os.getenv("RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS", "15")
 )
 RAG_SCHEDULER_REQUEST_RETRIES = int(os.getenv("RAG_SCHEDULER_REQUEST_RETRIES", "2"))
+# Optional Slack-compatible operations webhook.  Only aggregate scheduler
+# status is sent; document content, queries, credentials, and source payloads
+# are never included.
+RAG_SCHEDULER_ALERT_WEBHOOK_URL = (
+    os.getenv("RAG_SCHEDULER_ALERT_WEBHOOK_URL", "").strip() or None
+)
+RAG_SCHEDULER_ALERT_TIMEOUT_SECONDS = float(
+    os.getenv("RAG_SCHEDULER_ALERT_TIMEOUT_SECONDS", "5")
+)
 # 공지 인덱스 재생성 시 Chroma 전량 재임베딩을 피하고 증분 dense 유지를 사용한다.
 # (변경/신규 공지는 _upsert_notice_chunks가 이미 Chroma에 증분 upsert/삭제하므로,
 #  refresh 단계에서는 parquet/TF-IDF만 전체 재생성하면 된다. Chroma 카운트가 어긋나면
@@ -328,7 +369,6 @@ __all__ = [
     "LEXICAL_BACKEND",
     "HYBRID_TITLE_FOCUS_WEIGHT",
     "MAX_CONTEXT_LENGTH",
-    "LLM_ROUTER_DESCRIPTIONS",
     "OPENAI_MODEL",
     "OPENAI_API_KEY",
     "RAG_REQUIRE_OPENAI_API_KEY",
@@ -337,7 +377,6 @@ __all__ = [
     "RAG_NOTICE_IMAGE_OCR_MAX_IMAGES",
     "RAG_NOTICE_IMAGE_OCR_MAX_BYTES",
     "RAG_NOTICE_IMAGE_OCR_MIN_TEXT_CHARS",
-    "RAG_ROUTER_CACHE_TTL_SECONDS",
     "RAG_SEMANTIC_CACHE_ENABLED",
     "RAG_SEMANTIC_CACHE_THRESHOLD",
     "RAG_SEMANTIC_CACHE_TTL_SECONDS",
@@ -377,12 +416,16 @@ __all__ = [
     "RAG_EVIDENCE_MAX_CANDIDATES",
     "RAG_EVIDENCE_TEXT_CHARS",
     "RAG_EVIDENCE_TIMEOUT_SECONDS",
+    "RAG_HONOR_SELECTOR_REFUSAL",
+    "RAG_SELECTOR_REFUSAL_MIN_COVERAGE",
     "RAG_SCHEDULER_ENABLED",
     "RAG_NOTICES_REFRESH_HOURS",
     "RAG_MEALS_REFRESH_HOURS",
     "RAG_NOTICES_REFRESH_MAX_PAGES",
     "RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS",
     "RAG_SCHEDULER_REQUEST_RETRIES",
+    "RAG_SCHEDULER_ALERT_WEBHOOK_URL",
+    "RAG_SCHEDULER_ALERT_TIMEOUT_SECONDS",
     "RAG_NOTICES_INCREMENTAL_EMBED",
     "MAX_HISTORY_STORE_SIZE",
     "REDIS_URL",

@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -26,15 +24,29 @@ from src.database import (
 from src.models.embedding import encode_texts
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
-    _persist_chunks,
+    _persist_replacing_collection,
     build_notice_chunks,
     build_notice_index_frame_from_db,
     persist_dataset_artifacts_only,
+    update_collection_metadata_from_frame,
+)
+from src.services.ingest_runtime import serialized_ingest
+from src.pipelines.canonical import canonical_hash, canonical_json, source_document_key
+from src.utils.notice_visibility import (
+    DEPARTMENT_NOTICE_BOARDS,
+    DEPARTMENT_VISIBILITY,
+    PUBLIC_VISIBILITY,
+    clean_department,
+    extract_department_from_notice_content,
 )
 from src.utils.preprocess import standardize_date
-from src.vectorstore.chroma_client import count_items, delete_items, reset_collection, upsert_items
+from src.vectorstore.chroma_client import (
+    delete_items,
+    get_all_ids,
+    upsert_items,
+)
 
-NOTICE_SCHEMA_VERSION = 2
+NOTICE_SCHEMA_VERSION = 3
 NOTICE_COLLECTION = DATASET_ARTIFACTS["notices"].collection
 AUTO_NOTICE_FILTER = (Notice.is_manual == 0) | (Notice.is_manual.is_(None))
 NOTICE_REQUIRED_FIELDS = {
@@ -55,16 +67,11 @@ class NoticeCollectResult:
     documents_updated: int
     documents_deleted: int
     documents_failed: int
+    crawl_incomplete_boards: list[str]
 
 
 def _safe_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value)
-
-
-def _json_default(value: Any):
-    if isinstance(value, (datetime, pd.Timestamp)):
-        return value.isoformat()
-    return str(value)
 
 
 def _coerce_bool(value: Any) -> bool:
@@ -103,19 +110,15 @@ def _normalize_attachments(value: Any) -> tuple[list[dict[str, Any]], bool]:
 
 
 def _hash_notice_content(record: dict[str, Any]) -> str:
-    raw = json.dumps(
+    return canonical_hash(
         {
             "title": record["title"],
             "category": record["category"],
             "posted_at": record["published_at"],
             "content_text": record["content_text"],
             "attachments": record["attachments"],
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        default=_json_default,
+        }
     )
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 def _canonical_notice_category(
@@ -156,10 +159,14 @@ def _normalize_notice_record(row: pd.Series) -> tuple[dict[str, Any], bool]:
         board_name,
         board_code,
     )
+    raw_source_type = row.get("source_type")
+    source_type = "" if raw_source_type is None else str(raw_source_type).strip()
+    if not source_type or source_type.lower() in {"nan", "none"}:
+        source_type = "html_notice"
     normalized = {
         "document_key": document_key,
         "dataset": "notices",
-        "source_type": str(row.get("source_type") or "html_notice").strip(),
+        "source_type": source_type,
         "source_id": source_id,
         "board_name": board_name,
         "board_code": board_code,
@@ -306,8 +313,196 @@ def _normalized_notice_to_notice_row(normalized: dict[str, Any], *, db_id: int |
         "본문HTML": normalized.get("content_html", ""),
         "첨부파일": normalized.get("attachments", []),
         "source_type": normalized.get("source_type", "html_notice"),
+        # 공식 수집 공지는 대상 학과 제한 없이 공개한다. 학과 전용 범위는 수동
+        # 제출 경로에서만 명시적으로 부여된다.
+        "department": "",
+        "visibility": PUBLIC_VISIBILITY,
         "db_id": db_id,
     }
+
+
+def ensure_manual_notice_source_document(
+    session,
+    notice: Notice,
+    *,
+    existing_document: SourceDocument | None = None,
+    now=None,
+) -> SourceDocument:
+    """Upsert one manually curated notice into the canonical source layer."""
+    source_id = f"manual_notice:{notice.id}"
+    source_url = str(notice.detail_url or f"manual://notice/{notice.id}").strip()
+    # Persist the synthetic identity on the projection too.  This keeps admin
+    # updates, DB-only rebuilds, and quality checks on the same parent URL.
+    notice.detail_url = source_url
+    try:
+        attachments = json.loads(notice.attachments or "[]")
+    except (TypeError, json.JSONDecodeError):
+        attachments = []
+    if not isinstance(attachments, list):
+        attachments = []
+    payload = {
+        "source_id": source_id,
+        "source_type": "manual_notice",
+        "board_name": str(notice.board or ""),
+        "title": str(notice.title or ""),
+        "category": str(notice.category or ""),
+        "published_at": str(notice.published_date or ""),
+        "is_pinned": str(notice.is_fixed or "").strip().lower() in {"1", "true", "y"},
+        "detail_url": source_url,
+        "content_text": str(notice.content or ""),
+        "attachments": attachments,
+        "department": clean_department(notice.department),
+        "visibility": (
+            DEPARTMENT_VISIBILITY
+            if str(notice.visibility or "").strip() == DEPARTMENT_VISIBILITY
+            and clean_department(notice.department)
+            else PUBLIC_VISIBILITY
+        ),
+    }
+    document = existing_document
+    if document is None:
+        document = (
+            session.query(SourceDocument)
+            .filter(
+                SourceDocument.dataset == "notices",
+                SourceDocument.source_id == source_id,
+            )
+            .one_or_none()
+        )
+    if document is None:
+        document = SourceDocument(
+            dataset="notices",
+            source_type="manual_notice",
+            source_id=source_id,
+            document_key=source_document_key("notices", source_id),
+        )
+        session.add(document)
+    timestamp = now or kst_now()
+    document.source_type = "manual_notice"
+    document.source_url = source_url
+    document.document_key = source_document_key("notices", source_id)
+    document.title = payload["title"]
+    document.category = payload["category"]
+    document.published_at = payload["published_at"]
+    document.status = "active"
+    document.content_hash = canonical_hash(payload)
+    document.schema_version = NOTICE_SCHEMA_VERSION
+    document.raw_payload_json = canonical_json(payload)
+    document.normalized_payload_json = canonical_json(payload)
+    document.collected_at = document.collected_at or timestamp
+    document.last_parsed_at = timestamp
+    document.parse_error = None
+    # Manual chunks predate SourceDocument and often have a NULL or legacy
+    # ``notice:<db_id>`` parent.  Repair them whenever this entry point runs.
+    for chunk in session.query(Chunk).filter(Chunk.notice_id == notice.id).all():
+        chunk.doc_id = document.document_key
+    return document
+
+
+def backfill_manual_notice_department_scopes(session=None) -> list[int]:
+    """기존 학과 콘솔 수동 공지에 남은 ``주관: 학과`` 표기를 구조화한다.
+
+    기존 공식 수집 공지는 건드리지 않는다. 범위를 알 수 없는 오래된 수동 공지도
+    임의로 숨기지 않고 공개 상태를 유지한다.
+    """
+    owns_session = session is None
+    if session is None:
+        session = SessionLocal()
+
+    changed_ids: list[int] = []
+    try:
+        notices = (
+            session.query(Notice)
+            .filter(Notice.is_manual == 1, Notice.board.in_(DEPARTMENT_NOTICE_BOARDS))
+            .order_by(Notice.id.asc())
+            .all()
+        )
+        for notice in notices:
+            department = clean_department(notice.department) or extract_department_from_notice_content(
+                notice.content
+            )
+            if not department:
+                continue
+            if (
+                clean_department(notice.department) != department
+                or str(notice.visibility or "").strip() != DEPARTMENT_VISIBILITY
+            ):
+                notice.department = department
+                notice.visibility = DEPARTMENT_VISIBILITY
+                changed_ids.append(notice.id)
+                ensure_manual_notice_source_document(session, notice)
+        if owns_session and changed_ids:
+            session.commit()
+        return changed_ids
+    except Exception:
+        if owns_session:
+            session.rollback()
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def _ensure_manual_notice_source_documents(session) -> int:
+    """Register every manually curated Notice row in the canonical source layer."""
+    notices = session.query(Notice).filter(Notice.is_manual == 1).order_by(Notice.id.asc()).all()
+    if not notices:
+        return 0
+
+    source_ids = [f"manual_notice:{notice.id}" for notice in notices]
+    existing = {
+        document.source_id: document
+        for document in session.query(SourceDocument)
+        .filter(
+            SourceDocument.dataset == "notices",
+            SourceDocument.source_id.in_(source_ids),
+        )
+        .all()
+    }
+    now = kst_now()
+    for notice in notices:
+        ensure_manual_notice_source_document(
+            session,
+            notice,
+            existing_document=existing.get(f"manual_notice:{notice.id}"),
+            now=now,
+        )
+    return len(notices)
+
+
+def backfill_manual_notice_source_documents() -> int:
+    """Persist canonical SourceDocument rows for manual notices."""
+    session = SessionLocal()
+    try:
+        count = _ensure_manual_notice_source_documents(session)
+        session.commit()
+        return count
+    finally:
+        session.close()
+
+
+def record_notice_ingestion_failure(error: object, *, stage: str = "crawl") -> int:
+    """Persist a terminal failure that happened before collection could start.
+
+    ``collect_notice_documents`` owns its own run once a DataFrame exists.  A
+    total list-page outage happens earlier, so without this entry point the CLI
+    exits non-zero but the durable ingestion history incorrectly keeps showing
+    the previous success.
+    """
+    session = SessionLocal()
+    try:
+        run = IngestionRun(
+            dataset="notices",
+            status="failed",
+            finished_at=kst_now(),
+            error_summary=f"{stage}: {error}",
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        return int(run.id)
+    finally:
+        session.close()
 
 
 def _delete_notice_chunks(session, notice_ids: list[int]) -> list[str]:
@@ -439,6 +634,15 @@ def collect_notice_documents(
     *,
     allow_missing_detection: bool = False,
 ) -> NoticeCollectResult:
+    crawl_incomplete_boards = sorted({
+        str(board).strip()
+        for board in incoming_df.attrs.get("crawl_incomplete_boards", [])
+        if str(board).strip()
+    })
+    # Missing detection is only safe after a complete crawl.  If one board is
+    # unavailable or truncated, treating its unseen rows as deletions would
+    # hide valid notices because of a transient upstream outage.
+    effective_missing_detection = allow_missing_detection and not crawl_incomplete_boards
     session = SessionLocal()
     run = IngestionRun(dataset="notices", status="running")
     session.add(run)
@@ -516,8 +720,8 @@ def collect_notice_documents(
             existing.status = status
             existing.content_hash = normalized["content_hash"]
             existing.schema_version = NOTICE_SCHEMA_VERSION
-            existing.raw_payload_json = json.dumps(raw_payload, ensure_ascii=False, default=_json_default)
-            existing.normalized_payload_json = json.dumps(normalized, ensure_ascii=False, default=_json_default)
+            existing.raw_payload_json = canonical_json(raw_payload)
+            existing.normalized_payload_json = canonical_json(normalized)
             existing.collected_at = kst_now()
             existing.last_parsed_at = kst_now()
             existing.parse_error = parse_error
@@ -526,7 +730,7 @@ def collect_notice_documents(
             if should_index and status != "parse_failed":
                 changed_keys.append(normalized["document_key"])
 
-        if allow_missing_detection:
+        if effective_missing_detection:
             visible_statuses = ["active", "updated"]
             candidates = (
                 session.query(SourceDocument)
@@ -557,6 +761,13 @@ def collect_notice_documents(
             run.status = "partial_success"
         else:
             run.status = "success"
+        if crawl_incomplete_boards and run.status == "success":
+            run.status = "partial_success"
+        if crawl_incomplete_boards:
+            run.error_summary = (
+                "incomplete notice boards; missing detection disabled: "
+                + ", ".join(crawl_incomplete_boards)
+            )
         run.documents_seen = documents_seen
         run.documents_new = documents_new
         run.documents_updated = documents_updated
@@ -573,6 +784,7 @@ def collect_notice_documents(
             documents_updated=documents_updated,
             documents_deleted=documents_deleted,
             documents_failed=documents_failed,
+            crawl_incomplete_boards=crawl_incomplete_boards,
         )
     except Exception as exc:
         session.rollback()
@@ -602,8 +814,9 @@ def apply_notice_normalized_documents(
 
         documents = query.all()
         source_docs_by_source_id = {doc.source_id: doc for doc in documents if doc.source_id}
-        active_docs = [doc for doc in documents if doc.status in {"active", "updated"}]
-        hidden_docs = [doc for doc in documents if doc.status in {"hidden", "deleted"}]
+        managed_documents = [doc for doc in documents if doc.source_type != "manual_notice"]
+        active_docs = [doc for doc in managed_documents if doc.status in {"active", "updated"}]
+        hidden_docs = [doc for doc in managed_documents if doc.status in {"hidden", "deleted"}]
 
         normalized_rows: list[dict[str, Any]] = []
         for doc in active_docs:
@@ -615,7 +828,7 @@ def apply_notice_normalized_documents(
             # Lazy, transaction-safe migration for a legacy document reached by
             # normal maintenance.  Subsequent reads no longer touch its file.
             if not doc.normalized_payload_json:
-                doc.normalized_payload_json = json.dumps(normalized, ensure_ascii=False, default=_json_default)
+                doc.normalized_payload_json = canonical_json(normalized)
             normalized_rows.append(normalized)
 
         notice_rows = _upsert_notice_domain_rows(session, normalized_rows)
@@ -643,23 +856,25 @@ def refresh_notice_artifacts() -> None:
     """
     frame = build_notice_index_frame_from_db()
     if frame.empty:
-        reset_collection(NOTICE_COLLECTION)
-        return
+        raise RuntimeError("Canonical notices frame is empty; preserving the existing index.")
 
     aligned = False
     if RAG_NOTICES_INCREMENTAL_EMBED:
         try:
-            aligned = count_items(NOTICE_COLLECTION) == len(frame)
+            live_ids = set(get_all_ids(NOTICE_COLLECTION))
+            frame_ids = set(frame["chunk_id"].astype(str))
+            aligned = live_ids == frame_ids
         except Exception:
             aligned = False
 
     if aligned:
         # Chroma는 이미 증분 유지됨 → 임베딩 없이 parquet/TF-IDF만 전체 재생성.
         persist_dataset_artifacts_only("notices", frame)
+        update_collection_metadata_from_frame("notices", frame)
     else:
-        # 토글 OFF 또는 Chroma 불일치(자가복구): 전량 초기화 후 재임베딩.
-        reset_collection(NOTICE_COLLECTION)
-        _persist_chunks("notices", NOTICE_COLLECTION, frame)
+        # 토글 OFF 또는 Chroma 불일치(자가복구): 기존 벡터를 보존한 채
+        # 새 corpus를 올리고 검증한 뒤 stale ID만 제거한다.
+        _persist_replacing_collection("notices", NOTICE_COLLECTION, frame)
 
 
 def rebuild_notices_from_source_documents() -> tuple[pd.DataFrame, object, object]:
@@ -670,14 +885,16 @@ def rebuild_notices_from_source_documents() -> tuple[pd.DataFrame, object, objec
     """
     session = SessionLocal()
     try:
+        _ensure_manual_notice_source_documents(session)
         documents = (
             session.query(SourceDocument)
             .filter(SourceDocument.dataset == "notices")
             .order_by(SourceDocument.id.asc())
             .all()
         )
-        active_docs = [doc for doc in documents if doc.status in {"active", "updated"}]
-        hidden_docs = [doc for doc in documents if doc.status in {"hidden", "deleted"}]
+        managed_documents = [doc for doc in documents if doc.source_type != "manual_notice"]
+        active_docs = [doc for doc in managed_documents if doc.status in {"active", "updated"}]
+        hidden_docs = [doc for doc in managed_documents if doc.status in {"hidden", "deleted"}]
         normalized = [_load_normalized_notice(doc) for doc in active_docs]
         normalized_rows = [row for row in normalized if row is not None]
         if not normalized_rows:
@@ -707,12 +924,22 @@ def rebuild_notices_from_source_documents() -> tuple[pd.DataFrame, object, objec
     # the regular artifact refresh path does.
     frame = build_notice_index_frame_from_db()
     if frame.empty:
-        reset_collection(NOTICE_COLLECTION)
         return frame, None, None
-    reset_collection(NOTICE_COLLECTION)
-    return _persist_chunks("notices", NOTICE_COLLECTION, frame)
+    return _persist_replacing_collection("notices", NOTICE_COLLECTION, frame)
 
 
+def _notice_collect_summary(result: NoticeCollectResult) -> dict[str, int]:
+    return {
+        "seen": result.documents_seen,
+        "new": result.documents_new,
+        "updated": result.documents_updated,
+        "deleted": result.documents_deleted,
+        "failed": result.documents_failed,
+        "incomplete_boards": len(result.crawl_incomplete_boards),
+    }
+
+
+@serialized_ingest("notices")
 def sync_notices(
     incoming_df: pd.DataFrame,
     *,
@@ -726,13 +953,7 @@ def sync_notices(
     )
 
     if mode == "collect-only":
-        return {
-            "seen": collect_result.documents_seen,
-            "new": collect_result.documents_new,
-            "updated": collect_result.documents_updated,
-            "deleted": collect_result.documents_deleted,
-            "failed": collect_result.documents_failed,
-        }
+        return _notice_collect_summary(collect_result)
 
     target_keys = list(dict.fromkeys(collect_result.changed_keys + collect_result.hidden_keys))
     if mode == "normalize-only":
@@ -741,25 +962,13 @@ def sync_notices(
     if mode == "index-only":
         apply_notice_normalized_documents(document_keys=target_keys, apply_index=True)
         refresh_notice_artifacts()
-        return {
-            "seen": collect_result.documents_seen,
-            "new": collect_result.documents_new,
-            "updated": collect_result.documents_updated,
-            "deleted": collect_result.documents_deleted,
-            "failed": collect_result.documents_failed,
-        }
+        return _notice_collect_summary(collect_result)
 
     if mode == "full-sync":
         apply_notice_normalized_documents(document_keys=target_keys, apply_index=True)
         refresh_notice_artifacts()
 
-    return {
-        "seen": collect_result.documents_seen,
-        "new": collect_result.documents_new,
-        "updated": collect_result.documents_updated,
-        "deleted": collect_result.documents_deleted,
-        "failed": collect_result.documents_failed,
-    }
+    return _notice_collect_summary(collect_result)
 
 
 def normalize_existing_notice_documents() -> None:
@@ -785,6 +994,7 @@ def migrate_legacy_notice_payloads(*, batch_size: int = 500) -> dict[str, int]:
         raise ValueError("batch_size must be positive")
     session = SessionLocal()
     migrated = raw_migrated = missing = invalid = 0
+    source_type_repaired = content_hash_repaired = 0
     try:
         docs = (
             session.query(SourceDocument)
@@ -801,32 +1011,75 @@ def migrate_legacy_notice_payloads(*, batch_size: int = 500) -> dict[str, int]:
                     else:
                         missing += 1
                 else:
-                    doc.normalized_payload_json = json.dumps(payload, ensure_ascii=False, default=_json_default)
+                    doc.normalized_payload_json = canonical_json(payload)
                     migrated += 1
             if not doc.raw_payload_json and doc.raw_path:
                 try:
                     raw_payload = json.loads(Path(doc.raw_path).read_text(encoding="utf-8"))
                     if isinstance(raw_payload, dict):
-                        doc.raw_payload_json = json.dumps(raw_payload, ensure_ascii=False, default=_json_default)
+                        doc.raw_payload_json = canonical_json(raw_payload)
                         raw_migrated += 1
                 except (OSError, UnicodeError, json.JSONDecodeError):
                     # The normalized representation remains sufficient for
                     # retrieval; report the issue through the existing invalid
                     # counter without blocking all valid documents.
                     invalid += 1
+            # Older rows could turn pandas NaN into the literal source type
+            # "nan".  Repair that metadata while the migration already owns
+            # the canonical JSON write, so runtime citations no longer expose
+            # an invalid source type.
+            source_type = str(doc.source_type or "").strip().lower()
+            if source_type in {"nan", "none"} and doc.normalized_payload_json:
+                try:
+                    normalized = json.loads(doc.normalized_payload_json)
+                except (TypeError, json.JSONDecodeError):
+                    normalized = None
+                if isinstance(normalized, dict):
+                    normalized["source_type"] = "html_notice"
+                    doc.source_type = "html_notice"
+                    doc.normalized_payload_json = canonical_json(normalized)
+                    doc.content_hash = _hash_notice_content(normalized)
+                    doc.schema_version = NOTICE_SCHEMA_VERSION
+                    source_type_repaired += 1
+            if doc.normalized_payload_json:
+                try:
+                    normalized_for_hash = json.loads(doc.normalized_payload_json)
+                except (TypeError, json.JSONDecodeError):
+                    normalized_for_hash = None
+                if isinstance(normalized_for_hash, dict):
+                    canonical_payload = canonical_json(normalized_for_hash)
+                    if doc.normalized_payload_json != canonical_payload:
+                        doc.normalized_payload_json = canonical_payload
+                    expected_hash = _hash_notice_content(normalized_for_hash)
+                    if doc.content_hash != expected_hash:
+                        doc.content_hash = expected_hash
+                        content_hash_repaired += 1
+                    if doc.schema_version != NOTICE_SCHEMA_VERSION:
+                        doc.schema_version = NOTICE_SCHEMA_VERSION
             if index % batch_size == 0:
                 session.commit()
         session.commit()
-        return {"migrated": migrated, "raw_migrated": raw_migrated, "missing": missing, "invalid": invalid}
+        return {
+            "migrated": migrated,
+            "raw_migrated": raw_migrated,
+            "missing": missing,
+            "invalid": invalid,
+            "source_type_repaired": source_type_repaired,
+            "content_hash_repaired": content_hash_repaired,
+        }
     finally:
         session.close()
 
 
 __all__ = [
     "apply_notice_normalized_documents",
+    "backfill_manual_notice_department_scopes",
+    "backfill_manual_notice_source_documents",
     "collect_notice_documents",
+    "ensure_manual_notice_source_document",
     "normalize_existing_notice_documents",
     "migrate_legacy_notice_payloads",
+    "record_notice_ingestion_failure",
     "refresh_notice_artifacts",
     "rebuild_notices_from_source_documents",
     "sync_notices",

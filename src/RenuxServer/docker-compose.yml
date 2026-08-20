@@ -94,6 +94,9 @@ services:
             - RAG_ALLOW_AS_OF_OVERRIDE=${RAG_ALLOW_AS_OF_OVERRIDE:-1}
             # 키가 없으면 기동 시점에 실패시킨다. 없이 뜨면 첫 질문에서야 드러난다.
             - RAG_REQUIRE_OPENAI_API_KEY=${RAG_REQUIRE_OPENAI_API_KEY:-1}
+            # 답변 토큰을 즉시 흘려보낸다. 1로 켜면 grounding 검증까지 끝난 뒤에야
+            # 답변 전체가 한 번에 도착해 체감 대기가 6초 이상으로 늘어난다.
+            - RAG_STREAM_BUFFER_UNTIL_GROUNDED=${RAG_STREAM_BUFFER_UNTIL_GROUNDED:-0}
             # appuser 홈 기준으로 HF 캐시 경로를 명시(오프라인 캐시 로드 보장).
             - HOME=/home/appuser
             - HF_HOME=/home/appuser/.cache/huggingface
@@ -126,6 +129,7 @@ services:
             - ./nginx.conf:/etc/nginx/nginx.conf:ro
         depends_on:
             - api
+        restart: unless-stopped
 volumes:
     postgres_data_test:
     redis_data:

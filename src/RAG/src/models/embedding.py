@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import logging
 from typing import Iterable, List
 
 import numpy as np
@@ -16,6 +17,51 @@ from src.config import (
     EMBED_QUERY_PREFIX,
     MODEL_TRUST_REMOTE_CODE,
 )
+from src.services.ingest_runtime import current_ingestion_context
+
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_embedding_matrix(
+    vectors: object,
+    *,
+    expected_rows: int,
+    operation: str,
+) -> np.ndarray:
+    """Reject partial, malformed, or non-finite model output before persistence."""
+    matrix = np.asarray(vectors)
+    dataset, run_id = current_ingestion_context("unknown")
+    if matrix.ndim != 2:
+        raise ValueError(
+            f"embedding output must be a 2D matrix: operation={operation} "
+            f"dataset={dataset} run_id={run_id} shape={matrix.shape}"
+        )
+    if matrix.shape[0] != expected_rows:
+        raise ValueError(
+            f"embedding row count mismatch: operation={operation} dataset={dataset} "
+            f"run_id={run_id} expected={expected_rows} actual={matrix.shape[0]}"
+        )
+    if expected_rows and matrix.shape[1] <= 0:
+        raise ValueError(
+            f"embedding dimension must be positive: operation={operation} "
+            f"dataset={dataset} run_id={run_id} shape={matrix.shape}"
+        )
+    if matrix.size and not np.isfinite(matrix).all():
+        invalid_count = int(matrix.size - np.count_nonzero(np.isfinite(matrix)))
+        raise ValueError(
+            f"embedding output contains non-finite values: operation={operation} "
+            f"dataset={dataset} run_id={run_id} invalid={invalid_count}"
+        )
+    logger.info(
+        "embedding_stage_completed dataset=%s run_id=%s operation=%s rows=%s dimension=%s",
+        dataset,
+        run_id,
+        operation,
+        matrix.shape[0],
+        matrix.shape[1],
+    )
+    return matrix
 
 
 @lru_cache(maxsize=1)
@@ -48,28 +94,44 @@ def encode_texts(texts: Iterable[str], normalize: bool = True) -> np.ndarray:
     E5 계열처럼 문서 프리픽스를 요구하는 모델은 EMBED_PASSAGE_PREFIX로 지원.
     KURE-v1/BGE-M3(기본 모델)는 프리픽스가 비어 있어 기존과 동일하게 동작한다.
     """
+    prepared = _apply_prefix(texts, EMBED_PASSAGE_PREFIX)
+    if not prepared:
+        return _validate_embedding_matrix(
+            np.empty((0, 0), dtype=np.float32),
+            expected_rows=0,
+            operation="passage",
+        )
     embedder = get_embedder()
     vectors = embedder.encode(
-        _apply_prefix(texts, EMBED_PASSAGE_PREFIX),
+        prepared,
         batch_size=EMBED_BATCH_SIZE,
         convert_to_numpy=True,
         normalize_embeddings=normalize,
         show_progress_bar=False,
     )
-    return vectors
+    return _validate_embedding_matrix(
+        vectors,
+        expected_rows=len(prepared),
+        operation="passage",
+    )
 
 
 @lru_cache(maxsize=256)
 def _encode_single_query(text: str, normalize: bool) -> tuple[float, ...]:
     """Cache one query vector so six routerless corpus searches encode once."""
     embedder = get_embedder()
-    vector = embedder.encode(
-        [text],
-        batch_size=EMBED_BATCH_SIZE,
-        convert_to_numpy=True,
-        normalize_embeddings=normalize,
-        show_progress_bar=False,
-    )[0]
+    vectors = _validate_embedding_matrix(
+        embedder.encode(
+            [text],
+            batch_size=EMBED_BATCH_SIZE,
+            convert_to_numpy=True,
+            normalize_embeddings=normalize,
+            show_progress_bar=False,
+        ),
+        expected_rows=1,
+        operation="query_model",
+    )
+    vector = vectors[0]
     return tuple(float(value) for value in vector)
 
 
@@ -78,9 +140,14 @@ def encode_queries(texts: Iterable[str], normalize: bool = True) -> np.ndarray:
     prepared = _apply_prefix(texts, EMBED_QUERY_PREFIX)
     if not prepared:
         return np.empty((0, 0), dtype=np.float32)
-    return np.asarray(
+    vectors = np.asarray(
         [_encode_single_query(text, normalize) for text in prepared],
         dtype=np.float32,
+    )
+    return _validate_embedding_matrix(
+        vectors,
+        expected_rows=len(prepared),
+        operation="query",
     )
 
 
