@@ -155,6 +155,11 @@ def _get_system_prompt(mode: str = "rag") -> str:
 12. 검색 전 분석 단계에서 만들어졌을 수 있는 가정이나 추론을 사실처럼 단정하지 마세요. [참고 자료]에 없는 엔터티를 보완 생성하지 마세요.
 13. [참고 자료] 안의 서로 보완하는 정보는 단순 나열하지 말고 사용자가 다음에 무엇을 해야 하는지 실행 관점에서 통합해 설명하세요. 단, [근거 그룹]이 둘 이상 제공되면 그룹 간 사실이나 해석을 하나로 합치지 말고, 동일 그룹 안에서만 정보를 통합하여 각 그룹을 별도의 동등한 섹션으로 유지하세요. 자료에 없는 사실은 지어내지 마세요.
 14. 문서 제목·본문에 특정 학년도, 학기 또는 계절학기가 명시되면 그 자료는 **그 기간에만** 적용됩니다. 사용자가 같은 기간을 명시하지 않았다면 이를 현재의 일반 절차처럼 설명하지 말고, 먼저 자료의 적용 기간을 밝힌 뒤 현재 적용 여부는 자료만으로 확인되지 않는다고 안내하세요.
+15. 모집·공모·장학·신청·접수의 현재 상태를 답할 때는 문서의 '신청 마감일'과 현재 날짜({current_date})를 반드시 비교하세요. 신청 마감일이 현재 날짜보다 이전이면 그 문서를 '진행 중', '모집 중', '신청 가능' 또는 '접수 가능'으로 표현하지 마세요. 마감이 지난 자료만 있다면 "현재 접수 중인 것은 확인되지 않습니다"라고 답하세요. 신청 마감일이 없으면 진행 중이라고 단정하지 말고 "마감일 확인 필요"라고 명시하세요.
+16. 각 자료의 '시점:' 줄은 시스템이 기준일과 대조해 계산한 결과입니다. 날짜를 직접 빼지 말고 이 줄을 그대로 따르세요.
+   - '이미 지난 일정'이면 '예정', '개최 예정', '열립니다'처럼 앞으로 일어날 일로 쓰지 말고 과거로 서술하세요.
+   - '게시 후 N일 경과'는 자료가 올라온 시점일 뿐 행사가 끝났다는 뜻은 아닙니다. 오래된 자료의 내용을 현재 상태로 단정하지 말고 게시 시점을 함께 밝히세요.
+   - 지난 항목만 있어도 **그 내용을 먼저 알려준 뒤** 지난 일임을 밝히세요. "확인되지 않습니다"는 자료 자체가 없을 때 쓰는 말입니다. 지난 자료가 있는데도 없다고 답하면 안 됩니다. 예: "통계학과 종강총회는 2025년 12월 12일 충무로 꾼포차에서 열렸어요 [문서1]. 이후 예정된 행사는 제공된 자료에서 확인되지 않습니다."
 
 [출력 형식 지침 — 중요]
 - 번호 목록은 반드시 '번호 + 제목'을 같은 줄에 작성하세요.
@@ -525,6 +530,43 @@ def validate_followup_questions(
     return suggestions
 
 
+def source_bounded_followup_fallback(
+    *,
+    question: str,
+    answer: str,
+    source_context: list[dict[str, Any]] | None,
+    campus_scope: str,
+    supported_domains: list[str] | None,
+) -> list[str]:
+    """Build one conservative next step from an exact transported title.
+
+    The model may legitimately return no candidate, especially when a direct
+    schedule/meal answer has only one short source row. The product and golden
+    contract still need a clickable question whose terms are retrievable from
+    that same source. Reusing the official title adds no new factual claim and
+    then passes through the same deterministic validator as model output.
+    """
+    for source in source_context or []:
+        if not isinstance(source, dict):
+            continue
+        title = re.sub(r"\s+", " ", str(source.get("title") or "")).strip(" []")
+        if not title:
+            continue
+        title = title[:80].rstrip()
+        candidates = validate_followup_questions(
+            [f"{title}도 자세히 확인할까요?"],
+            question=question,
+            answer=answer,
+            source_context=source_context,
+            campus_scope=campus_scope,
+            supported_domains=supported_domains,
+            count=1,
+        )
+        if candidates:
+            return candidates
+    return []
+
+
 def build_followup_question_details(
     questions: list[str],
     source_context: list[dict[str, Any]] | None,
@@ -564,7 +606,13 @@ def build_followup_question_details(
             if (overlap >= 2 and ratio >= 0.4) or (
                 distinctive_overlap and len(candidate_tokens) <= 4 and ratio >= 0.25
             ):
-                matches.append((ratio, overlap, source_reference(source)))
+                transported_ref = str(source.get("source_ref") or "").strip()
+                reference = (
+                    transported_ref
+                    if re.fullmatch(r"sha256:[0-9a-f]{64}", transported_ref)
+                    else source_reference(source)
+                )
+                matches.append((ratio, overlap, reference))
         if not matches:
             continue
         matches.sort(key=lambda item: (-item[0], -item[1], item[2]))
@@ -621,7 +669,13 @@ async def generate_followup_questions(
             fallback = _fallback_provider(primary)
             if fallback is None:
                 logger.warning("Follow-up question generation failed with provider '%s': %s", primary, exc)
-                return []
+                return source_bounded_followup_fallback(
+                    question=question,
+                    answer=answer,
+                    source_context=source_context,
+                    campus_scope=campus_scope,
+                    supported_domains=supported_domains,
+                )
             logger.warning(
                 "Follow-up provider '%s' failed (%s); falling back to '%s'.",
                 primary,
@@ -642,9 +696,15 @@ async def generate_followup_questions(
         parsed = json.loads(cleaned)
         if not isinstance(parsed, list):
             logger.debug("Follow-up response was not a JSON array: %s", cleaned)
-            return []
+            return source_bounded_followup_fallback(
+                question=question,
+                answer=answer,
+                source_context=source_context,
+                campus_scope=campus_scope,
+                supported_domains=supported_domains,
+            )
 
-        return validate_followup_questions(
+        validated = validate_followup_questions(
             parsed,
             question=question,
             answer=answer,
@@ -653,9 +713,24 @@ async def generate_followup_questions(
             supported_domains=supported_domains,
             count=count,
         )
+        if validated:
+            return validated
+        return source_bounded_followup_fallback(
+            question=question,
+            answer=answer,
+            source_context=source_context,
+            campus_scope=campus_scope,
+            supported_domains=supported_domains,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to generate follow-up questions: %s", exc)
-        return []
+        return source_bounded_followup_fallback(
+            question=question,
+            answer=answer,
+            source_context=source_context,
+            campus_scope=campus_scope,
+            supported_domains=supported_domains,
+        )
 
 
 async def generate_langchain_answer_stream(

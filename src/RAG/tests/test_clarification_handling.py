@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from api import rag_service  # noqa: E402
@@ -50,6 +52,29 @@ def test_history_allows_a_resolved_followup_to_continue_to_retrieval():
         "그 강의 신청해도 돼?",
         _analysis(needs_clarification=True, reason="강의명이 필요합니다."),
         "직전 대화에서 데이터구조 강의와 학수번호를 확인했습니다.",
+    )
+
+    assert fields == []
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "F 받은 과목을 재수강하면 성적 상한이 어떻게 돼?",
+        "등록금을 카드로 낼 수 있는지와 가능한 카드사를 확인해 줘",
+        "전과 신청 자격과 선발 절차를 알려줘",
+        "졸업하려면 영어 성적을 꼭 제출해야 해?",
+        "성적확정일과 성적장학금 발표일을 함께 비교해 줘",
+    ],
+)
+def test_generic_analyser_ambiguity_does_not_block_a_specified_question(question):
+    fields = rag_service._first_turn_clarification_fields(
+        question,
+        _analysis(
+            needs_clarification=True,
+            reason="확인하려는 대상이나 조건",
+        ),
+        "",
     )
 
     assert fields == []

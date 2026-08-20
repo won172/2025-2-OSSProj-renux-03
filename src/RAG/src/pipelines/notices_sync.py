@@ -159,7 +159,7 @@ def _normalize_notice_record(row: pd.Series) -> tuple[dict[str, Any], bool]:
     normalized = {
         "document_key": document_key,
         "dataset": "notices",
-        "source_type": "html_notice",
+        "source_type": str(row.get("source_type") or "html_notice").strip(),
         "source_id": source_id,
         "board_name": board_name,
         "board_code": board_code,
@@ -305,6 +305,7 @@ def _normalized_notice_to_notice_row(normalized: dict[str, Any], *, db_id: int |
         "본문": normalized.get("content_text", ""),
         "본문HTML": normalized.get("content_html", ""),
         "첨부파일": normalized.get("attachments", []),
+        "source_type": normalized.get("source_type", "html_notice"),
         "db_id": db_id,
     }
 
@@ -371,6 +372,24 @@ def _upsert_notice_chunks(session, notice_rows: list[dict[str, Any]], source_doc
     chunk_df = build_notice_chunks(pd.DataFrame(notice_rows))
     if chunk_df.empty:
         return
+
+    # 문서키 기반 chunk_id는 도메인 Notice 행이 교체되어도 유지될 수 있다.
+    # 새 notice_id만 지우면 이전 행을 가리키는 동일 chunk_id가 남아 UNIQUE 충돌이
+    # 나므로, 삽입 직전에 청크 identity 자체로도 기존 파생 행을 정리한다.
+    replacement_chunk_ids = chunk_df["chunk_id"].astype(str).tolist()
+    colliding = (
+        session.query(Chunk)
+        .filter(Chunk.chunk_id.in_(replacement_chunk_ids))
+        .all()
+    )
+    if colliding:
+        delete_items(
+            NOTICE_COLLECTION,
+            [chunk.chunk_id for chunk in colliding if chunk.chunk_id],
+        )
+        session.query(Chunk).filter(
+            Chunk.chunk_id.in_(replacement_chunk_ids)
+        ).delete(synchronize_session=False)
 
     # Keep relational chunks and their source-document state in the same
     # SQLite transaction.  ``DataFrame.to_sql(..., con=session.bind)`` opens a
@@ -469,7 +488,12 @@ def collect_notice_documents(
             elif existing is None:
                 documents_new += 1
                 should_index = True
-            elif existing.content_hash != normalized["content_hash"] or existing.status in {"hidden", "deleted", "parse_failed"}:
+            elif (
+                existing.content_hash != normalized["content_hash"]
+                or existing.source_url != normalized["detail_url"]
+                or existing.source_type != normalized["source_type"]
+                or existing.status in {"hidden", "deleted", "parse_failed"}
+            ):
                 status = "updated"
                 documents_updated += 1
                 should_index = True
@@ -477,13 +501,14 @@ def collect_notice_documents(
             if existing is None:
                 existing = SourceDocument(
                     dataset="notices",
-                    source_type="html_notice",
+                    source_type=normalized["source_type"],
                     source_id=normalized["source_id"],
                     document_key=normalized["document_key"],
                 )
                 session.add(existing)
                 existing_docs[normalized["source_id"]] = existing
 
+            existing.source_type = normalized["source_type"]
             existing.source_url = normalized["detail_url"]
             existing.title = normalized["title"]
             existing.category = normalized["category"]

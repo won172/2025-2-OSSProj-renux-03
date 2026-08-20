@@ -99,6 +99,21 @@ static public class NotificationApis
         ["academic_schedule"] = "학사일정",
     };
 
+    /// <summary>
+    /// 설정을 처음 만들 때 켜 두는 주제.
+    ///
+    /// 전부 꺼진 채로 시작하면 설정 화면을 찾아 직접 켜기 전까지 알림이 0건이라,
+    /// 기능이 있다는 사실조차 알기 어려웠다. 설정 행이 없다는 것은 사용자가 끈 적이
+    /// 없다는 뜻이므로, 여기서 켜도 누군가의 명시적 선택을 덮어쓰지 않는다.
+    /// 앱 안 배지 수준의 알림이라 기본 노출이 과하지 않다.
+    /// </summary>
+    private static readonly HashSet<string> DefaultEnabledTopics = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "academic_schedule",
+        "course_registration",
+        "scholarship",
+    };
+
     static public void AddNotificationApis(this WebApplication application)
     {
         var app = application.MapGroup("/notifications").RequireAuthorization();
@@ -300,16 +315,31 @@ static public class NotificationApis
             return Results.Ok(new NotificationSyncResult(createdCount, upcomingMatched));
         });
 
-        app.MapGet("", async (ServerDbContext db, HttpContext context, int limit = 50) =>
+        app.MapGet("", async (
+            ServerDbContext db,
+            HttpContext context,
+            int limit = 50,
+            bool includePast = false) =>
         {
             if (!TryGetUserId(context, out Guid userId))
             {
                 return Results.Unauthorized();
             }
 
-            var notifications = await db.UserNotifications
-                .Where(n => n.UserId == userId)
-                .OrderByDescending(n => n.CreatedTime)
+            var query = db.UserNotifications.Where(n => n.UserId == userId);
+
+            // 이미 지난 마감은 기본적으로 감춘다. 어제 끝난 신청이 오늘도 알림함
+            // 맨 위에 남아 있으면 지금 챙겨야 할 것을 가린다.
+            if (!includePast)
+            {
+                var todayUtc = ToUtcDateTime(TodayKst());
+                query = query.Where(n => n.TargetDate >= todayUtc);
+            }
+
+            var notifications = await query
+                // 생성 시각이 아니라 마감이 임박한 순으로 — 알림함의 목적은 '무엇이 급한가'다.
+                .OrderBy(n => n.TargetDate)
+                .ThenByDescending(n => n.CreatedTime)
                 .Take(Math.Clamp(limit, 1, 100))
                 .ToListAsync(context.RequestAborted);
             return Results.Ok(notifications.Select(ToDto).ToList());
@@ -338,6 +368,62 @@ static public class NotificationApis
             }
 
             return Results.Ok(ToDto(notification));
+        });
+
+        // 알림이 쌓였을 때 하나씩 누르지 않아도 되도록.
+        app.MapPost("/read-all", async (ServerDbContext db, HttpContext context) =>
+        {
+            if (!TryGetUserId(context, out Guid userId))
+            {
+                return Results.Unauthorized();
+            }
+
+            var unread = await db.UserNotifications
+                .Where(n => n.UserId == userId && !n.IsRead)
+                .ToListAsync(context.RequestAborted);
+
+            if (unread.Count == 0)
+            {
+                return Results.Ok(new { updated = 0 });
+            }
+
+            var now = DateTime.UtcNow;
+            foreach (var notification in unread)
+            {
+                notification.IsRead = true;
+                notification.ReadTime = now;
+            }
+
+            await db.SaveChangesAsync(context.RequestAborted);
+            return Results.Ok(new { updated = unread.Count });
+        });
+
+        // 읽은 알림 일괄 정리. 지우지 않으면 학기 내내 쌓이기만 한다.
+        app.MapDelete("/read", async (ServerDbContext db, HttpContext context) =>
+        {
+            if (!TryGetUserId(context, out Guid userId))
+            {
+                return Results.Unauthorized();
+            }
+
+            var deleted = await db.UserNotifications
+                .Where(n => n.UserId == userId && n.IsRead)
+                .ExecuteDeleteAsync(context.RequestAborted);
+            return Results.Ok(new { deleted });
+        });
+
+        app.MapDelete("/{id:guid}", async (ServerDbContext db, HttpContext context, Guid id) =>
+        {
+            if (!TryGetUserId(context, out Guid userId))
+            {
+                return Results.Unauthorized();
+            }
+
+            var deleted = await db.UserNotifications
+                .Where(n => n.Id == id && n.UserId == userId)
+                .ExecuteDeleteAsync(context.RequestAborted);
+
+            return deleted > 0 ? Results.Ok(new { deleted }) : Results.NotFound();
         });
     }
 
@@ -371,7 +457,7 @@ static public class NotificationApis
             {
                 UserId = userId,
                 Topic = topic,
-                Enabled = false,
+                Enabled = DefaultEnabledTopics.Contains(topic),
                 RemindDaysBefore = "7,1,0",
                 Channel = "in_app",
                 CreatedTime = now,

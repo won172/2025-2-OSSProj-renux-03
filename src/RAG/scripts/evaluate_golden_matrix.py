@@ -9,7 +9,7 @@ import re
 import sys
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -47,6 +47,12 @@ REFUSAL_LEAK_PATTERNS: dict[str, tuple[str, ...]] = {
 }
 ANSWER_AXIS_EQUIVALENTS: dict[str, tuple[str, ...]] = {
     "연락처": ("연락처", "전화번호", "문의번호", "대표번호"),
+}
+RAG_METRIC_THRESHOLDS = {
+    "faithfulness": 0.75,
+    "answer_relevancy": 0.80,
+    "context_precision": 0.70,
+    "context_recall": 0.80,
 }
 
 
@@ -334,6 +340,13 @@ def _followup_axis(case: GoldenCase, result: dict[str, Any]) -> AxisResult:
     sources = result.get("sources", [])
     source_ids = {source["id"] for source in sources}
     reasons: list[str] = []
+    # Production intentionally calls /followups only after a grounded answer.
+    # Clarifications, refusals, and grounding failures must not be penalized for
+    # suppressing suggestions; exposing any suggestion there violates the gate.
+    if result.get("grounded") is not True:
+        if followups:
+            reasons.append("follow-ups must be suppressed for an ungrounded response")
+        return AxisResult(not reasons, tuple(reasons))
     if case.followup_policy == "none":
         if followups:
             reasons.append("follow-up policy is none")
@@ -389,8 +402,10 @@ def evaluate(
     results: list[dict[str, Any]],
     *,
     run_at: datetime | None = None,
+    metric_thresholds: dict[str, float] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     run_at = run_at or datetime.now(timezone.utc)
+    metric_thresholds = metric_thresholds or RAG_METRIC_THRESHOLDS
     case_by_id = {case.id: case for case in cases}
     result_by_id: dict[str, dict[str, Any]] = {}
     contract_errors = []
@@ -407,6 +422,7 @@ def evaluate(
         contract_errors.append(f"unknown result ids ({len(extra)}): {extra[:10]}")
 
     details = []
+    rag_metric_rows: list[dict[str, float]] = []
     wrong_campus_count = 0
     by_domain_rows: dict[str, list] = defaultdict(list)
     for case in cases:
@@ -435,6 +451,34 @@ def evaluate(
             "all_axes_passed": all(axis.passed for axis in axes.values()),
             "wrong_campus": wrong_campus,
         }
+        if case.answerability == "answerable":
+            expected_datasets = set(case.expected_datasets)
+            source_datasets = [
+                str(source.get("dataset"))
+                for source in result.get("sources", [])
+                if source.get("dataset")
+            ]
+            actual_datasets = set(source_datasets)
+            if "cross_domain" in case.case_types:
+                context_recall = float(expected_datasets.issubset(actual_datasets))
+            else:
+                context_recall = float(bool(expected_datasets & actual_datasets))
+            context_precision = (
+                sum(dataset in expected_datasets for dataset in source_datasets)
+                / len(source_datasets)
+                if source_datasets
+                else 0.0
+            )
+            row_metrics = {
+                "faithfulness": float(
+                    result.get("grounded") is True and axes["source"].passed
+                ),
+                "answer_relevancy": float(axes["answer"].passed),
+                "context_precision": context_precision,
+                "context_recall": context_recall,
+            }
+            rag_metric_rows.append(row_metrics)
+            detail["rag_metrics"] = row_metrics
         details.append(detail)
         by_domain_rows[case.domain].append(detail)
 
@@ -452,6 +496,21 @@ def evaluate(
             },
         }
     all_passed = sum(detail["all_axes_passed"] for detail in details)
+    rag_metrics = {
+        name: (
+            sum(row[name] for row in rag_metric_rows) / len(rag_metric_rows)
+            if rag_metric_rows
+            else None
+        )
+        for name in RAG_METRIC_THRESHOLDS
+    }
+    metric_failures = [
+        f"{name} {rag_metrics[name]:.4f} below {threshold:.4f}"
+        if rag_metrics[name] is not None
+        else f"{name} unavailable"
+        for name, threshold in metric_thresholds.items()
+        if rag_metrics.get(name) is None or rag_metrics[name] < threshold
+    ]
     summary = {
         "schema_version": 2,
         "evaluated": len(details),
@@ -459,8 +518,16 @@ def evaluate(
         "all_axes_passed": all_passed,
         "wrong_campus_count": wrong_campus_count,
         "contract_errors": contract_errors,
+        "rag_metrics": rag_metrics,
+        "rag_metric_thresholds": metric_thresholds,
+        "rag_metric_failures": metric_failures,
         "by_domain": by_domain,
-        "passed": not contract_errors and all_passed == len(cases) and wrong_campus_count == 0,
+        "passed": (
+            not contract_errors
+            and not metric_failures
+            and all_passed == len(cases)
+            and wrong_campus_count == 0
+        ),
     }
     return summary, details
 
@@ -473,6 +540,10 @@ def write_markdown(summary: dict, details: list[dict], path: Path) -> None:
         f"- Evaluated: {summary['evaluated']} / {summary['matrix_questions']}",
         f"- All four axes: {summary['all_axes_passed']}",
         f"- Campus failures: {summary['wrong_campus_count']}",
+        f"- Faithfulness: {summary['rag_metrics']['faithfulness']:.2%}",
+        f"- Answer relevancy: {summary['rag_metrics']['answer_relevancy']:.2%}",
+        f"- Context precision: {summary['rag_metrics']['context_precision']:.2%}",
+        f"- Context recall: {summary['rag_metrics']['context_recall']:.2%}",
         "",
         "| Domain | Evaluated | All axes | Intent | Answer | Source | Follow-up |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -485,6 +556,8 @@ def write_markdown(summary: dict, details: list[dict], path: Path) -> None:
             f"{axis['answer']} | {axis['source']} | {axis['followup']} |"
         )
     lines.extend(["", "## Failures", ""])
+    for failure in summary["rag_metric_failures"]:
+        lines.append(f"- RAG metric: {failure}")
     for detail in (item for item in details if not item["all_axes_passed"]):
         reasons = [
             f"{axis}: {reason}"
@@ -506,6 +579,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--results", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--min-faithfulness", type=float, default=RAG_METRIC_THRESHOLDS["faithfulness"])
+    parser.add_argument("--min-answer-relevancy", type=float, default=RAG_METRIC_THRESHOLDS["answer_relevancy"])
+    parser.add_argument("--min-context-precision", type=float, default=RAG_METRIC_THRESHOLDS["context_precision"])
+    parser.add_argument("--min-context-recall", type=float, default=RAG_METRIC_THRESHOLDS["context_recall"])
     args = parser.parse_args(argv)
     try:
         taxonomy = load_taxonomy(args.taxonomy)
@@ -515,8 +592,25 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("invalid matrix: " + "; ".join(structural))
         results = load_results(args.results, args.schema)
         manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-        run_at = datetime.fromisoformat(manifest["run_completed_at"])
-        summary, details = evaluate(cases, results, run_at=run_at)
+        if manifest.get("as_of"):
+            run_at = datetime.combine(
+                date.fromisoformat(manifest["as_of"]),
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            )
+        else:
+            run_at = datetime.fromisoformat(manifest["run_completed_at"])
+        summary, details = evaluate(
+            cases,
+            results,
+            run_at=run_at,
+            metric_thresholds={
+                "faithfulness": args.min_faithfulness,
+                "answer_relevancy": args.min_answer_relevancy,
+                "context_precision": args.min_context_precision,
+                "context_recall": args.min_context_recall,
+            },
+        )
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         print(f"Golden evaluation contract error: {exc}", file=sys.stderr)
         return 2

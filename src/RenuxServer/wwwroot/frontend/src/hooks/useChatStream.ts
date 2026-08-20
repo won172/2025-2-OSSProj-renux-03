@@ -37,6 +37,8 @@ export interface ChatStreamHandlers {
 export interface ChatStreamResult {
   answer: string
   receivedAny: boolean
+  requestId?: string
+  grounded?: boolean
 }
 
 /**
@@ -103,6 +105,8 @@ export const useChatStream = () => {
         let accumulatedAnswer = ''
         let receivedCompletion = false
         let receivedDone = false
+        let completedRequestId: string | undefined
+        let completedGrounded: boolean | undefined
 
         const processLine = (rawLine: string) => {
           const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
@@ -129,6 +133,7 @@ export const useChatStream = () => {
           }
 
           if (data.type === 'metadata') {
+            completedRequestId = data.request_id ?? completedRequestId
             handlers.onMetadata?.({
               sources: data.sources,
               requestId: data.request_id,
@@ -147,6 +152,10 @@ export const useChatStream = () => {
             })
           } else if (data.type === 'completion') {
             receivedCompletion = true
+            completedRequestId = data.request_id ?? completedRequestId
+            completedGrounded = typeof data.grounded === 'boolean'
+              ? data.grounded
+              : completedGrounded
             handlers.onMetadata?.({
               sources: data.sources,
               requestId: data.request_id,
@@ -194,7 +203,12 @@ export const useChatStream = () => {
           readerRef.current = null
         }
 
-        return { answer: accumulatedAnswer, receivedAny: accumulatedAnswer.trim().length > 0 }
+        return {
+          answer: accumulatedAnswer,
+          receivedAny: accumulatedAnswer.trim().length > 0,
+          requestId: completedRequestId,
+          grounded: completedGrounded,
+        }
       }
 
       try {

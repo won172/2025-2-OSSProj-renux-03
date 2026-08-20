@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,13 +16,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.search.hybrid import (  # noqa: E402
+    BM25LexicalIndex,
     _academic_period_title_adjustment,
     _matches_where,
     build_tfidf_vectorizer,
     hybrid_search,
-    load_tfidf,
-    load_tfidf_with_ids,
-    train_tfidf,
+    load_lexical,
+    load_lexical_with_ids,
+    read_lexical_metadata,
+    train_bm25,
 )
 import src.search.hybrid as hybrid  # noqa: E402
 
@@ -59,17 +62,19 @@ def test_matches_where_unknown_operator_is_conservative():
     assert not _matches_where(_row(major="통계학과"), {"major": {"$gt": "a"}})
 
 
-# ---------- train_tfidf chunk_id 키잉 ----------
+# ---------- BM25 chunk_id 키잉 ----------
 
-def test_train_tfidf_persists_chunk_ids(tmp_path):
-    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
-         patch("src.search.hybrid._vectorizer_path", lambda ident: tmp_path / f"{ident}_tfidf.pkl"):
+def test_train_bm25_persists_chunk_ids_and_metadata(tmp_path):
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path):
         corpus = ["장학금 신청 안내", "수강신청 일정 공지", "졸업 요건 변경"]
         ids = ["c1", "c2", "c3"]
-        train_tfidf("testset", corpus, chunk_ids=ids)
-        _, matrix, loaded_ids = load_tfidf_with_ids("testset")
+        train_bm25("testset", corpus, chunk_ids=ids)
+        index, matrix, loaded_ids = load_lexical_with_ids("testset")
         assert loaded_ids == ids
         assert matrix.shape[0] == 3
+        assert isinstance(index, BM25LexicalIndex)
+        assert read_lexical_metadata("testset")["retriever_type"] == "bm25"
+        assert (tmp_path / "testset_bm25.pkl").exists()
 
 
 def test_korean_tfidf_tokenizer_handles_particle_and_spacing_variants():
@@ -94,23 +99,23 @@ def test_korean_tfidf_tokenizer_exposes_three_syllable_compound_stem():
     assert scores[0] > scores[1]
 
 
-def test_train_tfidf_rejects_mismatched_ids(tmp_path):
-    with patch("src.search.hybrid._vectorizer_path", lambda ident: tmp_path / f"{ident}_tfidf.pkl"):
+def test_train_bm25_rejects_mismatched_ids(tmp_path):
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path):
         with pytest.raises(ValueError):
-            train_tfidf("testset", ["a", "b"], chunk_ids=["only-one"])
+            train_bm25("testset", ["a", "b"], chunk_ids=["only-one"])
 
 
-# ---------- TF-IDF pkl 무결성 검증(매니페스트) ----------
+# ---------- BM25 pkl 무결성 검증(매니페스트) ----------
 
 def test_train_writes_manifest_and_load_verifies(tmp_path):
     """학습 시 매니페스트에 sha256이 기록되고, 정상 로드는 검증을 통과한다."""
     with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
          patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True):
-        train_tfidf("intg", ["가나다", "라마바"], chunk_ids=["c1", "c2"])
+        train_bm25("intg", ["가나다 안내", "라마바 공지"], chunk_ids=["c1", "c2"])
         manifest = hybrid._read_manifest()
-        assert "intg_tfidf.pkl" in manifest
+        assert "intg_bm25.pkl" in manifest
         # 검증이 켜진 상태에서도 정상 아티팩트는 로드된다(예외 없음).
-        vec, matrix = load_tfidf("intg")
+        vec, matrix = load_lexical("intg")
         assert matrix.shape[0] == 2
 
 
@@ -118,12 +123,12 @@ def test_load_rejects_tampered_artifact(tmp_path):
     """매니페스트 해시와 다른(변조된) pkl은 fail-closed로 로드를 거부한다."""
     with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
          patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True):
-        train_tfidf("intg", ["가나다", "라마바"], chunk_ids=["c1", "c2"])
+        train_bm25("intg", ["가나다 안내", "라마바 공지"], chunk_ids=["c1", "c2"])
         # 아티팩트 바이트를 변조 → 해시 불일치 유발
-        pkl = tmp_path / "intg_tfidf.pkl"
+        pkl = tmp_path / "intg_bm25.pkl"
         pkl.write_bytes(pkl.read_bytes() + b"\x00tampered")
         with pytest.raises(ValueError, match="무결성"):
-            load_tfidf("intg")
+            load_lexical("intg")
 
 
 def test_load_strict_mode_rejects_unmanifested(tmp_path):
@@ -131,11 +136,89 @@ def test_load_strict_mode_rejects_unmanifested(tmp_path):
     with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
          patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True), \
          patch("src.search.hybrid.TFIDF_REQUIRE_MANIFEST", True):
-        train_tfidf("intg", ["가나다", "라마바"], chunk_ids=["c1", "c2"])
+        train_bm25("intg", ["가나다 안내", "라마바 공지"], chunk_ids=["c1", "c2"])
         # 매니페스트를 비워 미등록 상태로 만든다
         (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
         with pytest.raises(ValueError):
-            load_tfidf("intg")
+            load_lexical("intg")
+
+
+def test_rebuild_does_not_expose_new_artifact_with_old_manifest(tmp_path, monkeypatch):
+    """동시 로드는 pkl/매니페스트 교체가 모두 끝난 뒤의 세대만 읽는다."""
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
+         patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True):
+        train_bm25("intg", ["이전 문서"], chunk_ids=["old"])
+        original_write = hybrid._write_manifest_unlocked
+        manifest_write_entered = threading.Event()
+        allow_manifest_write = threading.Event()
+
+        def delayed_manifest_write(manifest):
+            manifest_write_entered.set()
+            assert allow_manifest_write.wait(timeout=5)
+            original_write(manifest)
+
+        monkeypatch.setattr(hybrid, "_write_manifest_unlocked", delayed_manifest_write)
+        writer = threading.Thread(
+            target=train_bm25,
+            args=("intg", ["새 문서"]),
+            kwargs={"chunk_ids": ["new"]},
+        )
+        writer.start()
+        assert manifest_write_entered.wait(timeout=5)
+
+        loaded: list[list[str] | None] = []
+
+        def load_during_publish():
+            _, _, chunk_ids = load_lexical_with_ids("intg")
+            loaded.append(chunk_ids)
+
+        reader = threading.Thread(target=load_during_publish)
+        reader.start()
+        reader.join(timeout=0.1)
+        assert reader.is_alive(), "reader must wait while artifact generation is being published"
+
+        allow_manifest_write.set()
+        writer.join(timeout=5)
+        reader.join(timeout=5)
+        assert not writer.is_alive()
+        assert not reader.is_alive()
+        assert loaded == [["new"]]
+
+
+def test_failed_rebuild_keeps_last_verified_artifact(tmp_path, monkeypatch):
+    """직렬화 실패는 기존 정상 파일을 건드리지 않고 임시 파일도 정리한다."""
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path), \
+         patch("src.search.hybrid.TFIDF_VERIFY_INTEGRITY", True):
+        train_bm25("intg", ["정상 문서"], chunk_ids=["stable"])
+        original_digest = hybrid._sha256_file(tmp_path / "intg_bm25.pkl")
+
+        def fail_dump(*_args, **_kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(hybrid.joblib, "dump", fail_dump)
+        with pytest.raises(OSError, match="disk full"):
+            train_bm25("intg", ["미완성 문서"], chunk_ids=["broken"])
+
+        assert hybrid._sha256_file(tmp_path / "intg_bm25.pkl") == original_digest
+        assert not list(tmp_path.glob(".intg_bm25.pkl.*.tmp"))
+        _, _, chunk_ids = load_lexical_with_ids("intg")
+        assert chunk_ids == ["stable"]
+
+
+def test_bm25_normalizes_for_document_length(tmp_path):
+    corpus = [
+        "장학금 신청",
+        "장학금 신청 " + " ".join(f"무관단어{index}" for index in range(80)),
+        "수강신청 일정",
+        "졸업 요건",
+        "도서관 운영시간",
+        "기숙사 입사",
+    ]
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path):
+        index, _ = train_bm25("length", corpus)
+
+    scores = index.score("장학금 신청")
+    assert scores[0] > scores[1] > 0
 
 
 # ---------- hybrid_search (Chroma/임베딩 모킹) ----------
@@ -176,6 +259,42 @@ def test_hybrid_search_maps_sparse_by_chunk_ids():
     top = result.iloc[0]
     assert top["chunk_id"] == "c1"
     assert top["sparse_score"] > 0
+
+
+def test_hybrid_search_uses_bm25_sparse_ranking(tmp_path):
+    chunks_df = pd.DataFrame(
+        {
+            "chunk_id": ["c1", "c2", "c3", "c4"],
+            "chunk_text": [
+                "장학금 신청 안내",
+                "수강신청 일정",
+                "졸업 요건",
+                "도서관 운영시간",
+            ],
+        }
+    )
+    with patch("src.search.hybrid.VECTORIZER_DIR", tmp_path):
+        index, matrix = train_bm25(
+            "bm25-search",
+            chunks_df["chunk_text"],
+            chunk_ids=chunks_df["chunk_id"],
+        )
+    with patch(
+        "src.search.hybrid.get_collection",
+        return_value=_fake_chroma([], []),
+    ), patch("src.search.hybrid.encode_queries", return_value=[[0.0]]):
+        result = hybrid_search(
+            "fake",
+            chunks_df,
+            index,
+            matrix,
+            "장학금 신청",
+            top_k=3,
+            tfidf_chunk_ids=["c1", "c2", "c3", "c4"],
+        )
+
+    assert result.iloc[0]["chunk_id"] == "c1"
+    assert result.iloc[0]["sparse_score"] == pytest.approx(1.0)
 
 
 def test_hybrid_search_falls_back_to_sparse_when_chroma_segment_is_broken():
@@ -336,3 +455,23 @@ def test_hybrid_search_with_meta_preserves_campus_date_and_locator_fields():
     assert result.loc[0, "campus_scope"] == "shared"
     assert result.loc[0, "schedule_id"] == "schedule-db-1"
     assert result.loc[0, "department"] == "학사지원팀"
+
+
+def test_대괄호로_시작하는_제목을_통째로_되살린다():
+    """`[홍보] …`처럼 대괄호 접두어로 시작하는 제목이 흔하다(5,528건 중 1,618건).
+
+    첫 `]`에서 자르면 그런 제목이 전부 "홍보"가 되어 출처 표시가 무의미해지고,
+    제목 일치 보너스도 잘린 조각으로 계산된다.
+    """
+    from src.search.hybrid import _extract_title
+
+    assert (
+        _extract_title("[[홍보] 2026년 소상공인 장학금 안내]\n\n본문")
+        == "[홍보] 2026년 소상공인 장학금 안내"
+    )
+    assert (
+        _extract_title("[2026학년도 2학기 학부 수강신청 안내]\n\n본문")
+        == "2026학년도 2학기 학부 수강신청 안내"
+    )
+    assert _extract_title("제목 래퍼가 없는 본문") == "제목 래퍼가 없는 본문"
+    assert _extract_title("") == ""

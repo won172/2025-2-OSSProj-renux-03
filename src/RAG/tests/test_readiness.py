@@ -197,3 +197,24 @@ def test_ready_reports_embedder_failure(monkeypatch: pytest.MonkeyPatch):
     check = _response_payload(response)["checks"]["embedder"]
     assert check["ready"] is False
     assert check["error"]["code"] == "embedder_warmup_failed"
+
+
+def test_데이터베이스_경로를_환경변수로_바꿀_수_있다(monkeypatch, tmp_path):
+    """경로가 고정이면 개발자는 늘 자기 로컬 DB로만 테스트하게 된다.
+
+    스케줄러 실행 기록을 추가했을 때 로컬 596건이 전부 통과하고 CI에서만 깨졌다 —
+    로컬에는 ingestion_runs 테이블이 있었기 때문이다. 빈 DB를 재현할 수단이 필요하다.
+    """
+    import importlib
+
+    목표 = tmp_path / "empty.db"
+    monkeypatch.setenv("RAG_DATABASE_FILE", str(목표))
+    import src.database as database
+
+    다시읽기 = importlib.reload(database)
+    try:
+        assert 다시읽기.DATABASE_FILE == 목표
+        assert str(목표) in 다시읽기.DATABASE_URL
+    finally:
+        monkeypatch.delenv("RAG_DATABASE_FILE", raising=False)
+        importlib.reload(database)

@@ -10,7 +10,10 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.crawlers import dongguk_notices  # noqa: E402
-from src.pipelines.ingest import build_notice_chunks  # noqa: E402
+from src.pipelines.ingest import (  # noqa: E402
+    _extract_notice_apply_deadline,
+    build_notice_chunks,
+)
 
 
 def test_collect_board_continues_past_known_articles(monkeypatch):
@@ -225,3 +228,39 @@ def test_build_notice_chunks_extracts_deadline_from_title_with_korean_month_day(
     chunks = build_notice_chunks(df)
 
     assert chunks.iloc[0]["apply_deadline"] == "2026-06-21"
+
+
+def test_notice_deadline_title_suffix_patterns_are_supported():
+    cases = {
+        "L-HUSS 여행코스 공모전 밸류업(신안) (2026.08.06까지)": "2026-08-06",
+        "아이디어 공모전 (10월 12일 마감)": "2026-10-12",
+        "교내 프로그램 신청 (12.22까지)": "2026-12-22",
+    }
+
+    for title, expected in cases.items():
+        assert _extract_notice_apply_deadline(
+            title,
+            "",
+            "2026-07-01",
+        ) == expected
+
+
+def test_notice_deadline_without_year_rolls_into_next_year_after_publication():
+    assert _extract_notice_apply_deadline(
+        "겨울 프로그램 신청 (1.15까지)",
+        "",
+        "2026-12-20",
+    ) == "2027-01-15"
+
+
+def test_application_form_window_wins_over_later_result_announcement():
+    content = """
+    지원서 접수: 2026. 8. 5.(수) ~ 8. 13.(목) 14시, nDRIMS 접수
+    비대면 AI 면접: 2026. 8. 19.(수) 10시 ~ 8. 20.(목) 15시
+    합격자 발표: 2026. 8. 27.(목) 17시 이후
+    """
+    assert _extract_notice_apply_deadline(
+        "2027-1학기 파견 영어권 교환학생 선발 일정",
+        content,
+        "2026-07-02",
+    ) == "2026-08-13"

@@ -15,7 +15,9 @@ LIBRARY_CAMPUSES = {
     "중앙도서관": "seoul",
     "바이오약학도서관": "bmc",
 }
-SOURCE_TYPE = "library_operation_time"
+# Golden/source lineage treats campus facility opening hours as a facility
+# guide; the endpoint name is an ingestion detail, not a reader-facing type.
+SOURCE_TYPE = "facility_guide"
 NOTICE_BOARD_CODE = "LIBRARY_HOURS"
 
 
@@ -140,18 +142,26 @@ def _normalize_time_entry(
     is_closed = _required_bool(raw.get("isClose"), f"{path}.isClose")
     is_all_day = _required_bool(raw.get("isAllDayOpen"), f"{path}.isAllDayOpen")
     if is_closed and is_all_day:
-        raise LibraryHoursSchemaError(f"{path} cannot be closed and open 24 hours")
+        # 운영 API는 휴관일에도 24시간 열람실에 두 플래그를 모두 내려준다.
+        # 시설 단위의 ``isAllDayOpen``을 우선하되 모순은 품질 이슈로 남긴다.
+        issues.append(
+            _issue(
+                "conflicting_status_flags",
+                path,
+                "isClose and isAllDayOpen are both true; treating facility as open 24 hours",
+            )
+        )
 
     open_time: str | None = None
     close_time: str | None = None
-    if is_closed:
-        hours_status = "closed"
-        normalized_closed: bool | None = True
-        normalized_24h: bool | None = False
-    elif is_all_day:
+    if is_all_day:
         hours_status = "open_24h"
         normalized_closed = False
         normalized_24h = True
+    elif is_closed:
+        hours_status = "closed"
+        normalized_closed: bool | None = True
+        normalized_24h: bool | None = False
     else:
         open_time = _clock_time(raw.get("openTime"), f"{path}.openTime", allow_2400=False)
         close_time = _clock_time(raw.get("closedTime"), f"{path}.closedTime", allow_2400=True)
@@ -245,9 +255,14 @@ def normalize_library_operation_times(
     prior fetch.  Use :func:`library_hours_for_date`; an absent service date is
     returned as ``status="unknown"``.
     """
-    payload = fetch.payload
-    if not isinstance(payload, dict):
+    raw_payload = fetch.payload
+    if not isinstance(raw_payload, dict):
         raise LibraryHoursSchemaError("payload must be an object")
+    payload = raw_payload
+    if "data" in raw_payload:
+        if raw_payload.get("success") is not True or not isinstance(raw_payload.get("data"), dict):
+            raise LibraryHoursSchemaError("payload.data must be a successful object envelope")
+        payload = raw_payload["data"]
     branches = payload.get("list")
     if not isinstance(branches, list):
         raise LibraryHoursSchemaError("payload.list must be an array")
@@ -255,7 +270,7 @@ def normalize_library_operation_times(
     if not isinstance(total_count, int) or isinstance(total_count, bool):
         raise LibraryHoursSchemaError("payload.totalCount must be an integer")
 
-    raw_payload_hash = _payload_hash(payload)
+    raw_payload_hash = _payload_hash(raw_payload)
     issues: list[dict[str, str]] = []
     if total_count != len(branches):
         issues.append(
@@ -401,7 +416,10 @@ def to_notice_shaped_records(
                 "카테고리": "시설운영",
                 "게시일": record["service_date"],
                 "상단고정": False,
-                "상세URL": record["source_url"],
+                # notices.detail_url is unique.  The official endpoint is shared by
+                # every facility/date row, so a stable fragment preserves both the
+                # canonical source and one-to-one relational identity.
+                "상세URL": f"{record['source_url']}#{record['record_id']}",
                 "본문": _record_content(record),
                 "본문HTML": "",
                 "첨부파일": [],
@@ -465,5 +483,5 @@ __all__ = [
     "normalize_library_operation_times",
     "to_chunk_shaped_records",
     "to_notice_shaped_records",
-]
     "library_hours_for_date",
+]

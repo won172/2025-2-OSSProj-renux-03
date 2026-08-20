@@ -1,1 +1,0 @@
-import{r as t}from"./index-BSdX6aom.js";const e=t.createContext(null),r=()=>{const o=t.useContext(e);if(!o)throw new Error("useAdminConsole은 AdminLayout 내부에서만 사용할 수 있습니다.");return o};export{e as A,r as u};

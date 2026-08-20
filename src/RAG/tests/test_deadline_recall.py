@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import List, Optional, Set
 
 import pandas as pd
+import pytest
 
 # 패키지 경로 설정 (pytest / 직접 실행 모두 호환)
 _RAG_DIR = Path(__file__).resolve().parents[1]
@@ -29,7 +30,13 @@ if str(_RAG_DIR) not in sys.path:
     sys.path.insert(0, str(_RAG_DIR))
 
 from src.config import HYBRID_ALPHA, DEFAULT_TOP_K
-from src.search.hybrid import load_tfidf_with_ids, hybrid_search_with_meta
+from src.search.hybrid import (
+    hybrid_search_with_meta,
+    lexical_artifact_path,
+    load_tfidf_with_ids,
+)
+
+_NOTICE_CHUNKS_PATH = _RAG_DIR / "artifacts" / "chunks" / "notices.parquet"
 
 # --------------------------------------------------------------------------- #
 # Ground-truth 구성
@@ -181,7 +188,7 @@ def _run_search(
 def measure_deadline_recall(verbose: bool = True) -> pd.DataFrame:
     """Recall@K 측정을 실행하고 결과 DataFrame을 반환."""
     # 아티팩트 로드
-    df = pd.read_parquet(_RAG_DIR / "artifacts" / "chunks" / "notices.parquet")
+    df = pd.read_parquet(_NOTICE_CHUNKS_PATH)
     vectorizer, matrix, tfidf_chunk_ids = load_tfidf_with_ids("notices")
 
     ground_truth = _build_ground_truth(df)
@@ -275,7 +282,17 @@ def _print_report(df: pd.DataFrame, ground_truth: dict) -> None:
 # --------------------------------------------------------------------------- #
 
 def test_deadline_recall_baseline():
-    """기본 recall@5 이 0.0 만 나오지 않는지 smoke 체크."""
+    """실제 로컬 인덱스가 있을 때 deadline Recall@40을 smoke-check한다.
+
+    청크와 희소 인덱스는 운영 데이터에서 재생성되는 gitignored 아티팩트다.
+    일반 단위 테스트 CI에는 포함되지 않으므로, 이 검사는 아티팩트를 마운트한
+    통합 환경에서만 실행하고 실제 후보 전체 평가는 golden gate가 담당한다.
+    """
+    lexical_path = lexical_artifact_path("notices")
+    if not _NOTICE_CHUNKS_PATH.exists() or not lexical_path.exists():
+        pytest.skip(
+            "deadline recall requires gitignored notices chunk and lexical artifacts"
+        )
     result = measure_deadline_recall(verbose=True)
     assert not result.empty, "결과 DataFrame이 비어 있음"
     # 장학금 질의 중 하나라도 recall@40 > 0 이어야 한다(기본 연기 검색 가능성 확인)

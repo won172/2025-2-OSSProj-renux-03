@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from src.config import (
-    OPENAI_CHAT_MODEL,
+    OPENAI_EVIDENCE_MODEL,
     RAG_EVIDENCE_TEXT_CHARS,
     RAG_EVIDENCE_TIMEOUT_SECONDS,
 )
@@ -69,7 +69,7 @@ Use only candidate_id values present in the input. Do not answer the question.
 @lru_cache(maxsize=1)
 def _structured_selector():
     llm = ChatOpenAI(
-        model=OPENAI_CHAT_MODEL,
+        model=OPENAI_EVIDENCE_MODEL,
         temperature=0,
         timeout=RAG_EVIDENCE_TIMEOUT_SECONDS,
         max_retries=0,
@@ -135,7 +135,7 @@ async def select_evidence_groups(
             usage_collector,
             stage="evidence_selection",
             provider="openai",
-            model=OPENAI_CHAT_MODEL,
+            model=OPENAI_EVIDENCE_MODEL,
             usage=_extract_usage_metadata(raw) if raw is not None else None,
             latency_ms=(time.perf_counter() - started_at) * 1000,
         )
@@ -149,7 +149,7 @@ async def select_evidence_groups(
                 usage_collector,
                 stage="evidence_selection",
                 provider="openai",
-                model=OPENAI_CHAT_MODEL,
+                model=OPENAI_EVIDENCE_MODEL,
                 usage=None,
                 latency_ms=(time.perf_counter() - started_at) * 1000,
             )

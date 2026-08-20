@@ -14,7 +14,7 @@ from langchain_openai import ChatOpenAI
 
 from src.config import (
     LLM_ROUTER_DESCRIPTIONS,
-    OPENAI_MODEL,
+    OPENAI_ROUTER_MODEL,
     OPENAI_CHAT_TIMEOUT_SECONDS,
     RAG_ROUTER_CACHE_TTL_SECONDS,
 )
@@ -76,24 +76,38 @@ prompt = PromptTemplate(
 
 # 라우팅을 수행할 LLM 체인을 구성합니다.
 # 파싱은 별도로 수행해 실패 시 LLM 원본 출력을 로깅할 수 있게 한다(디버깅 용이).
-llm = ChatOpenAI(
-    model=OPENAI_MODEL,
-    temperature=0,
-    timeout=OPENAI_CHAT_TIMEOUT_SECONDS,
-    max_retries=1,
-    model_kwargs={"response_format": {"type": "json_object"}},
-)
-router_chain = prompt | llm
+# 키가 없는 테스트 수집과 sparse-only 프로세스가 import 단계에서 죽지 않도록
+# 실제 라우팅 요청 시점까지 OpenAI 클라이언트 생성을 미룬다.
+router_chain = None
+
+
+def _get_router_chain():
+    global router_chain
+    if router_chain is None:
+        llm = ChatOpenAI(
+            model=OPENAI_ROUTER_MODEL,
+            temperature=0,
+            timeout=OPENAI_CHAT_TIMEOUT_SECONDS,
+            max_retries=1,
+            model_kwargs={"response_format": {"type": "json_object"}},
+        )
+        router_chain = prompt | llm
+    return router_chain
 _route_cache: dict[str, tuple[float, List[str]]] = {}
 
 
 _KEYWORD_RULES: list[tuple[str, list[str]]] = [
     (r"학식|식단|학생식당|상록원|솥앤누들|누리터|d-?flex|디플렉스|메뉴|중식|석식", ["meals"]),
-    (r"전화|연락처|내선|사무실|행정실|담당|교수", ["staff"]),
+    (r"전화|연락처|내선|사무실|행정실|담당|교수|신고처|문의처|대표번호|이메일", ["staff"]),
     (r"수강신청|취소|재수강|휴학|복학|성적|졸업|학칙|규정|시행세칙|전과|복수전공", ["rules"]),
     (r"개강|종강|시험|일정|기간|학사일정|이번 주|이번 달", ["schedule"]),
     (r"교과|교과목|전공과목|이수구분|선수과목|학점|커리큘럼|교육과정|수업|강의", ["courses"]),
-    (r"공지|장학|모집|발표|등록금|입시|채용|신청", ["notices"]),
+    (
+        r"공지|장학|모집|발표|등록금|입시|채용|신청|"
+        r"교내|캠퍼스|시설|도서관|열람실|와이파이|분실물|셔틀|프린터|"
+        r"학생증|기숙사|생활관|식권|편의점|운영시간|공부\s*공간|학습\s*공간",
+        ["notices"],
+    ),
 ]
 
 def _format_destinations() -> str:
@@ -150,7 +164,7 @@ async def route_query(query: str) -> List[str]:
     
     raw_text = None
     try:
-        raw_message = await router_chain.ainvoke({
+        raw_message = await _get_router_chain().ainvoke({
             "query": query,
             "destinations": formatted_destinations,
         })

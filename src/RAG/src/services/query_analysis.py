@@ -8,7 +8,22 @@ from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, ValidationError
 
-from src.config import OPENAI_MODEL, QUERY_ANALYSIS_MAX_QUERIES, RAG_MAX_SUBQUERIES
+from src.config import (
+    OPENAI_QUERY_ANALYSIS_MODEL,
+    QUERY_ANALYSIS_MAX_QUERIES,
+    RAG_MAX_SUBQUERIES,
+)
+from src.services.conversation import (
+    history_allows_context_rewrite,
+    preserve_original_query,
+)
+from src.services.temporal_context import TemporalContext, build_temporal_context
+from src.utils.query_years import (
+    extract_explicit_years,
+    filter_unstated_year_values,
+    introduces_unstated_year,
+    user_history_only,
+)
 
 VALID_INTENTS = {"notices", "rules", "schedule", "staff", "courses", "meals", "unknown"}
 VALID_DATASETS = {"notices", "rules", "schedule", "staff", "courses", "meals"}
@@ -53,17 +68,23 @@ prompt = PromptTemplate(
 1. 답변을 만들지 말고 검색을 위한 분석만 하세요.
 2. 원문 의미를 바꾸지 마세요.
 3. 추측으로 특정 장학금/학과/부서를 단정하지 마세요.
-4. search_queries는 최대 {max_queries}개만 생성하세요.
-5. search_queries에는 원문을 크게 벗어나지 않는 검색용 표현만 넣으세요.
-6. intent는 반드시 다음 중 하나만 고르세요:
+4. 기준일은 상대 날짜(오늘/이번 주/이번 학기)를 해석할 때만 사용하세요.
+   사용자 질문 또는 사용자 이전 발화에 연도가 없다면 normalized_question,
+   search_queries, sub_queries, entities에 특정 연도를 새로 넣지 마세요.
+5. search_queries는 최대 {max_queries}개만 생성하세요.
+6. search_queries에는 원문을 크게 벗어나지 않는 검색용 표현만 넣으세요.
+7. intent는 반드시 다음 중 하나만 고르세요:
    notices, rules, schedule, staff, courses, meals, unknown
-7. time_focus는 반드시 다음 중 하나만 고르세요:
+8. time_focus는 반드시 다음 중 하나만 고르세요:
    today, recent, this_week, this_month, none
-8. 모호하지만 검색은 가능하면 needs_clarification=true로 두고도 search_queries는 생성하세요.
-9. [이전 대화]가 있고 현재 질문이 후속 질문(대명사·생략 포함, 예: "그럼 신청 기간은?")이면,
-   이전 대화의 주제를 반영해 normalized_question과 search_queries를 **독립적으로 이해 가능한
-   완전한 질문**으로 재작성하세요. 단, 현재 질문이 새로운 주제면 이전 대화는 무시하세요.
-10. 질문이 **여러 종류의 정보를 동시에 요구하는 복합 질문**이면(예: "졸업하려면 뭘 해야 해?",
+9. needs_clarification=true는 대명사·지시어의 대상이 없거나, 질문의 핵심 식별자가 빠져
+   검색 대상을 정할 수 없는 경우에만 사용하세요. 규정의 기준·가능 여부·절차·시점처럼
+   질문 주제가 명시돼 있고 공식 자료에서 답을 찾을 수 있으면 추가 조건이 있으면 더
+   정확해진다는 이유만으로 true로 두지 마세요. 모호하지만 검색은 가능하면
+   search_queries는 생성하세요.
+10. [이전 대화]는 현재 질문과 실질 어휘가 겹칠 때만 제공됩니다. 후속 질문을 재작성하더라도
+   현재 질문 원문을 삭제하거나 다른 문장으로 치환하지 말고, 원문 뒤에 필요한 맥락만 덧붙이세요.
+11. 질문이 **여러 종류의 정보를 동시에 요구하는 복합 질문**이면(예: "졸업하려면 뭘 해야 해?",
     "수강 계획 세워줘", "복수전공 졸업 준비") is_compound=true로 두고 sub_queries를 만드세요.
     - sub_queries는 질문을 측면별로 쪼갠 독립 검색이며, 각 항목에 가장 알맞은 dataset 하나를 지정합니다.
     - 예: 졸업 준비 → [요건은 rules, 전공/이수과목은 courses, 수강신청·졸업논문 일정은 schedule,
@@ -73,6 +94,9 @@ prompt = PromptTemplate(
 
 [이전 대화]
 {history}
+
+[요청 기준 시점]
+{temporal_context}
 
 intent 기준(가장 중심이 되는 단일 측면):
 - notices: 장학, 모집, 발표, 일반 공지, 최신 공지
@@ -88,7 +112,7 @@ intent 기준(가장 중심이 되는 단일 측면):
 JSON 형식:
 {format_instructions}
 """,
-    input_variables=["query", "history"],
+    input_variables=["query", "history", "temporal_context"],
     partial_variables={
         "format_instructions": parser.get_format_instructions(),
         "max_queries": str(QUERY_ANALYSIS_MAX_QUERIES),
@@ -96,24 +120,137 @@ JSON 형식:
     },
 )
 
-llm = ChatOpenAI(
-    model=OPENAI_MODEL,
-    temperature=0,
-    timeout=20,
-    max_retries=1,  # 질의분석은 실패해도 raw 질문으로 폴백되므로 재시도 1회로 TTFB 누적 방지
-    model_kwargs={"response_format": {"type": "json_object"}},
-)
-analysis_chain = prompt | llm | parser
+# API 키가 없는 테스트·readiness 프로세스도 이 모듈을 import할 수 있어야 한다.
+# 체인은 실제 질의분석이 처음 요청될 때만 만든다. 공개 변수는 기존 테스트의
+# monkeypatch 지점을 보존하기 위해 유지한다.
+analysis_chain = None
 
 
-async def analyze_query(query: str, history_text: str = "") -> QueryAnalysisResult | None:
+def _get_analysis_chain():
+    global analysis_chain
+    if analysis_chain is None:
+        llm = ChatOpenAI(
+            model=OPENAI_QUERY_ANALYSIS_MODEL,
+            temperature=0,
+            timeout=20,
+            max_retries=1,  # 실패 시 raw 질문으로 폴백되므로 TTFB 누적 방지
+            model_kwargs={"response_format": {"type": "json_object"}},
+        )
+        analysis_chain = prompt | llm | parser
+    return analysis_chain
+
+
+def enforce_explicit_year_boundary(
+    result: QueryAnalysisResult,
+    *,
+    query: str,
+    history_text: str = "",
+) -> QueryAnalysisResult:
+    """LLM이 사용자에게 없던 연도를 검색 제약으로 발명하지 못하게 한다."""
+    allowed_years = extract_explicit_years(query) | extract_explicit_years(
+        user_history_only(history_text)
+    )
+    normalized = result.normalized_question.strip() or query.strip()
+    if introduces_unstated_year(normalized, allowed_years):
+        normalized = query.strip()
+
+    search_queries = filter_unstated_year_values(
+        result.search_queries,
+        allowed_years=allowed_years,
+    )
+    sub_queries = [
+        candidate
+        for candidate in result.sub_queries
+        if not introduces_unstated_year(candidate.query, allowed_years)
+    ]
+    entities = {
+        key: [
+            value
+            for value in values
+            if not introduces_unstated_year(str(value), allowed_years)
+        ]
+        for key, values in (result.entities or {}).items()
+    }
+    entities = {key: values for key, values in entities.items() if values}
+    return result.model_copy(
+        update={
+            "normalized_question": normalized,
+            "search_queries": search_queries,
+            "sub_queries": sub_queries,
+            "is_compound": bool(result.is_compound and sub_queries),
+            "entities": entities,
+        }
+    )
+
+
+def enforce_original_query_boundary(
+    result: QueryAnalysisResult,
+    *,
+    query: str,
+) -> QueryAnalysisResult:
+    """Reject topic replacements and keep the exact user utterance additive."""
+    original = query.strip()
+    raw_normalized = result.normalized_question.strip()
+    normalized = preserve_original_query(original, raw_normalized)
+    topic_replaced = bool(raw_normalized and normalized is None)
+    if normalized is None:
+        normalized = original
+
+    search_queries: list[str] = []
+    for candidate in result.search_queries:
+        preserved = preserve_original_query(original, candidate)
+        if preserved and preserved not in search_queries:
+            search_queries.append(preserved)
+
+    sub_queries: list[SubQuery] = []
+    for candidate in result.sub_queries:
+        preserved = preserve_original_query(original, candidate.query)
+        if preserved:
+            sub_queries.append(
+                candidate.model_copy(update={"query": preserved})
+            )
+
+    updates: dict[str, object] = {
+        "normalized_question": normalized,
+        "search_queries": search_queries,
+        "sub_queries": sub_queries,
+        "is_compound": bool(result.is_compound and sub_queries),
+    }
+    if topic_replaced:
+        # A stolen normalized question makes the model's route/entities/time
+        # untrustworthy too. Deterministic keyword routing will still recover
+        # school terms present in the raw query.
+        updates.update(
+            {
+                "intent": "unknown",
+                "entities": {},
+                "time_focus": "none",
+                "needs_clarification": False,
+                "clarification_reason": None,
+            }
+        )
+    return result.model_copy(update=updates)
+
+
+async def analyze_query(
+    query: str,
+    history_text: str = "",
+    temporal_context: TemporalContext | None = None,
+) -> QueryAnalysisResult | None:
     if not query.strip():
         return None
 
     try:
-        result = await analysis_chain.ainvoke({
+        temporal = temporal_context or build_temporal_context()
+        safe_history = (
+            history_text
+            if history_allows_context_rewrite(query, history_text)
+            else ""
+        )
+        result = await _get_analysis_chain().ainvoke({
             "query": query,
-            "history": history_text.strip() or "(없음)",
+            "history": safe_history.strip() or "(없음)",
+            "temporal_context": temporal.prompt_text,
         })
     except ValidationError as exc:
         logging.warning("Query analysis validation failed: %s", exc)
@@ -121,6 +258,13 @@ async def analyze_query(query: str, history_text: str = "") -> QueryAnalysisResu
     except Exception as exc:
         logging.warning("Query analysis failed: %s", exc)
         return None
+
+    result = enforce_explicit_year_boundary(
+        result,
+        query=query,
+        history_text=safe_history,
+    )
+    result = enforce_original_query_boundary(result, query=query)
 
     search_queries = []
     for candidate in result.search_queries:
@@ -162,4 +306,10 @@ async def analyze_query(query: str, history_text: str = "") -> QueryAnalysisResu
     )
 
 
-__all__ = ["QueryAnalysisResult", "SubQuery", "analyze_query"]
+__all__ = [
+    "QueryAnalysisResult",
+    "SubQuery",
+    "analyze_query",
+    "enforce_explicit_year_boundary",
+    "enforce_original_query_boundary",
+]

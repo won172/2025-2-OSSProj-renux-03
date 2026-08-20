@@ -131,6 +131,43 @@ const SettingsPage = () => {
     })
   }
 
+  /** 주제를 하나씩 누르지 않아도 되게 — 처음 설정할 때와 잠시 끄고 싶을 때 모두 쓰인다. */
+  const handleToggleAllTopics = (enabled: boolean) => {
+    setPreferences((current) => current.map((preference) => ({ ...preference, enabled })))
+  }
+
+  /** 주제별로 지금 몇 건이 걸려 있는지 — 켜고 나서 무엇이 오는지 미리 보인다. */
+  const deadlineCountByTopic = useMemo(() => {
+    const counts = new Map<NotificationTopic, number>()
+    deadlines.forEach((deadline) => {
+      counts.set(deadline.topic, (counts.get(deadline.topic) ?? 0) + 1)
+    })
+    return counts
+  }, [deadlines])
+
+  const handleClearRead = async () => {
+    setError(null)
+    setNotice(null)
+    try {
+      const result = await apiFetch<{ deleted: number }>('/notifications/read', { method: 'DELETE' })
+      setNotifications((current) => current.filter((notification) => !notification.isRead))
+      setNotice(result.deleted > 0 ? `읽은 알림 ${result.deleted}개를 정리했습니다.` : '정리할 읽은 알림이 없습니다.')
+    } catch {
+      setError('읽은 알림을 정리하지 못했습니다.')
+    }
+  }
+
+  const handleMarkAllRead = async () => {
+    const previous = notifications
+    setNotifications((current) => current.map((notification) => ({ ...notification, isRead: true })))
+    try {
+      await apiFetch<{ updated: number }>('/notifications/read-all', { method: 'POST' })
+    } catch {
+      setNotifications(previous)
+      setError('알림을 모두 읽음으로 표시하지 못했습니다.')
+    }
+  }
+
   const handleSave = async () => {
     setIsSaving(true)
     setError(null)
@@ -213,11 +250,29 @@ const SettingsPage = () => {
               <div className="settings-panel__header">
                 <div>
                   <h2>관심 주제</h2>
-                  <p>켜둔 주제만 내 마감일과 내부 알림에 반영됩니다.</p>
+                  <p>켜둔 주제만 내 마감일과 알림에 반영됩니다.</p>
                 </div>
-                <button type="button" className="auth-submit settings-save-btn" onClick={handleSave} disabled={isSaving}>
-                  {isSaving ? '저장 중...' : '저장'}
-                </button>
+                <div className="settings-topic-bulk">
+                  <button
+                    type="button"
+                    className="settings-page__back"
+                    onClick={() => handleToggleAllTopics(true)}
+                    disabled={isSaving || preferences.every((preference) => preference.enabled)}
+                  >
+                    전체 켜기
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-page__back"
+                    onClick={() => handleToggleAllTopics(false)}
+                    disabled={isSaving || preferences.every((preference) => !preference.enabled)}
+                  >
+                    전체 끄기
+                  </button>
+                  <button type="button" className="auth-submit settings-save-btn" onClick={handleSave} disabled={isSaving}>
+                    {isSaving ? '저장 중...' : '저장'}
+                  </button>
+                </div>
               </div>
 
               <div className="settings-topic-list">
@@ -233,7 +288,14 @@ const SettingsPage = () => {
                           onChange={() => handleToggleTopic(topic.topic)}
                         />
                         <span>
-                          <strong>{topic.label}</strong>
+                          <strong>
+                            {topic.label}
+                            {(deadlineCountByTopic.get(topic.topic) ?? 0) > 0 && (
+                              <em className="settings-topic__count">
+                                다가오는 마감 {deadlineCountByTopic.get(topic.topic)}건
+                              </em>
+                            )}
+                          </strong>
                           <small>{topic.description}</small>
                         </span>
                       </label>
@@ -311,7 +373,19 @@ const SettingsPage = () => {
                 <h2>최근 알림</h2>
                 <p>동기화 시점에 해당하는 7일 전, 1일 전, 당일 알림입니다.</p>
               </div>
-              <span className="settings-count">{notifications.length}개</span>
+              <div className="settings-topic-bulk">
+                <span className="settings-count">{notifications.length}개</span>
+                {unreadCount > 0 && (
+                  <button type="button" className="settings-page__back" onClick={handleMarkAllRead}>
+                    모두 읽음
+                  </button>
+                )}
+                {notifications.some((notification) => notification.isRead) && (
+                  <button type="button" className="settings-page__back" onClick={handleClearRead}>
+                    읽은 알림 정리
+                  </button>
+                )}
+              </div>
             </div>
             <div className="notification-list">
               {notifications.length === 0 ? (

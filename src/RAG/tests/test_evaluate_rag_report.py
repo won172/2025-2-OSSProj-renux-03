@@ -7,7 +7,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.evaluate_rag import summarize_results, write_markdown_report  # noqa: E402
+from scripts.evaluate_rag import (  # noqa: E402
+    resolve_evaluation_as_of,
+    summarize_results,
+    write_markdown_report,
+)
 
 
 def test_summarize_results_computes_core_rag_metrics():
@@ -87,3 +91,42 @@ def test_write_markdown_report_includes_gate_warnings(tmp_path):
     assert "Gate Warnings" in report
     assert "route_hit_rate" in report
     assert "Miss Samples" in report
+
+
+def test_evaluation_as_of_uses_row_value_unless_explicitly_overridden():
+    assert resolve_evaluation_as_of("2026-07-30") == "2026-07-30"
+    assert (
+        resolve_evaluation_as_of("2026-07-30", "2026-08-15")
+        == "2026-08-15"
+    )
+
+
+def test_repeat_inconsistency_is_a_release_gate_warning():
+    results = pd.DataFrame(
+        [
+            {
+                "expected_dataset": "notices",
+                "hit": True,
+                "context_recall_proxy": True,
+                "keyword_score": 1.0,
+                "fallback": False,
+                "retrieval_repeat_consistent": False,
+            },
+            {
+                "expected_dataset": "notices",
+                "hit": True,
+                "context_recall_proxy": True,
+                "keyword_score": 1.0,
+                "fallback": True,
+                "retrieval_repeat_consistent": False,
+            },
+        ]
+    )
+
+    summary = summarize_results(results, {})
+
+    assert summary["metrics"]["retrieval_repeat_consistency"] == 0.0
+    assert any(
+        "retrieval_repeat_consistency" in warning
+        for warning in summary["warnings"]
+    )

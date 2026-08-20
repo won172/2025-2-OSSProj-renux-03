@@ -1,19 +1,31 @@
-"""동국대 학칙 HWP 파일을 일괄 추출하는 스크립트입니다."""
+"""동국대 학칙 HWP와 공식 규정관리시스템 현행판을 정규화한다."""
 from __future__ import annotations
 
+from datetime import date
 import re
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urljoin
 from zipfile import BadZipFile, ZipFile
 import xml.etree.ElementTree as ET
 
 import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 
 from src.config import BASE_DIR, DATA_DIR
 
 RULE_ROOT = BASE_DIR / "dongguk_rule"
 OUTPUT_PATH = DATA_DIR / "dongguk_rule_texts.csv"
+OFFICIAL_RULE_BASE_URL = "https://rule.dongguk.edu"
+ACADEMIC_RULE_LIST_URL = (
+    f"{OFFICIAL_RULE_BASE_URL}/lmxsrv/law/lawListManager.srv"
+    "?LAWGROUP=1&PAGE_MODE=&SEQ=6"
+)
+_LIST_ID_RE = re.compile(r"fullPopupPost\((\d+)\s*,\s*(\d+)")
+_LIST_DATE_RE = re.compile(r"showDate\('(\d{4})(\d{2})(\d{2})'")
+_RULE_CODE_RE = re.compile(r"\b(\d+-\d+-\d+)\b")
 
 
 def list_hwp_files(root: Path) -> List[Path]:
@@ -103,6 +115,118 @@ def summarise_relative_path(path: Path, root: Path) -> Tuple[str, str]:
 
 def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def parse_official_rule_list(html: str) -> List[Dict[str, str]]:
+    """규정 목록 HTML에서 현재 SEQ/연혁번호/개정일을 읽는다."""
+    soup = BeautifulSoup(html, "lxml")
+    records: List[Dict[str, str]] = []
+    for row in soup.select("tbody.tbody tr"):
+        title_cell = row.select_one("td.tbody_txt")
+        if title_cell is None:
+            continue
+        link = title_cell.find("a", href=True)
+        match = _LIST_ID_RE.search(str(link.get("href") if link else ""))
+        if match is None:
+            continue
+        seq, history = match.groups()
+        title = clean_text(title_cell.get_text(" ", strip=True))
+        code_match = _RULE_CODE_RE.search(title)
+        code = code_match.group(1) if code_match else ""
+        if code and title.startswith(code):
+            title = title[len(code) :].strip()
+        date_match = _LIST_DATE_RE.search(str(row))
+        if date_match is None:
+            continue
+        published_at = date(*map(int, date_match.groups())).isoformat()
+        records.append(
+            {
+                "rule_code": code,
+                "title": title,
+                "seq": seq,
+                "seq_history": history,
+                "published_at": published_at,
+                "source_url": urljoin(
+                    OFFICIAL_RULE_BASE_URL,
+                    f"/lmxsrv/law/lawFullContent.srv?SEQ={seq}&SEQ_HISTORY={history}",
+                ),
+            }
+        )
+    return records
+
+
+def parse_official_rule_content(html: str) -> Tuple[str, str]:
+    """전체보기 HTML을 검색 가능한 제목/본문으로 바꾼다."""
+    soup = BeautifulSoup(html, "lxml")
+    root = soup.select_one("#contentview")
+    if root is None:
+        raise ValueError("official rule content container is missing")
+    title_node = root.select_one(".lawname")
+    title = clean_text(title_node.get_text(" ", strip=True) if title_node else "")
+    lines: List[str] = []
+    for node in root.select(
+        ".lawname, .chapter, .addenda, .article, .hang, .ho, .mok, .none"
+    ):
+        line = clean_text(node.get_text(" ", strip=True))
+        if line and line != "연" and (not lines or line != lines[-1]):
+            lines.append(line)
+    text = "\n".join(lines)
+    if not title or len(text) < 100:
+        raise ValueError("official rule content is unexpectedly empty")
+    return title, text
+
+
+def collect_official_academic_rules(
+    *,
+    timeout: float = 20.0,
+    session: requests.Session | None = None,
+) -> pd.DataFrame:
+    """제2편 제1장(대학)의 공식 현행 규정 전체를 수집한다."""
+    client = session or requests.Session()
+    response = client.get(ACADEMIC_RULE_LIST_URL, timeout=timeout)
+    response.raise_for_status()
+    rows: List[Dict[str, str]] = []
+    for item in parse_official_rule_list(response.text):
+        detail = client.get(item["source_url"], timeout=timeout)
+        detail.raise_for_status()
+        parsed_title, text = parse_official_rule_content(detail.text)
+        title = parsed_title or item["title"]
+        version = item["published_at"].replace("-", ".")
+        code_prefix = f"{item['rule_code']}. " if item["rule_code"] else ""
+        rows.append(
+            {
+                "relative_dir": "제2편_학칙/제1장_대학/공식_현행",
+                "filename": f"{code_prefix}{title}({version}.).html",
+                "title": f"{code_prefix}{title}".strip(),
+                "text": text,
+                "source_type": "official_rule_web",
+                "source_url": item["source_url"],
+                "source_page_url": ACADEMIC_RULE_LIST_URL,
+                "source_version": f"{item['seq']}:{item['seq_history']}",
+                "source_file": "official_rule_web",
+                "published_at": item["published_at"],
+                "rule_code": item["rule_code"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def merge_official_rule_versions(
+    existing: pd.DataFrame,
+    official: pd.DataFrame,
+) -> pd.DataFrame:
+    """같은 공식 연혁은 갱신하고 과거판/HWP 정본은 보존한다."""
+    if official.empty:
+        raise ValueError("refusing to replace rules with an empty official crawl")
+    merged = pd.concat([existing, official], ignore_index=True, sort=False).fillna("")
+    official_mask = merged.get("source_type", pd.Series("", index=merged.index)).eq(
+        "official_rule_web"
+    )
+    official_rows = merged.loc[official_mask].drop_duplicates(
+        subset=["source_type", "source_version"], keep="last"
+    )
+    legacy_rows = merged.loc[~official_mask]
+    return pd.concat([legacy_rows, official_rows], ignore_index=True, sort=False).fillna("")
 
 
 def main() -> None:

@@ -35,6 +35,10 @@ public record RagSource(
     [property: JsonPropertyName("final_score")] double? FinalScore
 );
 public record FeedbackDto(string RequestId, int Rating, string? Reason, string? Comment);
+public record FollowupRequestDto(string RequestId);
+public record RagFollowupResponse(
+    [property: JsonPropertyName("request_id")] string? RequestId,
+    List<string>? Questions);
 
 static public class ChatRequestApis
 {
@@ -565,6 +569,129 @@ static public class ChatRequestApis
                 {
                     logger.LogWarning(exception, "Answer completion telemetry write failed.");
                 }
+            }
+        });
+
+        app.MapPost("/followups", async (
+            FollowupRequestDto request,
+            ServerDbContext db,
+            HttpContext context,
+            IConfiguration configuration,
+            IHttpClientFactory httpClientFactory,
+            ILogger<Program> logger,
+            IDataProtectionProvider dataProtectionProvider) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.RequestId) || request.RequestId.Length > 200)
+            {
+                return Results.BadRequest(new { message = "requestId가 필요합니다." });
+            }
+
+            ChatMessage? ownedAnswer = null;
+            Guid? verifiedChatId = null;
+            string? validatedGuestSubjectId = null;
+            bool isAuthenticated = TryGetUserId(context, out Guid userId);
+            if (isAuthenticated)
+            {
+                ownedAnswer = await (
+                    from answer in db.ChatMessages
+                    join chat in db.Chats on answer.ChatId equals chat.Id
+                    where !answer.IsAsk
+                          && answer.IsCurrent
+                          && answer.RequestId == request.RequestId
+                          && chat.UserId == userId
+                    select answer)
+                    .FirstOrDefaultAsync(context.RequestAborted);
+                if (ownedAnswer is null) return Results.NotFound();
+                verifiedChatId = ownedAnswer.ChatId;
+
+                // 이미 생성된 값은 RAG LLM을 다시 호출하지 않고 그대로 돌려준다.
+                List<string>? cached = DeserializeSuggestedQuestions(ownedAnswer.SuggestedQuestionsJson);
+                if (cached is { Count: > 0 }) return Results.Ok(new { questions = cached });
+            }
+            else if (!GuestIdentity.TryValidate(
+                         context.Request,
+                         dataProtectionProvider,
+                         out validatedGuestSubjectId))
+            {
+                return Results.Unauthorized();
+            }
+
+            ProductEventContext eventContext = await ProductTelemetry.ResolveContextAsync(
+                db,
+                context,
+                configuration,
+                verifiedChatId,
+                validatedGuestSubjectId,
+                context.RequestAborted);
+            ProductEvent? completionEvent = await ProductTelemetry.FindAnswerCompletionEventAsync(
+                db,
+                configuration,
+                eventContext,
+                request.RequestId,
+                context.RequestAborted);
+            if (completionEvent is null) return Results.NotFound();
+
+            var ragUrl = configuration["RagServiceUrl"]
+                ?? configuration["RAG_SERVICE_URL"]
+                ?? "http://rag-service:8000";
+            var client = httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromMinutes(2);
+
+            try
+            {
+                using var response = await client.PostAsJsonAsync(
+                    $"{ragUrl}/followups",
+                    new { requestId = request.RequestId },
+                    JsonOptions,
+                    context.RequestAborted);
+                if (!response.IsSuccessStatusCode)
+                {
+                    logger.LogWarning(
+                        "RAG followup request failed. StatusCode={StatusCode}",
+                        (int)response.StatusCode);
+                    return Results.Ok(new { questions = Array.Empty<string>() });
+                }
+
+                RagFollowupResponse? payload = await response.Content.ReadFromJsonAsync<RagFollowupResponse>(
+                    JsonOptions,
+                    context.RequestAborted);
+                List<string> questions = (payload?.Questions ?? [])
+                    .Where(question => !string.IsNullOrWhiteSpace(question))
+                    .Select(question => question.Trim())
+                    .Distinct(StringComparer.Ordinal)
+                    .Take(10)
+                    .ToList();
+
+                if (ownedAnswer is not null)
+                {
+                    // 재생성으로 현재 답변이 바뀐 경우 낡은 요청의 추천을 새 답변에 붙이지 않는다.
+                    bool stillCurrent = await db.ChatMessages.AnyAsync(
+                        answer => answer.Id == ownedAnswer.Id
+                                  && answer.IsCurrent
+                                  && answer.RequestId == request.RequestId,
+                        context.RequestAborted);
+                    if (!stillCurrent) return Results.Ok(new { questions = Array.Empty<string>() });
+                    ownedAnswer.SuggestedQuestionsJson = SerializeSuggestedQuestions(questions);
+                }
+                await ProductTelemetry.UpdateAnswerSuggestionCountAsync(
+                    db,
+                    configuration,
+                    eventContext,
+                    request.RequestId,
+                    questions.Count,
+                    context.RequestAborted);
+                if (ownedAnswer is not null) await db.SaveChangesAsync(context.RequestAborted);
+
+                return Results.Ok(new { questions });
+            }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+            {
+                return Results.Empty;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "RAG followup request failed.");
+                return Results.Ok(new { questions = Array.Empty<string>() });
             }
         });
 

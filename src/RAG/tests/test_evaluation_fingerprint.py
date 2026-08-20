@@ -21,6 +21,10 @@ def _fixture_candidate(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
     (vectorizers / "manifest.json").write_text('{"version":1}\n', encoding="utf-8")
 
     monkeypatch.setattr(rag_service.rag_config, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(rag_service.rag_config, "OPENAI_QUERY_ANALYSIS_MODEL", "query-model")
+    monkeypatch.setattr(rag_service.rag_config, "OPENAI_ROUTER_MODEL", "router-model")
+    monkeypatch.setattr(rag_service.rag_config, "OPENAI_EVIDENCE_MODEL", "evidence-model")
+    monkeypatch.setattr(rag_service.rag_config, "OPENAI_GROUNDING_MODEL", "grounding-model")
     monkeypatch.setattr(rag_service, "VECTORIZER_DIR", vectorizers)
     monkeypatch.setattr(
         rag_service,
@@ -55,6 +59,10 @@ def test_evaluation_fingerprint_is_self_hashed_and_excludes_private_runtime_valu
     assert payload["datasets"][0]["cached_chunk_count"] is None
     assert payload["datasets"][0]["dense_index_ready"] is False
     assert payload["dense_index_ready"] is False
+    assert payload["runtime_config"]["query_analysis_model"] == "query-model"
+    assert payload["runtime_config"]["router_model"] == "router-model"
+    assert payload["runtime_config"]["evidence_selection_model"] == "evidence-model"
+    assert payload["runtime_config"]["grounding_model"] == "grounding-model"
     assert str(tmp_path) not in serialized
     assert "api_key" not in serialized.lower()
     assert "secret" not in serialized.lower()

@@ -4,8 +4,8 @@ __pycache__
 .env
 .env.*
 !.env.example
-venv/
-.venv/
+venv*/
+.venv*/
 artifacts/
 rag_database.db
 huggingface_cache/

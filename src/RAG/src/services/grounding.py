@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from src.config import OPENAI_CHAT_TIMEOUT_SECONDS, OPENAI_MODEL
+from src.config import OPENAI_CHAT_TIMEOUT_SECONDS, OPENAI_GROUNDING_MODEL
 from src.services.langchain_chat import _append_usage_record, _extract_usage_metadata
 
 logger = logging.getLogger(__name__)
@@ -18,13 +18,24 @@ logger = logging.getLogger(__name__)
 _MAX_CONTEXT_CHARS = 4000
 _MAX_ANSWER_CHARS = 2000
 
-_GROUNDING_LLM = ChatOpenAI(
-    model=OPENAI_MODEL,
-    temperature=0,
-    timeout=OPENAI_CHAT_TIMEOUT_SECONDS,
-    max_retries=1,
-    model_kwargs={"response_format": {"type": "json_object"}},
-)
+# Keep imports side-effect free.  Test collection, readiness probes, and
+# sparse-only deployments must not require OpenAI credentials merely because
+# ``rag_service`` imports the grounding helper.  The public module variable is
+# retained for tests/embedders that inject a compatible client.
+_GROUNDING_LLM: Any | None = None
+
+
+def _get_grounding_llm() -> Any:
+    global _GROUNDING_LLM
+    if _GROUNDING_LLM is None:
+        _GROUNDING_LLM = ChatOpenAI(
+            model=OPENAI_GROUNDING_MODEL,
+            temperature=0,
+            timeout=OPENAI_CHAT_TIMEOUT_SECONDS,
+            max_retries=1,
+            model_kwargs={"response_format": {"type": "json_object"}},
+        )
+    return _GROUNDING_LLM
 
 
 @dataclass
@@ -33,10 +44,17 @@ class GroundingResult:
     grounded: bool
     score: float
     reason: str | None
+    relevance_score: float = 1.0
 
 
 def _unchecked_pass() -> GroundingResult:
-    return GroundingResult(checked=False, grounded=True, score=1.0, reason=None)
+    return GroundingResult(
+        checked=False,
+        grounded=True,
+        score=1.0,
+        reason=None,
+        relevance_score=1.0,
+    )
 
 
 def _strip_code_fence(text: str) -> str:
@@ -59,7 +77,7 @@ async def check_answer_grounding(
     min_score: float,
     usage_collector: list[dict[str, Any]] | None = None,
 ) -> GroundingResult:
-    """답변 주장 중 컨텍스트로 직접 뒷받침되는 비율을 1회 LLM 호출로 평가합니다."""
+    """Evaluate both source grounding and question-answer relevance."""
     if not answer.strip() or not context.strip():
         return _unchecked_pass()
 
@@ -67,8 +85,9 @@ async def check_answer_grounding(
         messages = [
             SystemMessage(
                 content=(
-                    "당신은 RAG 답변의 근거성을 검증하는 평가자입니다. "
-                    "컨텍스트에 직접 근거가 있는 답변 주장 비율만 평가하고, 추측하지 마세요."
+                    "당신은 RAG 답변의 안전성을 검증하는 평가자입니다. "
+                    "답변이 컨텍스트에 근거하는지와 사용자 질문에 실제로 답하는지를 "
+                    "서로 독립적으로 평가하고, 추측하지 마세요."
                 )
             ),
             HumanMessage(
@@ -79,31 +98,51 @@ async def check_answer_grounding(
                     f"{context.strip()[:_MAX_CONTEXT_CHARS]}\n\n"
                     "[답변]\n"
                     f"{answer.strip()[:_MAX_ANSWER_CHARS]}\n\n"
-                    "컨텍스트와 답변을 비교해 답변의 주장 중 컨텍스트로 직접 뒷받침되는 비율을 0~1 숫자로 평가하세요. "
-                    '반드시 STRICT JSON 객체만 출력하세요: {"score": 0.0, "reason": "..."}'
+                    "grounding_score는 답변 주장 중 컨텍스트로 직접 뒷받침되는 비율, "
+                    "relevance_score는 답변이 사용자 질문의 의도와 주제에 직접 답하는 정도입니다. "
+                    "각각 0~1 숫자로 독립 평가하세요. 엉뚱한 질문에 대한 답은 컨텍스트 근거가 "
+                    "충분해도 relevance_score를 낮게 주세요. "
+                    "반드시 STRICT JSON 객체만 출력하세요: "
+                    '{"grounding_score": 0.0, "relevance_score": 0.0, "reason": "..."}'
                 )
             ),
         ]
         started_at = time.perf_counter()
-        response = await _GROUNDING_LLM.ainvoke(messages)
+        response = await _get_grounding_llm().ainvoke(messages)
         _append_usage_record(
             usage_collector,
             stage="grounding_check",
             provider="openai",
-            model=OPENAI_MODEL,
+            model=OPENAI_GROUNDING_MODEL,
             usage=_extract_usage_metadata(response),
             latency_ms=(time.perf_counter() - started_at) * 1000,
         )
         content = response.content if isinstance(response.content, str) else str(response.content)
         parsed = json.loads(_strip_code_fence(content))
-        raw_score = parsed.get("score")
-        score = max(0.0, min(1.0, float(raw_score)))
+        raw_grounding_score = parsed.get(
+            "grounding_score",
+            parsed.get("score"),
+        )
+        raw_relevance_score = parsed.get(
+            "relevance_score",
+            raw_grounding_score,
+        )
+        grounding_score = max(
+            0.0,
+            min(1.0, float(raw_grounding_score)),
+        )
+        relevance_score = max(
+            0.0,
+            min(1.0, float(raw_relevance_score)),
+        )
+        score = min(grounding_score, relevance_score)
         reason = parsed.get("reason")
         return GroundingResult(
             checked=True,
             grounded=score >= min_score,
             score=score,
             reason=reason.strip() if isinstance(reason, str) and reason.strip() else None,
+            relevance_score=relevance_score,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Grounding check failed: %s", exc)

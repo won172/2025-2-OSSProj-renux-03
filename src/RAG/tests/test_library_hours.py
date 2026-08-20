@@ -176,12 +176,6 @@ def test_missing_time_values_and_empty_operation_list_are_visible_issues():
             "isClose must be a boolean",
         ),
         (
-            lambda payload: payload["list"][0]["operationTimes"][0].update(
-                {"isClose": True, "isAllDayOpen": True}
-            ),
-            "cannot be closed and open 24 hours",
-        ),
-        (
             lambda payload: payload["list"][0]["childBranchSections"][2][
                 "operationTimes"
             ][0].update({"closedTime": "2460"}),
@@ -216,6 +210,26 @@ def test_unknown_library_is_ignored_with_issue_and_total_mismatch_is_visible():
     assert all(record["library_name"] != "외부도서관" for record in result.records)
 
 
+def test_live_api_envelope_and_closed_24h_facility_are_normalized_safely():
+    payload = _payload()
+    payload["list"][0]["childBranchSections"][1]["operationTimes"][0].update(
+        {"isClose": True, "isAllDayOpen": True}
+    )
+    enveloped = {"success": True, "data": payload}
+
+    result = normalize_library_operation_times(_fetch(enveloped))
+
+    assert {issue["code"] for issue in result.issues} == {
+        "conflicting_status_flags"
+    }
+    record = next(
+        item for item in result.records if item["facility_name"] == "보덕열람실"
+    )
+    assert record["hours_status"] == "open_24h"
+    assert record["is_closed"] is False
+    assert record["is_24h"] is True
+
+
 def test_raw_hash_is_canonical_and_input_is_not_mutated():
     payload = _payload()
     original = copy.deepcopy(payload)
@@ -241,6 +255,7 @@ def test_notice_and_chunk_shapes_are_deterministic_and_not_persisted():
         assert notice["campus_scope"] == chunk["campus_scope"]
         assert notice["effective_date"] == chunk["effective_date"]
         assert notice["raw_payload_hash"] == chunk["raw_payload_hash"]
+        assert notice["상세URL"].startswith(LIBRARY_OPERATION_TIME_URL + "#")
         assert chunk["source"] == "notices"
         assert chunk["source_type"] == "facility_guide"
         assert chunk["url"] == LIBRARY_OPERATION_TIME_URL

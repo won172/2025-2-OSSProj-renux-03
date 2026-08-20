@@ -12,8 +12,16 @@ def kst_now():
 
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 
-# 데이터베이스 파일 경로 설정 (RAG 폴더 최상위에 'rag_database.db' 파일로 저장됨)
-DATABASE_FILE = Path(__file__).resolve().parents[1] / "rag_database.db"
+# 데이터베이스 파일 경로 (기본: RAG 폴더 최상위의 'rag_database.db').
+#
+# RAG_DATABASE_FILE로 바꿀 수 있다. 경로가 고정돼 있으면 개발자는 항상 자기 로컬 DB로만
+# 테스트하게 되고, 새 체크아웃처럼 테이블이 없는 상태를 재현할 방법이 없다. 실제로
+# 스케줄러 실행 기록을 추가했을 때 로컬 596건이 전부 통과하고 CI에서만 깨졌다 —
+# 로컬에는 ingestion_runs 테이블이 있었기 때문이다.
+DATABASE_FILE = Path(
+    os.getenv("RAG_DATABASE_FILE")
+    or Path(__file__).resolve().parents[1] / "rag_database.db"
+)
 DATABASE_URL = f"sqlite:///{DATABASE_FILE}"
 
 # SQLAlchemy 엔진 생성
@@ -52,6 +60,12 @@ class Rule(Base):
     filename = Column(String, index=True)
     relative_dir = Column(String)
     full_text = Column(Text)
+    title = Column(String, nullable=True)
+    source_type = Column(String, nullable=True)
+    source_url = Column(Text, nullable=True)
+    source_page_url = Column(Text, nullable=True)
+    source_version = Column(String, nullable=True, index=True)
+    published_at = Column(String, nullable=True, index=True)
     
     chunks = relationship("Chunk", back_populates="rule")
 
@@ -235,6 +249,7 @@ class RagQueryLog(Base):
     session_id = Column(String, index=True)
     question = Column(Text)
     expanded_question = Column(Text)
+    as_of = Column(String, nullable=True, index=True)
     route = Column(Text)
     answer = Column(Text)
     fallback_triggered = Column(Boolean, default=False)
@@ -281,6 +296,10 @@ class RagRetrievalLog(Base):
     recency_score = Column(Float, nullable=True)
     final_score = Column(Float, nullable=True)
     sort_date = Column(String, nullable=True)
+    # Async follow-up generation must transport the exact source identity that
+    # the completed answer exposed. Recomputing it from this reduced log row
+    # loses campus/effective-date metadata and produces a different lineage.
+    source_ref = Column(String, nullable=True, index=True)
     snippet = Column(Text)
     created_at = Column(DateTime, default=kst_now, index=True)
 
@@ -318,6 +337,17 @@ def _ensure_sqlite_columns(table_name: str, columns: dict[str, str]) -> None:
 def ensure_runtime_schema() -> None:
     """기존 SQLite 파일에 누락된 운영 로그 컬럼을 보강합니다."""
     _ensure_sqlite_columns(
+        "rules",
+        {
+            "title": "VARCHAR",
+            "source_type": "VARCHAR",
+            "source_url": "TEXT",
+            "source_page_url": "TEXT",
+            "source_version": "VARCHAR",
+            "published_at": "VARCHAR",
+        },
+    )
+    _ensure_sqlite_columns(
         "source_documents",
         {
             "raw_payload_json": "TEXT",
@@ -334,6 +364,7 @@ def ensure_runtime_schema() -> None:
     _ensure_sqlite_columns(
         "rag_query_logs",
         {
+            "as_of": "VARCHAR",
             "fallback_reason": "VARCHAR",
             "grounding_checked": "BOOLEAN DEFAULT 0",
             "grounding_grounded": "BOOLEAN",
@@ -360,6 +391,7 @@ def ensure_runtime_schema() -> None:
         "rag_retrieval_logs",
         {
             "sort_date": "VARCHAR",
+            "source_ref": "VARCHAR",
         },
     )
     _ensure_sqlite_columns(

@@ -15,8 +15,14 @@ interface ChatHeaderProps {
   departmentName: string | null
   role: UserRole
   notifications: UserNotification[]
-  unreadCount: number
-  onMarkNotificationRead: (notificationId: string) => void
+  hasEnabledTopics: boolean
+  lastSyncedAt: Date | null
+  syncingNotifications: boolean
+  onMarkNotificationRead: (notificationIds: string[]) => void
+  onMarkAllNotificationsRead: () => void
+  onDeleteNotifications: (notificationIds: string[]) => void
+  onRefreshNotifications: () => void
+  onAskFromNotification: (question: string) => void
   onOpenSidebar: () => void
   isSidebarOpen: boolean
   onLogin: () => void
@@ -45,8 +51,14 @@ const ChatHeader = ({
   departmentName,
   role,
   notifications,
-  unreadCount,
+  hasEnabledTopics,
+  lastSyncedAt,
+  syncingNotifications,
   onMarkNotificationRead,
+  onMarkAllNotificationsRead,
+  onDeleteNotifications,
+  onRefreshNotifications,
+  onAskFromNotification,
   onOpenSidebar,
   isSidebarOpen,
   onLogin,
@@ -109,8 +121,14 @@ const ChatHeader = ({
           <>
             <NotificationBell
               notifications={notifications}
-              unreadCount={unreadCount}
+              hasEnabledTopics={hasEnabledTopics}
+              lastSyncedAt={lastSyncedAt}
+              syncing={syncingNotifications}
               onMarkRead={onMarkNotificationRead}
+              onMarkAllRead={onMarkAllNotificationsRead}
+              onDelete={onDeleteNotifications}
+              onOpen={onRefreshNotifications}
+              onAsk={onAskFromNotification}
             />
 
             <div className="ch-menu-anchor" ref={anchorRef}>

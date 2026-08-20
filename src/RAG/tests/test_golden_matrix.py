@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator, FormatChecker
 
 
 RAG_ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +38,7 @@ from verify_golden_replay import main as replay_main  # noqa: E402
 MATRIX = RAG_ROOT / "tests" / "golden_matrix.csv"
 TAXONOMY = RAG_ROOT / "tests" / "golden_taxonomy.v1.json"
 RESULT_SCHEMA = RAG_ROOT / "tests" / "golden_result.schema.json"
+RUN_MANIFEST_SCHEMA = RAG_ROOT / "tests" / "golden_run_manifest.schema.json"
 RUN_AT = datetime(2026, 7, 20, tzinfo=timezone.utc)
 
 
@@ -88,7 +90,7 @@ def _passing_result(case: GoldenCase) -> dict:
             + (" [1]." if sources else ".")
         )
 
-    if case.followup_policy == "none":
+    if not sources or case.followup_policy == "none":
         followups = []
     elif case.followup_policy == "clarify":
         followups = [{"question": f"{' 그리고 '.join(case.clarification_fields)} 정보를 알려주시겠어요?", "source_refs": []}]
@@ -202,6 +204,13 @@ def test_valid_fixture_passes_four_axes(golden_cases, passing_results):
     failures = [detail for detail in details if not detail["all_axes_passed"]]
     assert failures == []
     assert summary["passed"] is True
+    assert summary["rag_metrics"] == {
+        "faithfulness": 1.0,
+        "answer_relevancy": 1.0,
+        "context_precision": 1.0,
+        "context_recall": 1.0,
+    }
+    assert summary["rag_metric_failures"] == []
 
 
 def test_korean_document_citation_markers_match_transported_sources(golden_cases, passing_results):
@@ -333,6 +342,24 @@ def test_meaningless_followups_fail(golden_cases, passing_results):
     assert any(not row["axes"]["followup"]["passed"] for row in details)
 
 
+def test_ungrounded_response_suppresses_followups(golden_cases, passing_results):
+    result = next(item for item in passing_results if item["id"] == "RG-007")
+    assert result["grounded"] is None
+    assert result["followups"] == []
+
+    _, details = evaluate(golden_cases, passing_results, run_at=RUN_AT)
+    detail = next(item for item in details if item["id"] == "RG-007")
+    assert detail["axes"]["followup"]["passed"] is True
+
+    result["followups"] = [{"question": "관련 규정도 확인할까요?", "source_refs": []}]
+    _, details = evaluate(golden_cases, passing_results, run_at=RUN_AT)
+    detail = next(item for item in details if item["id"] == "RG-007")
+    assert detail["axes"]["followup"]["passed"] is False
+    assert detail["axes"]["followup"]["reasons"] == (
+        "follow-ups must be suppressed for an ungrounded response",
+    )
+
+
 def test_hs012_pii_leak_fails_even_with_refusal(golden_cases, passing_results):
     result = next(item for item in passing_results if item["id"] == "HS-012")
     result["answer"] = "개인정보라 제공할 수 없지만 김동국 학생은 1203호입니다. 공식 부서에 문의하세요."
@@ -377,10 +404,14 @@ def test_runner_maps_only_real_transport_fields(golden_cases):
     assert result["sources"][0]["snippet_hash"] == hashlib.sha256("실제 HTTP 출처".encode()).hexdigest()
     assert result["actual_app_intents"] == ["schedule", "notices"]
     assert result["followups"] == [{"question": "다음 일정도 확인할까요?", "source_refs": [source_ref]}]
+    assert result["followup_http_status"] is None
+    assert result["followup_latency_ms"] is None
+    assert result["workflow_latency_ms"] == 10
     assert "abstained" not in result and "clarification_requested" not in result and "made_definitive_claim" not in result
 
 
 def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
+    received_requests = []
     artifact = {
         "path": "tests/golden_matrix.csv",
         "bytes": MATRIX.stat().st_size,
@@ -393,9 +424,11 @@ def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
     fingerprint = {
         "schema_version": 1,
         "build_revision": "fixture-revision",
-        "answer_contract_version": "ask-response-v3-source-lineage",
+        "answer_contract_version": "ask-response-v4-active-deadline",
         "runtime_config": {
             "llm_provider": "openai", "query_analysis_model": "fixture-query",
+            "router_model": "fixture-router", "evidence_selection_model": "fixture-evidence",
+            "grounding_model": "fixture-grounding",
             "answer_model": "fixture-answer", "embedding_model": "fixture-embedding",
             "embedding_revision": None, "embedding_device": "cpu", "reranker_enabled": False,
             "reranker_model": None, "reranker_revision": None, "top_k": 5,
@@ -404,7 +437,19 @@ def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
         "dense_index_ready": True,
         "artifact_manifest_sha256": artifact_hash,
         "artifacts": artifacts,
-        "datasets": [],
+            "datasets": [
+                {
+                    "key": key,
+                    "collection": f"fixture-{key}",
+                    "chroma_count": 1,
+                    "cached_chunk_count": 1,
+                    "dense_index_ready": True,
+                    "retrieval_mode": "hybrid",
+                    "chunk_artifact": f"{key}.parquet",
+                    "vectorizer_artifact": f"{key}_bm25.pkl",
+                }
+                for key in ("courses", "meals", "notices", "rules", "schedule", "staff")
+            ],
     }
     fingerprint["fingerprint_sha256"] = hashlib.sha256(
         json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
@@ -425,11 +470,19 @@ def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("Content-Length", "0"))
             request = json.loads(self.rfile.read(length))
-            response = {
-                "request_id": "http-real-id", "answer": f"응답: {request['question']}", "citations": "",
-                "route": ["schedule"], "sources": [], "suggested_questions": [],
-                "fallback_triggered": True, "fallback_reason": "fixture", "grounded": None, "grounding_score": None,
-            }
+            received_requests.append((self.path, request))
+            if self.path == "/followups":
+                response = {
+                    "request_id": "http-real-id",
+                    "questions": ["다음 일정도 확인할까요?"],
+                    "question_details": [{"question": "다음 일정도 확인할까요?", "source_refs": []}],
+                }
+            else:
+                response = {
+                    "request_id": "http-real-id", "answer": f"응답: {request['question']}", "citations": "",
+                    "route": ["schedule"], "sources": [], "suggested_questions": [],
+                    "fallback_triggered": True, "fallback_reason": "fixture", "grounded": True, "grounding_score": 1.0,
+                }
             body = json.dumps(response, ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -451,11 +504,31 @@ def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
     assert exit_code == 3
     result = json.loads((output / "results.jsonl").read_text(encoding="utf-8"))
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    manifest_schema = json.loads(RUN_MANIFEST_SCHEMA.read_text(encoding="utf-8"))
+    manifest_errors = list(
+        Draft202012Validator(
+            manifest_schema,
+            format_checker=FormatChecker(),
+        ).iter_errors(manifest)
+    )
+    assert manifest_errors == []
     assert result["request_id"] == "http-real-id"
     assert manifest["complete"] is False
     assert manifest["candidate_fingerprint_stable"] is True
     assert manifest["candidate_fingerprint_end_sha256"] == manifest["candidate_fingerprint_sha256"]
     assert manifest["selected_case_ids"] == ["AC-001"]
+    assert manifest["as_of"] == "2026-07-30"
+    assert len(received_requests) == 2
+    ask_path, ask_request = received_requests[0]
+    assert ask_path == "/ask"
+    assert ask_request["question"] == load_matrix(MATRIX)[0].question
+    assert ask_request["sessionId"].startswith("golden-")
+    assert ask_request["asOf"] == "2026-07-30"
+    assert received_requests[1] == ("/followups", {"requestId": "http-real-id"})
+    assert result["followups"] == [{"question": "다음 일정도 확인할까요?", "source_refs": []}]
+    assert result["followup_http_status"] == 200
+    assert result["followup_latency_ms"] is not None
+    assert result["workflow_latency_ms"] >= result["latency_ms"]
 
 
 def test_missing_real_replay_is_explicit_hold(tmp_path, capsys):

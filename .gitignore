@@ -16,7 +16,7 @@ RenuxServer.csproj.user
 # Local environment files
 src/RAG/.env
 src/RAG/env
-src/RAG/.venv/
+src/RAG/.venv*/
 src/RAG/dockerignore
 src/RAG/dongguk_rule/.dockerignore
 src/RenuxServer/.env
@@ -45,7 +45,8 @@ src/RAG/artifacts/raw/
 src/RAG/artifacts/normalized/
 src/RAG/artifacts/chunks/
 src/RAG/artifacts/vectorizers/
-# 단, *_tfidf.pkl 과 manifest.json(무결성 검증 기준)은 `git add -f`로 추적 중 — 함께 커밋할 것.
+# 단, *_tfidf.pkl, *_bm25.pkl 과 manifest.json(무결성 검증 기준)은
+# `git add -f`로 추적해 같은 아티팩트 세대로 함께 커밋할 것.
 src/RAG/artifacts/vectorizers_backup_*/
 src/RAG/artifacts/models/
 src/RAG/artifacts/db_chroma/

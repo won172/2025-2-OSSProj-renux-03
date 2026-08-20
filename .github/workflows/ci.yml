@@ -41,3 +41,27 @@ jobs:
           dotnet-version: 9.0.x
       - run: dotnet restore RenuxServer.sln
       - run: dotnet build RenuxServer.sln --configuration Release --no-restore
+
+  rag-python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/RAG
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: src/RAG/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+      # 개발자 로컬에는 데이터가 채워진 rag_database.db가 있어서, 테이블이 없는
+      # 상태에서만 드러나는 실패가 푸시 전까지 보이지 않는다. 실제로 스케줄러 실행
+      # 기록을 추가했을 때 로컬 596건이 모두 통과하고 CI에서만 깨졌다.
+      # 같은 검사를 로컬에서도 재현할 수 있게 RAG_DATABASE_FILE로 경로를 바꾼다:
+      #   RAG_DATABASE_FILE=/tmp/empty.db python -m pytest -q
+      - name: Run tests against an empty database
+        env:
+          RAG_DATABASE_FILE: ${{ runner.temp }}/empty-rag.db
+        run: python -m pytest -q

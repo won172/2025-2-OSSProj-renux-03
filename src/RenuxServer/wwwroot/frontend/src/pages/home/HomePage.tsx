@@ -14,9 +14,13 @@ import {
   fetchActiveChats,
   fetchDeadlines,
   fetchDepartments,
+  fetchFollowups,
   fetchHomeBriefing,
+  fetchNotificationPreferences,
   fetchNotifications,
   loadChatMessages,
+  deleteNotification,
+  markAllNotificationsRead,
   markNotificationRead,
   renameChat,
   startChat,
@@ -61,6 +65,12 @@ const MOBILE_LAYOUT_QUERY = '(max-width: 900px)'
 const GUIDE_DISMISSED_KEY = 'renux-guide-dismissed'
 /** 맨 아래에서 이 거리 안이면 '따라가기' 상태로 본다. */
 const FOLLOW_THRESHOLD_PX = 120
+/**
+ * 알림 자동 동기화 주기.
+ * 후보 목록은 서버에서 20분 캐시되고 공지는 하루 4회만 갱신되므로,
+ * 더 자주 물어도 새 정보가 나오지 않고 요청만 늘어난다.
+ */
+const NOTIFICATION_SYNC_INTERVAL_MS = 10 * 60 * 1000
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -123,12 +133,14 @@ const HomePage = () => {
   const [chatInput, setChatInput] = useState('')
   const [chatSending, setChatSending] = useState(false)
   const [activeCitation, setActiveCitation] = useState<{ messageId: string; citationNumber: number } | null>(null)
-  const [scopeDepartmentId, setScopeDepartmentId] = useState<string | null>(null)
 
   const [briefing, setBriefing] = useState<HomeBriefingData | null>(null)
   const [briefingLoading, setBriefingLoading] = useState(true)
   const [notifications, setNotifications] = useState<UserNotification[]>([])
   const [deadlines, setDeadlines] = useState<DeadlineItem[]>([])
+  const [hasEnabledTopics, setHasEnabledTopics] = useState(true)
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
+  const [syncingNotifications, setSyncingNotifications] = useState(false)
 
   const [toasts, setToasts] = useState<ChatToast[]>([])
   const [deleteTarget, setDeleteTarget] = useState<ChatListEntry | null>(null)
@@ -161,10 +173,16 @@ const HomePage = () => {
   /** 사용자가 위로 올려 읽는 중이면 새 토큰이 와도 끌어내리지 않는다. */
   const shouldFollowRef = useRef(true)
   const toastSeq = useRef(0)
+  /** 폴링 콜백이 낡은 authStatus를 붙잡지 않도록 최신 값을 ref로 둔다. */
+  const authStatusRef = useRef<AuthStatus>('checking')
 
   const { streamMessage, stopStream } = useChatStream()
   const { canInstall, install, dismiss: dismissInstall } = useInstallPrompt()
   const isAuthenticated = authStatus === 'authenticated'
+
+  useEffect(() => {
+    authStatusRef.current = authStatus
+  }, [authStatus])
 
   const showToast = useCallback((text: string, tone: ChatToastTone = 'success') => {
     toastSeq.current += 1
@@ -378,23 +396,29 @@ const HomePage = () => {
     void load()
   }, [])
 
-  // 로그인 직후 마감 알림을 한 번 동기화한다 — 설정 페이지에 들어가야만 갱신되던 문제를 없앤다.
-  useEffect(() => {
-    if (authStatus !== 'authenticated') return
-    let cancelled = false
+  /**
+   * 마감 알림을 서버와 맞춘다.
+   * 설정 페이지에 들어가야만 갱신되던 문제를 없애기 위해 로그인 직후·주기적으로,
+   * 그리고 벨을 열 때 호출한다. 실패해도 화면을 막지 않고 기존 목록을 유지한다.
+   */
+  const refreshNotifications = useCallback(async (options: { sync?: boolean } = {}) => {
+    if (authStatusRef.current !== 'authenticated') return
+    if (options.sync) setSyncingNotifications(true)
 
-    const load = async () => {
-      try {
-        await syncNotifications()
-      } catch {
-        // 동기화 실패는 화면을 막지 않는다. 기존 알림 목록만 보여준다.
+    try {
+      if (options.sync) {
+        try {
+          await syncNotifications()
+        } catch {
+          // 동기화 실패는 조회까지 막지 않는다.
+        }
       }
 
-      const [notificationResult, deadlineResult] = await Promise.allSettled([
+      const [notificationResult, deadlineResult, preferenceResult] = await Promise.allSettled([
         fetchNotifications(),
         fetchDeadlines(),
+        fetchNotificationPreferences(),
       ])
-      if (cancelled) return
 
       if (notificationResult.status === 'fulfilled' && Array.isArray(notificationResult.value)) {
         setNotifications(notificationResult.value)
@@ -402,11 +426,23 @@ const HomePage = () => {
       if (deadlineResult.status === 'fulfilled' && Array.isArray(deadlineResult.value)) {
         setDeadlines(deadlineResult.value)
       }
+      if (preferenceResult.status === 'fulfilled') {
+        // 관심 주제가 하나도 켜져 있지 않으면 벨의 빈 상태 문구가 달라져야 한다.
+        setHasEnabledTopics((preferenceResult.value.preferences ?? []).some((preference) => preference.enabled))
+      }
+      setLastSyncedAt(new Date())
+    } finally {
+      if (options.sync) setSyncingNotifications(false)
     }
+  }, [])
 
-    void load()
-    return () => { cancelled = true }
-  }, [authStatus])
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return
+
+    void refreshNotifications({ sync: true })
+    const timer = window.setInterval(() => { void refreshNotifications({ sync: true }) }, NOTIFICATION_SYNC_INTERVAL_MS)
+    return () => window.clearInterval(timer)
+  }, [authStatus, refreshNotifications])
 
   // ------------------------------------------------------------ 대화 로드
 
@@ -571,7 +607,7 @@ const HomePage = () => {
     scrollToBottom()
 
     try {
-      const { receivedAny } = await streamMessage(
+      const { receivedAny, requestId, grounded } = await streamMessage(
         {
           id: question.id,
           chatId: question.chatId,
@@ -627,6 +663,24 @@ const HomePage = () => {
         )
       }
       followIfAtBottom()
+
+      // 본 답변의 completion/done을 받은 뒤 별도 요청으로 추천을 만든다.
+      // await하지 않으므로 입력창 로딩 상태와 답변 완료 시점에는 영향을 주지 않는다.
+      if (requestId && grounded === true) {
+        void fetchFollowups(
+          requestId,
+          authStatus === 'guest' ? guestToken : undefined,
+        ).then(({ questions }) => {
+          setChatMessages((previous) => previous.map((message) => (
+            message.id === assistantId && message.requestId === requestId
+              ? { ...message, suggestedQuestions: questions }
+              : message
+          )))
+        }).catch((error) => {
+          // 추천 실패는 이미 완료된 답변을 오류 상태로 바꾸지 않는다.
+          console.warn('Failed to load follow-up suggestions', error)
+        })
+      }
     } catch (error) {
       if (isAbortError(error)) {
         setChatError(null)
@@ -691,13 +745,9 @@ const HomePage = () => {
     await streamIntoAssistant(prepared.question, prepared.assistant.id, false)
   }
 
-  /** 새 대화에 사용할 학과. 칩 선택값 → 내 학과 → 첫 번째 학과 순으로 정한다. */
-  const resolveScopeDepartment = useCallback((): Department | null => {
+  /** 서버의 채팅방 조직 FK를 채우기 위해 내 학과를 우선하고, 없으면 첫 조직을 사용한다. */
+  const resolveChatDepartment = useCallback((): Department | null => {
     if (departments.length === 0) return null
-    if (scopeDepartmentId) {
-      const picked = departments.find((department) => department.id === scopeDepartmentId)
-      if (picked) return picked
-    }
     if (departmentName) {
       const mine = departments.find(
         (department) => department.major?.majorname?.trim() === departmentName.trim(),
@@ -705,7 +755,7 @@ const HomePage = () => {
       if (mine) return mine
     }
     return departments[0]
-  }, [departmentName, departments, scopeDepartmentId])
+  }, [departmentName, departments])
 
   const submitQuestion = async (rawText: string) => {
     const trimmed = rawText.trim()
@@ -723,7 +773,7 @@ const HomePage = () => {
 
     // 방이 없으면 첫 질문으로 바로 만든다 — 별도 모달 없이 대화가 시작되게.
     if (!currentChatId) {
-      const org = resolveScopeDepartment()
+      const org = resolveChatDepartment()
       if (!org) {
         setChatError('채팅을 시작할 수 있는 학과 정보가 없습니다.')
         return
@@ -880,6 +930,8 @@ const HomePage = () => {
       setActiveChats([])
       setNotifications([])
       setDeadlines([])
+      setLastSyncedAt(null)
+      setHasEnabledTopics(true)
       setChatMessages([])
       setSelectedChatId(null)
       setSelectedChatTitle(null)
@@ -891,13 +943,51 @@ const HomePage = () => {
     }
   }
 
-  const handleMarkNotificationRead = async (notificationId: string) => {
-    try {
-      const updated = await markNotificationRead(notificationId)
-      setNotifications((previous) => previous.map((item) => (item.id === notificationId ? updated : item)))
-    } catch (error) {
-      console.warn('Failed to mark notification as read', error)
+  /**
+   * 알림 읽음 처리.
+   * 같은 마감의 리마인드 여러 건을 한 번에 받는다(화면에서 한 줄로 접혀 있으므로).
+   * 낙관적으로 먼저 반영하고, 실패하면 되돌린다 — 서버 왕복을 기다리면 클릭이 굼떠 보인다.
+   */
+  const handleMarkNotificationRead = async (notificationIds: string[]) => {
+    if (notificationIds.length === 0) return
+    const targets = new Set(notificationIds)
+    const previousState = notifications
+
+    setNotifications((previous) => previous.map((item) => (
+      targets.has(item.id) ? { ...item, isRead: true } : item
+    )))
+
+    const results = await Promise.allSettled(notificationIds.map(markNotificationRead))
+    if (results.some((result) => result.status === 'rejected')) {
+      setNotifications(previousState)
       showToast('알림을 읽음으로 표시하지 못했습니다.', 'error')
+    }
+  }
+
+  const handleMarkAllNotificationsRead = async () => {
+    const previousState = notifications
+    setNotifications((previous) => previous.map((item) => ({ ...item, isRead: true })))
+
+    try {
+      await markAllNotificationsRead()
+    } catch (error) {
+      console.warn('Failed to mark all notifications as read', error)
+      setNotifications(previousState)
+      showToast('알림을 모두 읽음으로 표시하지 못했습니다.', 'error')
+    }
+  }
+
+  const handleDeleteNotifications = async (notificationIds: string[]) => {
+    if (notificationIds.length === 0) return
+    const targets = new Set(notificationIds)
+    const previousState = notifications
+
+    setNotifications((previous) => previous.filter((item) => !targets.has(item.id)))
+
+    const results = await Promise.allSettled(notificationIds.map(deleteNotification))
+    if (results.some((result) => result.status === 'rejected')) {
+      setNotifications(previousState)
+      showToast('알림을 삭제하지 못했습니다.', 'error')
     }
   }
 
@@ -915,11 +1005,6 @@ const HomePage = () => {
   const chatEntries = useMemo<ChatListEntry[]>(
     () => (isAuthenticated ? activeChats.map(toChatListEntry) : guestRecords.map(toGuestChatListEntry)),
     [activeChats, guestRecords, isAuthenticated],
-  )
-
-  const unreadCount = useMemo(
-    () => notifications.filter((notification) => !notification.isRead).length,
-    [notifications],
   )
 
   const starterQuestions = useMemo(() => {
@@ -1002,8 +1087,14 @@ const HomePage = () => {
           departmentName={departmentName}
           role={userRole}
           notifications={notifications}
-          unreadCount={unreadCount}
-          onMarkNotificationRead={handleMarkNotificationRead}
+          hasEnabledTopics={hasEnabledTopics}
+          lastSyncedAt={lastSyncedAt}
+          syncingNotifications={syncingNotifications}
+          onMarkNotificationRead={(ids) => { void handleMarkNotificationRead(ids) }}
+          onMarkAllNotificationsRead={() => { void handleMarkAllNotificationsRead() }}
+          onDeleteNotifications={(ids) => { void handleDeleteNotifications(ids) }}
+          onRefreshNotifications={() => { void refreshNotifications() }}
+          onAskFromNotification={(question) => { void submitQuestion(question) }}
           onOpenSidebar={openSidebar}
           isSidebarOpen={isSidebarOpen}
           onLogin={() => navigate('/auth/in')}
@@ -1118,11 +1209,6 @@ const HomePage = () => {
               : '무엇이든 물어보세요 — 입력하면 바로 대화가 시작됩니다'
           }
           error={chatError}
-          showScopePicker={!selectedChatId}
-          departments={departments}
-          // 사용자가 고르지 않았어도 실제로 쓰일 학과에 체크가 가도록 해석된 값을 넘긴다.
-          scopeDepartmentId={resolveScopeDepartment()?.id ?? null}
-          onScopeChange={setScopeDepartmentId}
         />
       </div>
 
