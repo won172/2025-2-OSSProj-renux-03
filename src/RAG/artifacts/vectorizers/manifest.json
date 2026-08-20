@@ -3,7 +3,7 @@
   "courses_tfidf.pkl": "eef9b19ae63341854071bd163b26eb384ed89c3dae5ab2c9ab730d2fffc24f5b",
   "meals_bm25.pkl": "203730b13e8d378857b62bf0c990571f91f7160c242742d422cb6ff682a7b828",
   "meals_tfidf.pkl": "11f91aa4633c80156b4f94ccce38a48dfc64b3a5b43b93710f20b9bb7bb1468a",
-  "notices_bm25.pkl": "49b898fa878a4e74a210f1840cbe9e7605cc61d6260be73160264035e3c6f2c6",
+  "notices_bm25.pkl": "93fa85d40d706f5c6596f361038bf7699e35914c0ab2ac381f0a210340916a27",
   "notices_tfidf.pkl": "1e0bc8c1a4cfac133348ef26ae41991d99f7e650e86c29ddb5d2b67f836e7bad",
   "rules_bm25.pkl": "c8fea7edef75a9bfaa935fd3841deaae7d930ea06105a330fd5bb8ce7d5aec3a",
   "rules_tfidf.pkl": "1b96978bfe191348386951f1efe5562be588bf5bce2d816259e2a9ff23d867be",
