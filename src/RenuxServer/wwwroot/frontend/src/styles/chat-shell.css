@@ -1049,7 +1049,8 @@
 .ch-dialog__desc { margin: 0 0 14px; color: #77695a; font-size: 13.5px; line-height: 1.6; }
 .ch-dialog__actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
-.ch-dialog input[type='text'] {
+.ch-dialog input[type='text'],
+.ch-dialog input[type='password'] {
   width: 100%;
   min-height: 38px;
   padding: 8px 11px;
@@ -1170,7 +1171,12 @@
   .ch-shell--nav-open .ch-scrim { display: block; }
 
   .ch-header__menu-btn { display: block; }
-  .ch-header { padding: 9px 14px; }
+  .ch-header {
+    padding: calc(9px + env(safe-area-inset-top, 0px)) 14px 9px;
+  }
+  .ch-sidebar__top {
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+  }
   .ch-center { padding: 16px 14px 10px; }
   .ch-composer { padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); }
   .ch-avatar__label { display: none; }

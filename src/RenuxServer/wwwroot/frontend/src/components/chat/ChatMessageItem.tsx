@@ -5,6 +5,7 @@ import ChatMarkdown from './ChatMarkdown'
 import SourceCards from './SourceCards'
 import SuggestedQuestions from './SuggestedQuestions'
 import type { ChatViewMessage } from '../../chat/chatState'
+import { canShareAnswer, shareAnswer } from '../../native/nativeFeatures'
 
 const FALLBACK_LABELS: Record<string, string> = {
   date_filter_eliminated_all: '날짜 범위 재확인',
@@ -61,6 +62,7 @@ const ChatMessageItem = ({
   onSelectSuggestion,
 }: ChatMessageItemProps) => {
   const [copied, setCopied] = useState(false)
+  const [sharing, setSharing] = useState(false)
   const [feedbackMode, setFeedbackMode] = useState<'idle' | 'form' | 'sending' | 'done'>('idle')
   const [feedbackReason, setFeedbackReason] = useState('')
   const [feedbackComment, setFeedbackComment] = useState('')
@@ -150,6 +152,18 @@ const ChatMessageItem = ({
     }
   }
 
+  const handleShare = async () => {
+    setSharing(true)
+    try {
+      await shareAnswer(message.content)
+    } catch (error) {
+      // iOS 공유 시트를 사용자가 닫은 경우를 포함해 답변 화면은 그대로 유지한다.
+      console.warn('Failed to share message text', error)
+    } finally {
+      setSharing(false)
+    }
+  }
+
   return (
     <li className={`ch-msg ${message.isFallback ? 'ch-msg--fallback' : ''} ${isStopped ? 'ch-msg--stopped' : ''}`}>
       <div className="ch-msg__doc">
@@ -196,6 +210,18 @@ const ChatMessageItem = ({
             >
               {copied ? '✓ 복사됨' : '📋 복사'}
             </button>
+
+            {canShareAnswer() && (
+              <button
+                type="button"
+                className="ch-action"
+                onClick={handleShare}
+                disabled={sharing}
+                aria-label="답변 공유"
+              >
+                {sharing ? '공유 중' : '↗ 공유'}
+              </button>
+            )}
 
             {canRegenerate && (
               <button

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch, type ApiError } from '../../api/client'
+import ConfirmDialog from '../../components/chat/ConfirmDialog'
 import type {
   DeadlineItem,
   NotificationPreference,
@@ -52,6 +53,10 @@ const SettingsPage = () => {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [needsLogin, setNeedsLogin] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deleteConfirmation, setDeleteConfirmation] = useState('')
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false)
 
   const preferenceByTopic = useMemo(() => {
     const map = new Map<NotificationTopic, NotificationPreference>()
@@ -208,6 +213,42 @@ const SettingsPage = () => {
       setNotifications((current) => current.map((item) => (item.id === notificationId ? updated : item)))
     } catch {
       setError('알림 읽음 처리에 실패했습니다.')
+    }
+  }
+
+  const closeDeleteDialog = () => {
+    if (isDeletingAccount) return
+    setDeleteDialogOpen(false)
+    setDeletePassword('')
+    setDeleteConfirmation('')
+  }
+
+  const handleDeleteAccount = async () => {
+    setIsDeletingAccount(true)
+    setError(null)
+    try {
+      await apiFetch<{ message: string }>('/auth/account', {
+        method: 'DELETE',
+        json: { password: deletePassword, confirmation: deleteConfirmation },
+      })
+      try {
+        window.localStorage.removeItem('renux-user-role')
+      } catch {
+        // 저장소 접근이 막혀 있어도 서버 계정 삭제는 완료됐다.
+      }
+      setDeleteDialogOpen(false)
+      navigate('/', { replace: true })
+      window.location.reload()
+    } catch (deleteError) {
+      const message = isApiError(deleteError)
+        && typeof deleteError.details === 'object'
+        && deleteError.details !== null
+        && 'message' in deleteError.details
+        ? String(deleteError.details.message)
+        : '회원 탈퇴를 완료하지 못했습니다.'
+      setError(message)
+    } finally {
+      setIsDeletingAccount(false)
     }
   }
 
@@ -418,8 +459,55 @@ const SettingsPage = () => {
               )}
             </div>
           </section>
+
+          <section className="settings-panel settings-panel--danger-zone">
+            <div className="settings-panel__header">
+              <div>
+                <h2>계정 관리</h2>
+                <p>회원 탈퇴 시 계정, 대화 기록, 알림 설정과 연결된 개인정보가 영구 삭제됩니다.</p>
+              </div>
+              <button
+                type="button"
+                className="settings-delete-account"
+                onClick={() => setDeleteDialogOpen(true)}
+              >
+                회원 탈퇴
+              </button>
+            </div>
+          </section>
         </>
       )}
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="회원 탈퇴"
+        description="삭제 후에는 계정과 대화 기록을 복구할 수 없습니다. 현재 비밀번호와 확인 문구를 입력해주세요."
+        confirmLabel="영구 삭제"
+        tone="danger"
+        busy={isDeletingAccount}
+        confirmDisabled={!deletePassword || deleteConfirmation.trim() !== '회원 탈퇴'}
+        onCancel={closeDeleteDialog}
+        onConfirm={handleDeleteAccount}
+      >
+        <label className="settings-delete-field">
+          <span>현재 비밀번호</span>
+          <input
+            type="password"
+            value={deletePassword}
+            onChange={(event) => setDeletePassword(event.target.value)}
+            autoComplete="current-password"
+          />
+        </label>
+        <label className="settings-delete-field">
+          <span>확인 문구: 회원 탈퇴</span>
+          <input
+            type="text"
+            value={deleteConfirmation}
+            onChange={(event) => setDeleteConfirmation(event.target.value)}
+            autoComplete="off"
+          />
+        </label>
+      </ConfirmDialog>
 
       <footer className="settings-page__footer">
         <Link to="/privacy">개인정보처리방침</Link>

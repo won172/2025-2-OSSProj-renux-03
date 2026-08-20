@@ -5,11 +5,17 @@ import { VitePWA } from 'vite-plugin-pwa'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const DEV_PROXY_TARGET = env.VITE_DEV_SERVER_PROXY_TARGET || 'https://localhost:5001'
+  const isNativeBuild = mode === 'native'
+  const nativeApiBaseUrl = env.VITE_API_BASE_URL?.trim()
+
+  if (isNativeBuild && (!nativeApiBaseUrl || !nativeApiBaseUrl.startsWith('https://'))) {
+    throw new Error('Native builds require VITE_API_BASE_URL with a stable https:// API origin.')
+  }
 
   return {
     plugins: [
       react(),
-      VitePWA({
+      ...(!isNativeBuild ? [VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['icons/pwa-192.png', 'icons/pwa-512.png'],
         manifest: {
@@ -54,7 +60,7 @@ export default defineConfig(({ mode }) => {
         devOptions: {
           enabled: false,
         },
-      }),
+      })] : []),
     ],
     server: {
       proxy: {

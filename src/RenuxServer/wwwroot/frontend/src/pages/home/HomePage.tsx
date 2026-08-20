@@ -57,6 +57,7 @@ import type { ActiveChat } from '../../types/chat'
 import type { AuthNameResponse, UserRole } from '../../types/auth'
 import type { Department } from '../../types/organization'
 import type { DeadlineItem, UserNotification } from '../../types/notification'
+import { signalAnswerCompleted } from '../../native/nativeFeatures'
 
 type AuthStatus = 'checking' | 'authenticated' | 'guest'
 
@@ -661,6 +662,9 @@ const HomePage = () => {
               : message,
           ),
         )
+      }
+      if (receivedAny) {
+        void signalAnswerCompleted()
       }
       followIfAtBottom()
 

@@ -90,7 +90,7 @@
     align-items: center;
     justify-content: center;
     background-color: var(--background-color);
-    padding: 24px;
+    padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
 }
 
 .auth-container {
@@ -1903,9 +1903,45 @@
     color: var(--buddy-muted);
 }
 
+.settings-panel--danger-zone {
+    border: 1px solid #fecaca;
+    background: #fffafa;
+}
+
+.settings-delete-account {
+    border: 1px solid #b91c1c;
+    border-radius: 8px;
+    background: #b91c1c;
+    color: white;
+    padding: 10px 14px;
+    font-weight: 800;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.settings-delete-account:hover {
+    background: #991b1b;
+}
+
+.settings-delete-field {
+    display: grid;
+    gap: 6px;
+    margin-top: 12px;
+    color: var(--buddy-foreground);
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.settings-delete-field input {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
 @media (max-width: 760px) {
     .settings-page {
-        padding: 24px 14px;
+        padding: calc(24px + env(safe-area-inset-top, 0px)) 14px calc(24px + env(safe-area-inset-bottom, 0px));
     }
 
     .settings-page__header,
@@ -3704,7 +3740,7 @@
 
 @media (max-width: 640px) {
     .policy-page {
-        padding: 24px 16px 48px;
+        padding: calc(24px + env(safe-area-inset-top, 0px)) 16px calc(48px + env(safe-area-inset-bottom, 0px));
     }
 
     .policy-page__header {
