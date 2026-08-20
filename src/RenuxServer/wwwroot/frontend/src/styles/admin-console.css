@@ -962,7 +962,7 @@
   .ac-topbar__menu { display: block; }
   .ac-content { padding: 16px 14px 76px; }
   .ac-banner { padding: 11px 14px; }
-  .ac-topbar { padding: 9px 14px; }
+  .ac-topbar { padding: calc(9px + env(safe-area-inset-top, 0px)) 14px 9px; }
   .ac-account { display: none; }
 
   .ac-split { grid-template-columns: minmax(0, 1fr); }

@@ -48,6 +48,11 @@ class Notice(Base):
     content = Column(Text)
     attachments = Column(Text)
     is_manual = Column(Integer, default=0) # 0: auto, 1: manual
+    # 학과 콘솔에서 제출한 항목의 대상 학과와 공개 범위. 기존 수집 공지는
+    # ``public``으로 두고, 학과 전용 항목은 검색·홈 브리핑 모두에서 이 값을
+    # 기준으로 제외한다.
+    department = Column(String, index=True, nullable=True)
+    visibility = Column(String, index=True, nullable=False, default="public")
     
     chunks = relationship("Chunk", back_populates="notice")
 
@@ -345,6 +350,13 @@ def ensure_runtime_schema() -> None:
             "source_page_url": "TEXT",
             "source_version": "VARCHAR",
             "published_at": "VARCHAR",
+        },
+    )
+    _ensure_sqlite_columns(
+        "notices",
+        {
+            "department": "VARCHAR",
+            "visibility": "VARCHAR DEFAULT 'public'",
         },
     )
     _ensure_sqlite_columns(

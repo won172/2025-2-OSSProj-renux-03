@@ -1,10 +1,12 @@
 ﻿using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Mvc;
 
 using RenuxServer.DbContexts;
 using RenuxServer.Dtos.AuthDtos;
 using RenuxServer.Models;
+using RenuxServer.Services;
 using System.Security.Claims;
 using System.IdentityModel.Tokens.Jwt;
 
@@ -585,6 +587,83 @@ static public class AuthenticationApis
             context.Response.Cookies.Delete("renux-server-token", BuildAuthCookieOptions(config));
 
             return Results.Ok(new { Message = "Ok" });
+        }).RequireAuthorization();
+
+        // App Store Review Guideline 5.1.1(v): 계정 생성을 지원하는 앱은 앱 안에서
+        // 계정 삭제를 완료할 수 있어야 한다. 최근 로그인 쿠키만으로 영구 삭제되지
+        // 않도록 현재 비밀번호와 명시적 확인 문구를 다시 받는다.
+        app.MapDelete("/account", async (
+            ServerDbContext db,
+            [FromBody] DeleteAccountDto request,
+            IConfiguration config,
+            HttpContext context) =>
+        {
+            var subject = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            if (!Guid.TryParse(subject, out Guid userId))
+            {
+                return Results.Unauthorized();
+            }
+
+            if (!string.Equals(request.Confirmation?.Trim(), "회원 탈퇴", StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new { message = "확인 문구로 '회원 탈퇴'를 입력해주세요." });
+            }
+
+            var user = await db.Users.FirstOrDefaultAsync(candidate => candidate.Id == userId);
+            if (user == null)
+            {
+                context.Response.Cookies.Delete("renux-server-token", BuildAuthCookieOptions(config));
+                return Results.Unauthorized();
+            }
+
+            if (string.IsNullOrEmpty(request.Password)
+                || !BCrypt.Net.BCrypt.Verify(request.Password, user.HashPassword))
+            {
+                return Results.BadRequest(new { message = "현재 비밀번호가 일치하지 않습니다." });
+            }
+
+            var chatIds = await db.Chats
+                .Where(chat => chat.UserId == userId)
+                .Select(chat => chat.Id)
+                .ToListAsync(context.RequestAborted);
+
+            if (chatIds.Count > 0)
+            {
+                db.ChatMessages.RemoveRange(db.ChatMessages.Where(message => chatIds.Contains(message.ChatId)));
+                db.Chats.RemoveRange(db.Chats.Where(chat => chatIds.Contains(chat.Id)));
+            }
+
+            db.NotificationPreferences.RemoveRange(
+                db.NotificationPreferences.Where(preference => preference.UserId == userId));
+            db.UserNotifications.RemoveRange(
+                db.UserNotifications.Where(notification => notification.UserId == userId));
+            db.CouncilSignupRequests.RemoveRange(
+                db.CouncilSignupRequests.Where(signupRequest => signupRequest.UserId == user.UserId));
+
+            // 현재 텔레메트리 키로 연결 가능한 가명 통계도 함께 지운다. 과거 키로 이미
+            // 비식별화된 집계는 계정과 다시 연결할 수 없으며 개인정보처리방침의 익명
+            // 통계 보유 항목에만 남는다.
+            try
+            {
+                string telemetrySubject = ProductTelemetry.BuildPseudonymousKey(
+                    config,
+                    "subject:user",
+                    userId.ToString("N"));
+                db.ProductEvents.RemoveRange(
+                    db.ProductEvents.Where(productEvent => productEvent.SubjectKey == telemetrySubject));
+            }
+            catch (InvalidOperationException)
+            {
+                // 텔레메트리를 사용하지 않는 배포에서도 계정 삭제 자체는 반드시 동작한다.
+            }
+
+            db.Users.Remove(user);
+            // SaveChanges는 이 변경 묶음을 하나의 DB 트랜잭션으로 실행한다. 별도의
+            // 사용자 트랜잭션은 Npgsql 재시도 전략과 충돌하므로 사용하지 않는다.
+            await db.SaveChangesAsync(context.RequestAborted);
+
+            context.Response.Cookies.Delete("renux-server-token", BuildAuthCookieOptions(config));
+            return Results.Ok(new { message = "계정과 연결된 개인정보를 삭제했습니다." });
         }).RequireAuthorization();
 
         // 구버전 프론트 호환용 GET (점진 제거 예정)

@@ -68,6 +68,10 @@ DEFAULT_REQUEST_RETRIES = 3
 PARSER_CANDIDATES: Iterable[str] = ("lxml", "html5lib", "html.parser")
 
 
+class NoticeCrawlError(RuntimeError):
+    """Raised when no configured notice board produced a trustworthy list page."""
+
+
 # ===== HTML 처리 헬퍼 =====
 def _strip_hwpjson_sections(markup: str) -> str:
     """`<![ ... data-hwpjson ... ]>` 구획을 제거합니다.
@@ -334,6 +338,9 @@ def collect_board(
     page = 1
     stop_collecting = False
     failed_articles = 0
+    list_pages_succeeded = 0
+    list_pages_failed = 0
+    list_rows_seen = 0
     # 목록이 대체로 날짜 역순이지만 중간에 섞인 글이 있을 수 있으므로,
     # 오래된 글이 연속으로 이 횟수만큼 나와야 수집을 중단한다(즉시 중단 시 누락 위험).
     OLD_STREAK_TO_STOP = 5
@@ -351,8 +358,11 @@ def collect_board(
                 retries=request_retries,
             )
         except Exception as exc:  # noqa: BLE001 — 목록 한 페이지 실패가 게시판 전체를 중단시키지 않도록
+            list_pages_failed += 1
             print(f"⚠️ [{board_name}] 목록 페이지 {page} 수집 실패: {exc}")
             break
+        list_pages_succeeded += 1
+        list_rows_seen += len(notice_list)
         if not notice_list:
             break
 
@@ -426,17 +436,33 @@ def collect_board(
     if failed_articles:
         print(f"⚠️ [{board_name}] 상세 수집 실패 {failed_articles}건 (수집 성공 {len(records)}건)")
 
-    if not records:
+    if records:
+        df = pd.DataFrame(records)
+        df["posted_at"] = pd.to_datetime(df["posted_at"], errors="coerce").dt.date
+        df.sort_values(by=["posted_at", "article_id"], ascending=[False, False], inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        selected = df[SELECT_COLUMNS].copy()
+        selected.rename(columns=COLUMN_LABELS, inplace=True)
+    else:
         columns = [COLUMN_LABELS[col] for col in SELECT_COLUMNS]
-        return pd.DataFrame(columns=columns)
+        selected = pd.DataFrame(columns=columns)
 
-    df = pd.DataFrame(records)
-    df["posted_at"] = pd.to_datetime(df["posted_at"], errors="coerce").dt.date
-    df.sort_values(by=["posted_at", "article_id"], ascending=[False, False], inplace=True)
-    df.reset_index(drop=True, inplace=True)
-
-    selected = df[SELECT_COLUMNS].copy()
-    selected.rename(columns=COLUMN_LABELS, inplace=True)
+    if list_pages_succeeded == 0 and list_pages_failed:
+        crawl_status = "failed"
+    elif list_pages_failed or failed_articles:
+        crawl_status = "partial"
+    else:
+        crawl_status = "success"
+    selected.attrs["crawl_diagnostics"] = {
+        "board_name": board_name,
+        "board_code": board_code,
+        "status": crawl_status,
+        "list_pages_succeeded": list_pages_succeeded,
+        "list_pages_failed": list_pages_failed,
+        "list_rows_seen": list_rows_seen,
+        "records_collected": len(selected),
+        "detail_failures": failed_articles,
+    }
     return selected
 
 
@@ -451,6 +477,7 @@ def crawl_notices(
 ) -> pd.DataFrame:
     boards = list(boards) if boards is not None else TARGET_BOARDS
     dataframes: List[pd.DataFrame] = []
+    diagnostics: List[Dict[str, Any]] = []
 
     for board_name in boards:
         board_code = BOARD_CODES.get(board_name)
@@ -469,15 +496,47 @@ def crawl_notices(
             request_retries=request_retries,
         )
         dataframes.append(df)
+        diagnostic = df.attrs.get("crawl_diagnostics")
+        if isinstance(diagnostic, dict):
+            diagnostics.append(dict(diagnostic))
 
     if not dataframes:
         columns = [COLUMN_LABELS[col] for col in SELECT_COLUMNS]
         return pd.DataFrame(columns=columns)
 
+    failed_boards = [
+        str(item.get("board_name") or item.get("board_code") or "unknown")
+        for item in diagnostics
+        if item.get("status") == "failed"
+    ]
+    incomplete_boards = [
+        str(item.get("board_name") or item.get("board_code") or "unknown")
+        for item in diagnostics
+        if item.get("status") in {"failed", "partial"}
+    ]
+    reachable_boards = [
+        item for item in diagnostics if int(item.get("list_pages_succeeded") or 0) > 0
+    ]
+    if diagnostics and not reachable_boards:
+        raise NoticeCrawlError(
+            f"공지 게시판 {len(diagnostics)}개 모두 목록 수집에 실패했습니다: "
+            + ", ".join(failed_boards)
+        )
+    if reachable_boards and not any(int(item.get("list_rows_seen") or 0) > 0 for item in reachable_boards):
+        raise NoticeCrawlError(
+            "접속 가능한 모든 공지 게시판의 첫 목록이 0건입니다. "
+            "사이트 구조 변경 또는 차단 여부를 확인하세요."
+        )
+
     combined = pd.concat(dataframes, ignore_index=True)
-    combined.drop_duplicates(subset=["상세URL"], inplace=True)
-    combined.sort_values(by=["게시일", "제목"], ascending=[False, True], inplace=True)
-    combined.reset_index(drop=True, inplace=True)
+    if not combined.empty:
+        combined.drop_duplicates(subset=["상세URL"], inplace=True)
+        combined.sort_values(by=["게시일", "제목"], ascending=[False, True], inplace=True)
+        combined.reset_index(drop=True, inplace=True)
+    combined.attrs["crawl_diagnostics"] = diagnostics
+    combined.attrs["crawl_failed_boards"] = failed_boards
+    combined.attrs["crawl_incomplete_boards"] = incomplete_boards
+    combined.attrs["crawl_status"] = "partial" if incomplete_boards else "success"
     return combined
 
 
@@ -498,6 +557,7 @@ def crawl_recent_notices(
 
 
 __all__ = [
+    "NoticeCrawlError",
     "crawl_notices",
     "crawl_recent_notices",
     "collect_board",

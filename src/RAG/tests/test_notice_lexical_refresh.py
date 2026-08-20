@@ -23,7 +23,13 @@ def _초기화():
     rag_service._lexical_rebuild_pending.clear()
 
 
+def _준비상태_갱신_막기(monkeypatch):
+    monkeypatch.setattr(rag_service, "_refresh_data_quality_readiness", lambda: {})
+    monkeypatch.setattr(rag_service, "_refresh_canonical_lineage_readiness", lambda: {})
+
+
 def test_캐시_재적재가_어휘_아티팩트도_다시_만든다(monkeypatch):
+    _준비상태_갱신_막기(monkeypatch)
     호출 = []
     monkeypatch.setattr(
         rag_service,
@@ -39,6 +45,7 @@ def test_캐시_재적재가_어휘_아티팩트도_다시_만든다(monkeypatch
 
 
 def test_어휘_재생성이_실패해도_캐시_재적재는_진행된다(monkeypatch):
+    _준비상태_갱신_막기(monkeypatch)
     def 폭발(context):
         raise RuntimeError("디스크 오류")
 

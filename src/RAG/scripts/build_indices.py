@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.pipelines.ingest import (
+    backfill_static_source_documents,
     ingest_courses,
     ingest_meals,
     ingest_notices,
@@ -58,6 +59,9 @@ def main() -> None:
     targets = args.datasets if args.datasets else list(ALL_LOADERS)
     init_db()
     if not args.import_legacy_csv:
+        static_targets = [key for key in targets if key in {"rules", "schedule", "courses", "staff"}]
+        if static_targets:
+            print(f"▶ 정적 정본 payload 확인: {backfill_static_source_documents(static_targets)}")
         results = {}
         for key in targets:
             if key == "notices":

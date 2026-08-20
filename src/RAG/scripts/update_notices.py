@@ -14,6 +14,7 @@ from src.pipelines.notices_sync import (
     apply_notice_normalized_documents,
     load_known_article_ids_by_board,
     normalize_existing_notice_documents,
+    record_notice_ingestion_failure,
     rebuild_notices_from_source_documents,
     sync_notices,
 )
@@ -27,7 +28,7 @@ def _run_once(
     earliest_year: int | None,
     mode: str,
     full_backfill: bool = False,
-) -> None:
+) -> bool:
     start_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{start_ts}] 🕐 notices 작업 시작 (mode={mode})")
 
@@ -37,7 +38,8 @@ def _run_once(
             print("✅ normalized 문서 기준으로 notices 도메인 테이블을 갱신했습니다.")
         except Exception as exc:  # noqa: BLE001
             print(f"⚠️ normalize-only 실패: {exc}")
-        return
+            return False
+        return True
 
     if mode == "index-only":
         try:
@@ -45,7 +47,8 @@ def _run_once(
             print(f"✅ SQLite 정본에서 notices 인덱스와 TF-IDF를 다시 생성했습니다: {len(chunks_df)} chunks")
         except Exception as exc:  # noqa: BLE001
             print(f"⚠️ index-only 실패: {exc}")
-        return
+            return False
+        return True
 
     try:
         known_ids_by_board = None
@@ -63,7 +66,12 @@ def _run_once(
         )
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️ 크롤링 실패: {exc}")
-        return
+        try:
+            run_id = record_notice_ingestion_failure(exc, stage="crawl")
+            print(f"⚠️ 실패 실행 기록 저장: run_id={run_id}")
+        except Exception as audit_exc:  # noqa: BLE001 - 감사 기록 실패가 원래 오류를 가리지 않게 한다.
+            print(f"⚠️ 실패 실행 기록 저장 실패: {audit_exc}")
+        return False
 
     try:
         summary = sync_notices(
@@ -73,13 +81,19 @@ def _run_once(
         )
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️ 동기화 실패: {exc}")
-        return
+        return False
     end_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    incomplete_boards = int(summary.get("incomplete_boards", 0) or 0)
+    failed_documents = int(summary.get("failed", 0) or 0)
+    completed = incomplete_boards == 0 and failed_documents == 0
+    marker = "✅" if completed else "⚠️"
     print(
-        f"[{end_ts}] ✅ notices 반영 완료. "
+        f"[{end_ts}] {marker} notices 반영 완료. "
         f"seen={summary['seen']} new={summary['new']} updated={summary['updated']} "
-        f"deleted={summary['deleted']} failed={summary['failed']}"
+        f"deleted={summary['deleted']} failed={summary['failed']} "
+        f"incomplete_boards={incomplete_boards}"
     )
+    return completed
 
 
 def main() -> None:
@@ -129,7 +143,16 @@ def main() -> None:
     earliest_year = args.earliest_year
 
     if args.interval <= 0:
-        _run_once(boards, max_pages, args.delay, earliest_year, args.mode, full_backfill=args.full)
+        succeeded = _run_once(
+            boards,
+            max_pages,
+            args.delay,
+            earliest_year,
+            args.mode,
+            full_backfill=args.full,
+        )
+        if not succeeded:
+            raise SystemExit(1)
         return
 
     interval_seconds = args.interval * 60

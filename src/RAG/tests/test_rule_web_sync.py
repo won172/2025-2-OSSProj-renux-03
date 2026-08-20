@@ -122,20 +122,21 @@ def test_official_merge_is_idempotent_and_rule_chunks_keep_source_lineage():
 
 def test_rule_collection_replacement_upserts_before_deleting_stale_ids(monkeypatch):
     events: list[object] = []
+    live_ids = {"old", "new"}
     frame = pd.DataFrame([{"chunk_id": "new", "chunk_text": "현행 규정"}])
 
-    monkeypatch.setattr(ingest, "get_all_ids", lambda _collection: ["old", "new"])
+    monkeypatch.setattr(ingest, "get_all_ids", lambda _collection: sorted(live_ids))
 
     def fake_persist(key, collection, chunks):
         events.append(("upsert", key, collection, chunks["chunk_id"].tolist()))
         return chunks, object(), object()
 
     monkeypatch.setattr(ingest, "_persist_chunks", fake_persist)
-    monkeypatch.setattr(
-        ingest,
-        "delete_items",
-        lambda collection, ids: events.append(("delete", collection, ids)),
-    )
+    def fake_delete(collection, ids):
+        events.append(("delete", collection, ids))
+        live_ids.difference_update(ids)
+
+    monkeypatch.setattr(ingest, "delete_items", fake_delete)
 
     ingest._persist_replacing_collection("rules", "dongguk_rules", frame)
 

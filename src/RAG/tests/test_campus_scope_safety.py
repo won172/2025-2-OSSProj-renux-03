@@ -106,7 +106,7 @@ def test_default_boundary_blocks_all_twelve_adversarial_wise_rows():
     assert untrusted.iloc[0]["campus_scope"] == "unknown"
 
 
-def test_wise_rows_are_allowed_only_when_original_query_is_explicit():
+def test_wise_rows_are_detected_but_remain_blocked_for_product_retrieval():
     rows = pd.DataFrame([
         {"chunk_id": "w1", "title": "WISE캠퍼스 학사 규정"},
         {"chunk_id": "s1", "title": "서울캠퍼스 학사 규정"},
@@ -118,11 +118,11 @@ def test_wise_rows_are_allowed_only_when_original_query_is_explicit():
     assert query_explicitly_requests_wise("휴학 규정 알려줘") is False
     assert query_explicitly_requests_wise("otherwise라는 단어 뜻") is False
 
-    filtered, blocked = apply_campus_safety_boundary(rows, allow_wise=True)
-    assert blocked == 0
-    assert filtered["chunk_id"].tolist() == ["w1", "s1"]
-    assert rag_service._semantic_cache_namespace(None, allow_wise=False) != (
-        rag_service._semantic_cache_namespace(None, allow_wise=True)
+    filtered, blocked = apply_campus_safety_boundary(rows, allow_wise=False)
+    assert blocked == 1
+    assert filtered["chunk_id"].tolist() == ["s1"]
+    assert rag_service._semantic_cache_namespace(None, allow_wise=False).endswith(
+        "seoul_bmc"
     )
 
 

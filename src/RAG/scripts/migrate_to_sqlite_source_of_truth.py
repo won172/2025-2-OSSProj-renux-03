@@ -14,7 +14,12 @@ if str(RAG_ROOT) not in sys.path:
     sys.path.insert(0, str(RAG_ROOT))
 
 from src.database import init_db  # noqa: E402
-from src.pipelines.ingest import ingest_meals, reindex_from_db  # noqa: E402
+from src.pipelines.ingest import (  # noqa: E402
+    backfill_static_source_documents,
+    ingest_meals,
+    normalize_existing_meal_documents,
+    reindex_from_db,
+)
 from src.pipelines.notices_sync import (  # noqa: E402
     migrate_legacy_notice_payloads,
     rebuild_notices_from_source_documents,
@@ -37,6 +42,9 @@ def main() -> None:
     if not args.skip_meals:
         chunks, _, _ = ingest_meals()
         print(f"meals SQLite bootstrap/rebuild: {len(chunks)} chunks")
+    print(f"meals canonical payload upgrades: {normalize_existing_meal_documents()}")
+    static_summary = backfill_static_source_documents()
+    print(f"static canonical payloads: {static_summary}")
     if args.reindex_static:
         for dataset in ("rules", "schedule", "courses", "staff"):
             result = reindex_from_db(dataset).get(dataset)

@@ -1,0 +1,149 @@
+{
+  "schema_version": 2,
+  "evaluated": 190,
+  "matrix_questions": 190,
+  "all_axes_passed": 72,
+  "wrong_campus_count": 1,
+  "contract_errors": [],
+  "rag_metrics": {
+    "faithfulness": 0.3157894736842105,
+    "answer_relevancy": 0.5657894736842105,
+    "context_precision": 0.6573464912280701,
+    "context_recall": 0.6513157894736842
+  },
+  "rag_metric_thresholds": {
+    "faithfulness": 0.75,
+    "answer_relevancy": 0.8,
+    "context_precision": 0.7,
+    "context_recall": 0.8
+  },
+  "rag_metric_failures": [
+    "faithfulness 0.3158 below 0.7500",
+    "answer_relevancy 0.5658 below 0.8000",
+    "context_precision 0.6573 below 0.7000",
+    "context_recall 0.6513 below 0.8000"
+  ],
+  "by_domain": {
+    "academic-calendar": {
+      "evaluated": 16,
+      "all_axes_passed": 7,
+      "axis_passed": {
+        "intent": 14,
+        "answer": 8,
+        "source": 13,
+        "followup": 16
+      }
+    },
+    "registration": {
+      "evaluated": 16,
+      "all_axes_passed": 4,
+      "axis_passed": {
+        "intent": 12,
+        "answer": 11,
+        "source": 4,
+        "followup": 16
+      }
+    },
+    "graduation": {
+      "evaluated": 16,
+      "all_axes_passed": 8,
+      "axis_passed": {
+        "intent": 14,
+        "answer": 11,
+        "source": 8,
+        "followup": 15
+      }
+    },
+    "scholarship": {
+      "evaluated": 16,
+      "all_axes_passed": 7,
+      "axis_passed": {
+        "intent": 12,
+        "answer": 9,
+        "source": 10,
+        "followup": 15
+      }
+    },
+    "academic-status": {
+      "evaluated": 16,
+      "all_axes_passed": 7,
+      "axis_passed": {
+        "intent": 15,
+        "answer": 11,
+        "source": 11,
+        "followup": 15
+      }
+    },
+    "campus-life": {
+      "evaluated": 16,
+      "all_axes_passed": 4,
+      "axis_passed": {
+        "intent": 6,
+        "answer": 8,
+        "source": 5,
+        "followup": 16
+      }
+    },
+    "dining": {
+      "evaluated": 15,
+      "all_axes_passed": 5,
+      "axis_passed": {
+        "intent": 11,
+        "answer": 5,
+        "source": 8,
+        "followup": 14
+      }
+    },
+    "housing": {
+      "evaluated": 16,
+      "all_axes_passed": 6,
+      "axis_passed": {
+        "intent": 11,
+        "answer": 9,
+        "source": 8,
+        "followup": 14
+      }
+    },
+    "career": {
+      "evaluated": 16,
+      "all_axes_passed": 6,
+      "axis_passed": {
+        "intent": 13,
+        "answer": 10,
+        "source": 10,
+        "followup": 15
+      }
+    },
+    "international": {
+      "evaluated": 16,
+      "all_axes_passed": 5,
+      "axis_passed": {
+        "intent": 14,
+        "answer": 10,
+        "source": 8,
+        "followup": 14
+      }
+    },
+    "people-services": {
+      "evaluated": 15,
+      "all_axes_passed": 5,
+      "axis_passed": {
+        "intent": 13,
+        "answer": 10,
+        "source": 8,
+        "followup": 15
+      }
+    },
+    "student-community": {
+      "evaluated": 16,
+      "all_axes_passed": 8,
+      "axis_passed": {
+        "intent": 13,
+        "answer": 10,
+        "source": 8,
+        "followup": 16
+      }
+    }
+  },
+  "passed": false
+}

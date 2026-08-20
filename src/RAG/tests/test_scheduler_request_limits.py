@@ -188,6 +188,7 @@ def test_scheduler_jobs_pass_and_log_configured_request_limits(monkeypatch, capl
     notices_crawler.crawl_notices = fake_crawl_notices
     notices_pipeline = ModuleType("src.pipelines.notices_sync")
     notices_pipeline.load_known_article_ids_by_board = lambda: {"일반공지": {1}}
+    notices_pipeline.record_notice_ingestion_failure = lambda *_args, **_kwargs: 1
     notices_pipeline.sync_notices = lambda *_args, **_kwargs: {}
 
     meals_crawler = ModuleType("src.crawlers.dongguk_meals")
@@ -222,3 +223,48 @@ def test_rag_service_healthcheck_fallbacks_have_hard_timeouts():
     assert "curl --connect-timeout 2 --max-time 4" in rag_service
     assert 'urlopen(\\"http://localhost:8000/ready\\", timeout=4)' in rag_service
     assert "            timeout: 10s" in rag_service
+
+
+def test_scheduler_sends_content_free_alerts_only_for_partial_or_failed(monkeypatch):
+    calls: list[dict] = []
+
+    class FakeResponse:
+        @staticmethod
+        def raise_for_status() -> None:
+            return None
+
+    def fake_post(url, *, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return FakeResponse()
+
+    monkeypatch.setattr(scheduler, "RAG_SCHEDULER_ALERT_WEBHOOK_URL", "https://alerts.example.test")
+    monkeypatch.setattr(scheduler, "RAG_SCHEDULER_ALERT_TIMEOUT_SECONDS", 3.0)
+    monkeypatch.setattr(scheduler.httpx, "post", fake_post)
+
+    scheduler._record_run("refresh_notices", "ok", "신규 0")
+    scheduler._record_run("refresh_notices", "partial", "미완료 게시판 1")
+    scheduler._record_run("refresh_meals", "failed", "upstream timeout")
+
+    assert len(calls) == 2
+    assert [call["json"]["status"] for call in calls] == ["partial", "failed"]
+    assert all(call["timeout"] == 3.0 for call in calls)
+    assert all(call["json"]["service"] == "dongttok-rag" for call in calls)
+    assert all("document" not in call["json"] for call in calls)
+    assert all("query" not in call["json"] for call in calls)
+
+
+def test_scheduler_alert_failure_never_breaks_run_record(monkeypatch, caplog):
+    monkeypatch.setattr(scheduler, "RAG_SCHEDULER_ALERT_WEBHOOK_URL", "https://alerts.example.test")
+    monkeypatch.setattr(
+        scheduler.httpx,
+        "post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("webhook unavailable")),
+    )
+
+    with caplog.at_level(logging.WARNING, logger=scheduler.__name__):
+        scheduler._record_run("refresh_notices", "failed", "crawl failed")
+
+    status = scheduler.get_scheduler_status()
+    notice_job = next(job for job in status["jobs"] if job["id"] == "refresh_notices")
+    assert notice_job["last_status"] == "failed"
+    assert "운영 경보 전송 실패" in caplog.text

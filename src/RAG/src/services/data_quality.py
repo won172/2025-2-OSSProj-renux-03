@@ -71,16 +71,15 @@ def build_notice_linkage_summary(
             .order_by(SourceDocument.id.asc())
             .all()
         )
-    linked_urls = {
-        source_url
-        for (source_url,) in (
-            session.query(Notice.detail_url)
-            .join(Chunk, Chunk.notice_id == Notice.id)
-            .filter(Notice.detail_url.isnot(None))
+    linked_document_keys = {
+        str(doc_id).strip()
+        for (doc_id,) in (
+            session.query(Chunk.doc_id)
+            .join(Notice, Chunk.notice_id == Notice.id)
             .distinct()
             .all()
         )
-        if source_url
+        if str(doc_id or "").strip()
     }
     active_statuses = {"active", "updated"}
     linked_document_ids: list[int] = []
@@ -91,7 +90,10 @@ def build_notice_linkage_summary(
 
     for document in documents:
         status = (document.status or "unknown").strip().lower()
-        has_linked_chunk = bool(document.source_url and document.source_url in linked_urls)
+        has_linked_chunk = bool(
+            document.document_key
+            and str(document.document_key) in linked_document_keys
+        )
         if has_linked_chunk:
             linked_document_ids.append(document.id)
         if status == "active":

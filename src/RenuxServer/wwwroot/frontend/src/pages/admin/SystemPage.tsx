@@ -115,8 +115,17 @@ const SystemPage = () => {
               value={getSystemStatusLabel(ragStatus.status)}
               tone={getSystemStatusTone(ragStatus.status)}
             />
-            <MetricCard label="총 질문 로그" value={ragStatus.rag_logs.total_queries.toLocaleString('ko-KR')} />
-            <MetricCard label="Fallback" value={ragStatus.rag_logs.fallback_count.toLocaleString('ko-KR')} />
+            {/* 이 두 값은 누적이 아니라 최근 기간의 실제 사용자 질문만 센다. */}
+            <MetricCard
+              label="질문 로그"
+              value={ragStatus.rag_logs.total_queries.toLocaleString('ko-KR')}
+              hint={ragStatus.rag_logs.window_days ? `최근 ${ragStatus.rag_logs.window_days}일` : undefined}
+            />
+            <MetricCard
+              label="Fallback"
+              value={ragStatus.rag_logs.fallback_count.toLocaleString('ko-KR')}
+              hint={ragStatus.rag_logs.window_days ? `최근 ${ragStatus.rag_logs.window_days}일` : undefined}
+            />
             <MetricCard label="승인 대기" value={ragStatus.pending_items.pending} />
             <MetricCard label="최근 질문" value={formatDateTime(ragStatus.rag_logs.latest_query_at)} />
             <MetricCard label="상태 기준 시각" value={formatDateTime(ragStatus.generated_at)} />

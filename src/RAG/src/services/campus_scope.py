@@ -1,10 +1,11 @@
 """Campus classification and the retrieval safety boundary.
 
-The product serves Seoul and BMC students by default.  WISE-only material is
-therefore excluded unless the *original user question* explicitly asks for
-WISE. ``unknown`` remains eligible for untrusted legacy rows. Records from the
-six curated main-campus corpora receive a provenance fallback only after every
-WISE, BMC, and Seoul identity signal has been checked.
+The v1 product serves Seoul and BMC students only. WISE is classified so that
+its documents and explicit question markers can be quarantined, never so that
+an ordinary product request can opt into WISE. ``unknown`` remains eligible for
+untrusted legacy rows. Records from the six curated main-campus corpora receive
+a provenance fallback only after every WISE, BMC, and Seoul identity signal has
+been checked.
 """
 from __future__ import annotations
 
@@ -61,7 +62,7 @@ def _clean(value: Any) -> str:
 
 
 def query_explicitly_requests_wise(question: str) -> bool:
-    """Return true only for an explicit WISE marker in the original question."""
+    """Return true for a WISE marker that must be rejected or quarantined."""
     return bool(_WISE_RE.search(_clean(question)))
 
 
@@ -144,7 +145,9 @@ def apply_campus_safety_boundary(
     campus. ``unknown`` is allowed for backwards compatibility, but only after
     reclassification from every legacy WISE-bearing field.  This avoids hiding
     the majority of old Seoul records while still blocking detectable WISE
-    material from candidates, sources, and answer context.
+    material from candidates, sources, and answer context. ``allow_wise`` is a
+    compatibility parameter for low-level callers; the public v1 API never
+    sets it to true.
     """
     if hits.empty:
         return hits.copy(), 0

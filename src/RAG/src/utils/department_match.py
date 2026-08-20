@@ -22,18 +22,47 @@ from __future__ import annotations
 import csv
 import functools
 import re
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import pandas as pd
 
-from src.config import DATA_SOURCES
+from src.config import DATA_DIR, DATA_SOURCES
 
 # 학과명 안에서 표기가 흔들리는 구분기호. 이 자리만 유연하게 대조한다.
 _SEPARATOR_CLASS = r"[\s·∙‧•/\-]*"
 _SEPARATOR_RUN = re.compile(r"[^0-9A-Za-z가-힣]+")
 # 학과명이 더 긴 한글 낱말의 일부로 걸리는 것을 막는 경계.
 _LEFT_BOUNDARY = r"(?<![가-힣A-Za-z])"
-_RIGHT_BOUNDARY = r"(?![가-힣])"
+
+# 한국어 조사·서술격은 명사에 띄어쓰기 없이 붙는다. 오른쪽 경계를 `(?![가-힣])`로만
+# 두면 "화학과의", "학부가", "학과에서"가 전부 인식에 실패한다. 실측: 조사 25개 전부
+# 실패했고 실제 로그 16건(폴백 3건)이 여기 걸렸다.
+#
+# 그렇다고 경계를 없애면 "수학과목"이 "수학과"로 잡힌다. 그래서 **알려진 조사만**
+# 선택적으로 흘려보내고, 그 뒤에 다시 한글이 오면 거부한다. "목"은 조사가 아니므로
+# "수학과목"은 그대로 걸러진다.
+_PARTICLES = (
+    # 격조사·보조사
+    "으로부터", "에게서", "한테서", "으로서", "으로써", "이라도", "이라는", "이든지",
+    "로부터", "에게", "한테", "께서", "으로", "로서", "로써", "라도", "라는", "든지",
+    "이나", "이랑", "조차", "마저", "밖에", "처럼", "보다", "마다", "에서", "까지",
+    "부터", "하고", "이란",
+    "께", "와", "과", "랑", "도", "만", "나", "란", "의", "에", "로",
+    "은", "는", "이", "가", "을", "를",
+    # 축약형. "에선"은 "에서는"이 줄어든 것이라 조사를 겹쳐도 만들어지지 않는다.
+    "에선", "에겐", "한텐", "으론", "론", "껜",
+    # 서술격조사·복수
+    "이었", "이에요", "입니다", "인데", "이야", "이고", "이며", "예요", "이다",
+    "야", "들",
+)
+# 정규식 교체는 왼쪽부터 시도하므로 긴 것을 앞에 둔다(백트래킹 비용도 줄인다).
+_PARTICLE_ALTERNATION = "|".join(
+    re.escape(p) for p in sorted(_PARTICLES, key=len, reverse=True)
+)
+# 조사는 겹쳐 붙는다("학과에서는", "학과와는", "학과들도"). 두 번까지 허용한다.
+# 무제한으로 두면 조사 아닌 한글까지 흘려보낼 여지가 커진다.
+_RIGHT_BOUNDARY = rf"(?:{_PARTICLE_ALTERNATION}){{0,2}}(?![가-힣])"
 
 
 def _department_pattern(name: str) -> re.Pattern[str] | None:
@@ -46,9 +75,42 @@ def _department_pattern(name: str) -> re.Pattern[str] | None:
 
 
 def _iter_source_departments() -> List[str]:
-    """색인된 `major`의 출처인 수집 CSV에서 학과명을 읽는다."""
+    """색인 정본(SourceDocument)에서 학과명을 읽는다.
+
+    테스트와 명시적 마이그레이션 도구가 넘긴 별도 경로만 CSV를 사용한다.
+    운영 기본 경로는 과정 색인과 동일한 canonical payload를 읽어야 한다.
+    """
     path = DATA_SOURCES.get("courses_all")
-    if path is None or not path.exists():
+    if path is None:
+        return []
+
+    default_path = (DATA_DIR / "dongguk_courses_all.csv").resolve()
+    if Path(path).resolve() == default_path:
+        try:
+            from src.database import SessionLocal
+            from src.pipelines.ingest import load_canonical_source_frame
+
+            session = SessionLocal()
+            try:
+                frame = load_canonical_source_frame(session, "courses")
+            finally:
+                session.close()
+            if frame.empty:
+                return []
+            column = "department_name" if "department_name" in frame.columns else "major"
+            if column not in frame.columns:
+                return []
+            return [
+                str(value).strip()
+                for value in frame[column]
+                if str(value).strip() and str(value).strip().lower() not in {"nan", "none"}
+            ]
+        except Exception:
+            return []
+
+    # Explicit non-default paths are retained for isolated tests and one-time
+    # legacy migration diagnostics.
+    if not path.exists():
         return []
     try:
         # 학과명 컬럼만 읽는다 — 전체를 읽으면 수 MB를 불필요하게 파싱한다.

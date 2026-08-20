@@ -30,7 +30,12 @@ from golden_matrix import (  # noqa: E402
     main as validate_main,
     validate_matrix,
 )
-from run_golden_matrix import _result_from_response, main as runner_main  # noqa: E402
+import run_golden_matrix as golden_runner  # noqa: E402
+from run_golden_matrix import (  # noqa: E402
+    _candidate_ready,
+    _result_from_response,
+    main as runner_main,
+)
 from src.services.source_contract import source_reference  # noqa: E402
 from verify_golden_replay import main as replay_main  # noqa: E402
 
@@ -183,6 +188,65 @@ def test_validator_rejects_missing_pattern_and_numeric_template(golden_cases, ta
     second = replace(golden_cases[1], id="ZZ-002", question="2027학년도 3학기 개강일이 언제야?")
     errors = validate_matrix([first, second], taxonomy, min_questions=0, min_per_domain=0)
     assert any("numeric-only question template" in error for error in errors)
+
+
+def test_matrix_covers_historical_and_absent_data_question_types(golden_cases):
+    """요청받은 14개 질문 유형 중 마지막 둘이 실제로 들어와 있는지.
+
+    둘 다 모든 도메인에 요구하지 않는다. meals 코퍼스는 2주치뿐이고 staff
+    명부에는 시점이 없어, 그 도메인의 과거 정보 문항은 정답을 만들 수 없다.
+    없는 정답을 지어내 칸을 채우면 문항 수만 늘고 지표는 거짓이 된다.
+    """
+    historical = [case for case in golden_cases if "historical_info" in case.case_types]
+    absent = [case for case in golden_cases if "nonexistent_info" in case.case_types]
+    assert len(historical) >= 10
+    assert len(absent) >= 12
+
+    for case in historical:
+        assert case.answerability == "answerable"
+        assert any("20" in keyword for keyword in case.required_keywords)
+    for case in absent:
+        assert case.answerability == "not_answerable"
+        assert case.refusal_reason == "data_absent_in_corpus"
+        assert case.expected_datasets  # 어디를 찾아봤는지는 선언해야 한다
+        assert not case.required_keywords
+
+
+def test_validator_rejects_a_historical_case_without_an_explicit_year(golden_cases, taxonomy):
+    """연도가 없으면 최신성 가중이 꺼지지 않아 검증하려던 경로를 안 밟는다."""
+    original = next(case for case in golden_cases if "historical_info" in case.case_types)
+    vague = replace(original, question="계절학기 수업 기간이 언제였어?")
+    errors = validate_matrix([vague], taxonomy, min_questions=0, min_per_domain=0)
+    assert any("explicit year" in error for error in errors)
+
+
+def test_validator_rejects_a_historical_case_presented_as_current(golden_cases, taxonomy):
+    original = next(case for case in golden_cases if "historical_info" in case.case_types)
+    unguarded = replace(original, forbidden_claims=("WISE 캠퍼스 기준입니다",))
+    errors = validate_matrix([unguarded], taxonomy, min_questions=0, min_per_domain=0)
+    assert any("past as current" in error for error in errors)
+
+
+def test_validator_rejects_absent_data_case_that_declares_answer_keywords(golden_cases, taxonomy):
+    """정답 키워드를 적으면 지어낸 답변이 그 키워드로 통과한다.
+
+    자료가 없는 질문에 '경쟁률'이 답에 나오면 성공이라고 채점하는 순간,
+    환각을 정답으로 세는 지표가 된다.
+    """
+    original = next(case for case in golden_cases if "nonexistent_info" in case.case_types)
+    with_keywords = replace(original, required_keywords=("경쟁률",))
+    errors = validate_matrix([with_keywords], taxonomy, min_questions=0, min_per_domain=0)
+    assert any("must not declare answer keywords" in error for error in errors)
+
+
+def test_validator_rejects_absent_data_case_reusing_the_privacy_refusal_contract(
+    golden_cases, taxonomy
+):
+    """자료 부재와 권한 거절은 처방이 반대다 — 앞은 사람이 채워야 하고 뒤는 채우면 안 된다."""
+    original = next(case for case in golden_cases if "nonexistent_info" in case.case_types)
+    mislabelled = replace(original, refusal_reason="student_record_privacy")
+    errors = validate_matrix([mislabelled], taxonomy, min_questions=0, min_per_domain=0)
+    assert any("data_absent_in_corpus" in error for error in errors)
 
 
 def test_structural_cli_loads_taxonomy(capsys):
@@ -369,9 +433,10 @@ def test_hs012_pii_leak_fails_even_with_refusal(golden_cases, passing_results):
     assert any("sensitive disclosure" in reason for reason in detail["axes"]["answer"]["reasons"])
 
 
-def test_ac013_wise_only_comparison_source_fails(golden_cases, passing_results):
+def test_ac013_wise_source_fails_for_out_of_scope_case(golden_cases, passing_results):
     result = next(item for item in passing_results if item["id"] == "AC-013")
-    result["sources"] = [source for source in result["sources"] if source["campus_scope"] == "wise"]
+    result["sources"] = [_source("schedule", "wise", 1, "AC-013")]
+    result["followups"] = [{"question": "WISE 자료도 확인할까요?", "source_refs": []}]
     result["followups"][0]["source_refs"] = [result["sources"][0]["id"]]
     _, details = evaluate(golden_cases, passing_results, run_at=RUN_AT)
     detail = next(item for item in details if item["id"] == "AC-013")
@@ -529,6 +594,56 @@ def test_runner_performs_http_call_and_marks_subset_incomplete(tmp_path):
     assert result["followup_http_status"] == 200
     assert result["followup_latency_ms"] is not None
     assert result["workflow_latency_ms"] >= result["latency_ms"]
+
+
+@pytest.mark.parametrize(
+    ("status", "payload", "expected"),
+    [
+        (200, {"status": "ready", "ready": True}, True),
+        (200, {"status": "ready"}, True),
+        (503, {"status": "not_ready", "ready": False}, False),
+        (200, {"status": "not_ready", "ready": False}, False),
+    ],
+)
+def test_release_candidate_requires_successful_readiness_attestation(status, payload, expected):
+    assert _candidate_ready(status, payload) is expected
+
+
+def test_runner_fails_before_llm_requests_when_candidate_lineage_is_not_ready(
+    monkeypatch,
+    tmp_path,
+):
+    requests: list[str] = []
+
+    def fake_request(url, _payload, _timeout, _headers):
+        requests.append(url)
+        return 503, {
+            "status": "not_ready",
+            "ready": False,
+            "failures": [
+                {"component": "canonical_lineage", "detail": "identity_mismatch"}
+            ],
+        }
+
+    monkeypatch.setattr(golden_runner, "_request_json", fake_request)
+    output = tmp_path / "not-ready"
+
+    exit_code = runner_main(
+        [
+            "--base-url",
+            "https://candidate.example.test",
+            "--output-dir",
+            str(output),
+            "--case-id",
+            "AC-001",
+        ]
+    )
+
+    assert exit_code == 5
+    assert requests == ["https://candidate.example.test/ready"]
+    readiness = json.loads((output / "readiness.json").read_text(encoding="utf-8"))
+    assert readiness["endpoint_ready_status"] == 503
+    assert readiness["payload"]["failures"][0]["component"] == "canonical_lineage"
 
 
 def test_missing_real_replay_is_explicit_hold(tmp_path, capsys):

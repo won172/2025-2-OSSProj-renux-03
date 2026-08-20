@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Caching.Memory;
+using System.Security.Claims;
 
 namespace RenuxServer.Apis;
 
@@ -28,14 +29,25 @@ static public class HomeApis
             ?? application.Configuration["RAG_SERVICE_URL"]
             ?? "http://rag-service:8000";
 
-        // 홈 '오늘' 브리핑. 로그인 여부와 무관하게 열어 둔다 — 게스트도 오늘 정보를 봐야 한다.
+        // 홈 '오늘' 브리핑. 게스트는 전체 공개 공지만, 로그인 학생은 본인 학과 범위까지 본다.
         app.MapGet("/briefing", async (
             HttpContext context,
             IHttpClientFactory httpClientFactory,
             IMemoryCache cache,
             ILogger<Program> logger) =>
         {
-            if (cache.TryGetValue(BriefingCacheKey, out string? cached) && cached is not null)
+            string? major = context.User.Identity?.IsAuthenticated == true
+                ? context.User.FindFirstValue("Major")
+                : null;
+            if (string.IsNullOrWhiteSpace(major) || major == "Unknown")
+            {
+                major = null;
+            }
+
+            string cacheKey = major is null
+                ? BriefingCacheKey
+                : $"{BriefingCacheKey}:major:{major}";
+            if (cache.TryGetValue(cacheKey, out string? cached) && cached is not null)
             {
                 return Results.Content(cached, "application/json");
             }
@@ -44,7 +56,10 @@ static public class HomeApis
             {
                 var client = httpClientFactory.CreateClient();
                 client.Timeout = TimeSpan.FromSeconds(8);
-                var response = await client.GetAsync($"{ragServiceUrl}/home/briefing", context.RequestAborted);
+                string briefingUrl = major is null
+                    ? $"{ragServiceUrl}/home/briefing"
+                    : $"{ragServiceUrl}/home/briefing?major={Uri.EscapeDataString(major)}";
+                var response = await client.GetAsync(briefingUrl, context.RequestAborted);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -53,7 +68,7 @@ static public class HomeApis
                 }
 
                 var body = await response.Content.ReadAsStringAsync(context.RequestAborted);
-                cache.Set(BriefingCacheKey, body, BriefingCacheDuration);
+                cache.Set(cacheKey, body, BriefingCacheDuration);
                 return Results.Content(body, "application/json");
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)

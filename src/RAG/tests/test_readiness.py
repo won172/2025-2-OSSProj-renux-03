@@ -32,6 +32,15 @@ def _prepare_successful_checks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rag_service, "_ensure_dataset", _successful_dataset)
     monkeypatch.setattr(rag_service, "count_items", lambda _collection: 1)
     monkeypatch.setattr(rag_service, "get_embedder", object)
+    monkeypatch.setattr(
+        rag_service,
+        "build_canonical_lineage_report",
+        lambda: {
+            "gate_passed": True,
+            "datasets": [],
+            "violations": [],
+        },
+    )
 
 
 def _response_payload(response: JSONResponse) -> dict:
@@ -64,6 +73,7 @@ def test_ready_succeeds_after_all_required_components_load(monkeypatch: pytest.M
         key: 1 for key in rag_service._REQUIRED_DATASETS
     }
     assert payload["checks"]["datasets"]["dense_errors"] == {}
+    assert payload["checks"]["canonical_lineage"]["ready"] is True
     assert payload["checks"]["embedder"]["ready"] is True
     assert payload["checks"]["scheduler"]["required"] is False
 
@@ -168,6 +178,11 @@ def test_runtime_refresh_reloads_requested_cache_and_updates_ready_snapshot(monk
         "_refresh_data_quality_readiness",
         lambda: {"gate_passed": True, "counts": {"category_unknown": 0}},
     )
+    monkeypatch.setattr(
+        rag_service,
+        "_refresh_canonical_lineage_readiness",
+        lambda: {"gate_passed": True, "violations": []},
+    )
     with rag_service._datasets_lock:
         rag_service._datasets["notices"] = object()
 
@@ -180,6 +195,32 @@ def test_runtime_refresh_reloads_requested_cache_and_updates_ready_snapshot(monk
     assert ready_snapshot["checks"]["datasets"]["detail"] == "refreshed"
     assert ready_snapshot["checks"]["datasets"]["counts"] == snapshot["counts"]
     assert snapshot["data_quality"]["counts"]["category_unknown"] == 0
+    assert snapshot["canonical_lineage"]["gate_passed"] is True
+
+
+def test_ready_fails_when_canonical_lineage_is_not_exact(monkeypatch: pytest.MonkeyPatch):
+    _prepare_successful_checks(monkeypatch)
+    monkeypatch.setattr(
+        rag_service,
+        "build_canonical_lineage_report",
+        lambda: {
+            "gate_passed": False,
+            "datasets": [],
+            "violations": [
+                {"dataset": "notices", "metric": "source_missing_artifact", "count": 1}
+            ],
+        },
+    )
+
+    rag_service._run_required_startup_checks()
+    response = rag_service.ready()
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 503
+    check = _response_payload(response)["checks"]["canonical_lineage"]
+    assert check["required"] is True
+    assert check["ready"] is False
+    assert check["detail"] == "identity_mismatch"
 
 
 def test_ready_reports_embedder_failure(monkeypatch: pytest.MonkeyPatch):

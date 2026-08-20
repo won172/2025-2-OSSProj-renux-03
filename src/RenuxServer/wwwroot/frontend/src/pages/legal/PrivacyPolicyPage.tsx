@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router-dom'
 
 // 방침 개정 시 이 두 값을 함께 갱신한다. 개정 시행 7일 전 공지 의무(제12조)가 있으므로
 // EFFECTIVE_DATE 는 공지 이후 실제 적용 시작일을 적는다.
-const EFFECTIVE_DATE = '2026년 7월 20일'
+const EFFECTIVE_DATE = '2026년 8월 27일'
 const COUNCIL_INSTAGRAM_URL =
   'https://www.instagram.com/dongttok.dgu?igsh=MWs3MWJ4OWU3NjdlMw%3D%3D&utm_source=qr'
 
@@ -268,8 +268,8 @@ const PrivacyPolicyPage = () => {
             DM을 통해 하실 수 있으며, 동똑이는 이에 대해 지체 없이 조치하겠습니다.
           </p>
           <p>
-            ③ 현재 서비스 화면에서 직접 회원 탈퇴를 진행할 수 있는 기능은 제공되지 않습니다. 위 채널로 탈퇴를
-            요청해 주시면 계정 정보와 대화 기록을 파기해 드립니다.
+            ③ 로그인 후 설정 화면의 &ldquo;회원 탈퇴&rdquo;에서 직접 계정 삭제를 완료할 수 있습니다. 현재 비밀번호와
+            확인 문구를 입력하면 계정 정보, 대화 기록, 알림 설정과 연결된 개인정보가 삭제되며 복구할 수 없습니다.
           </p>
           <p>
             ④ 정보주체 본인이 아닌 대리인이 권리를 행사하는 경우, 동똑이는 위임 사실을 확인할 수 있는 자료를

@@ -597,9 +597,31 @@ def _load_course_catalog_cached(course_path_text: str, modified_ns: int) -> tupl
 
 
 def load_course_catalog(path: str | Path | None = None) -> tuple[CourseRecord, ...]:
-    course_path = Path(path) if path is not None else DATA_SOURCES["courses_all"]
-    modified_ns = course_path.stat().st_mtime_ns if course_path.exists() else -1
-    return _load_course_catalog_cached(str(course_path.resolve()), modified_ns)
+    if path is not None:
+        # Explicit paths remain available to migration tools and isolated tests.
+        course_path = Path(path)
+        modified_ns = course_path.stat().st_mtime_ns if course_path.exists() else -1
+        return _load_course_catalog_cached(str(course_path.resolve()), modified_ns)
+
+    # Runtime recommendations use the same canonical SourceDocument payloads as
+    # indexing.  The import is local to keep this service usable by lightweight
+    # parsing tests without initializing the whole ingestion module at import.
+    try:
+        from src.database import SessionLocal
+        from src.pipelines.ingest import load_canonical_source_frame
+
+        session = SessionLocal()
+        try:
+            frame = load_canonical_source_frame(session, "courses")
+        finally:
+            session.close()
+        if frame.empty:
+            return ()
+        return tuple(CourseRecord.from_row(row) for row in frame.to_dict(orient="records"))
+    except Exception:
+        # A missing/uninitialized canonical DB is an unavailable dataset, not a
+        # reason to silently answer from a stale CSV artifact.
+        return ()
 
 
 def format_recommendation_answer(plan: CourseRecommendationPlan) -> str:

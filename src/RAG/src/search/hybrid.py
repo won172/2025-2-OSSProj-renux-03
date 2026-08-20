@@ -28,11 +28,15 @@ from src.config import (
     HYBRID_ALPHA,
     HYBRID_FUSION_MODE,
     HYBRID_RRF_K,
+    HYBRID_TITLE_FOCUS_WEIGHT,
+    LEXICAL_BACKEND,
     TFIDF_TOKENIZER,
     TFIDF_REQUIRE_MANIFEST,
     TFIDF_VERIFY_INTEGRITY,
     VECTORIZER_DIR,
 )
+from src.search import fts_index as _fts
+from src.search.fts_index import Fts5LexicalIndex
 from src.models.embedding import encode_queries
 from src.vectorstore.chroma_client import get_collection, query_items
 
@@ -78,6 +82,22 @@ def lexical_artifact_path(identifier: str) -> Path:
     """현재 BM25 아티팩트를 우선하고, 재색인 전에는 TF-IDF를 읽기 전용 폴백한다."""
     bm25_path = _bm25_path(identifier)
     return bm25_path if bm25_path.exists() else _legacy_tfidf_path(identifier)
+
+
+def live_lexical_index_path(identifier: str) -> Path:
+    """지금 실제로 검색에 쓰이는 희소 인덱스 파일 경로.
+
+    데이터셋 캐시가 이 파일의 mtime으로 재색인을 감지한다. `lexical_artifact_path`를
+    쓰면 안 되는데, 그 함수는 pkl **로딩**에도 쓰이므로 FTS5를 가리키게 바꾸면
+    joblib이 SQLite 파일을 역직렬화하려 든다.
+
+    FTS5 인덱스는 데이터셋별 파일이 아니라 하나의 SQLite 파일이라, 공지를
+    재색인하면 교과목 캐시도 함께 무효화된다. 불필요한 재로딩이지만 안전한
+    방향이고(낡은 인덱스를 계속 쓰는 것보다 낫다), parquet 재로딩 비용뿐이다.
+    """
+    if LEXICAL_BACKEND == "fts5":
+        return _fts.fts_db_path()
+    return lexical_artifact_path(identifier)
 
 
 # 과거 테스트·도구의 내부 패치 지점을 보존한다. 신규 학습은 항상 _bm25_path를 쓴다.
@@ -235,6 +255,54 @@ def _kiwi_or_light_korean_tokenize(text: str) -> list[str]:
         return _light_korean_tokenize(text)
 
     return tokens or _light_korean_tokenize(text)
+
+
+def corpus_tokenize(text: str) -> list[str]:
+    """색인에 실제로 쓰인 토크나이저로 자른다.
+
+    색인·질의·어휘 조회가 각자 다른 토크나이저를 쓰면 히트가 조용히 사라진다.
+    실제로 Kiwi를 켠 뒤 `missing_from_corpus`가 "졸업 **요건이**"를 코퍼스에
+    없는 낱말로 보고했다 — 색인에는 Kiwi가 만든 `요건`이 있는데 조사가 붙은
+    경량 토큰으로 조회했기 때문이다. 그 상태로 신뢰도 판정을 세우면 정상
+    질문을 자료 없음으로 오인한다. 세 경로가 같은 함수를 쓰게 해서 막는다.
+    """
+    if _resolve_tfidf_tokenizer_name() == "korean":
+        return _kiwi_or_light_korean_tokenize(text)
+    return _light_korean_tokenize(text)
+
+
+def content_tokens(text: str) -> list[str]:
+    """어휘 부재 판정에 쓸 **내용어**만 남긴다(출현 순서 보존).
+
+    질문어(`알려줘`, `보여줘`)와 활용형 어미는 코퍼스에 없는 것이 정상이라,
+    그대로 두면 모든 질문이 "코퍼스에 없는 말이 있다"로 잡혀 신호가 잡음에 묻힌다.
+    Kiwi가 있으면 명사만 취해 이 문제를 구조적으로 없앤다(품사 정보가 있으므로
+    불용어 목록을 계속 늘릴 필요가 없다). 없으면 종전 휴리스틱으로 폴백한다.
+    """
+    kiwi = _load_kiwi()
+    if kiwi is not None:
+        try:
+            nouns: list[str] = []
+            for token in kiwi.tokenize(str(text)):
+                form = str(getattr(token, "form", "")).strip().lower()
+                tag = str(getattr(token, "tag", ""))
+                if tag.startswith(("NNG", "NNP", "SL", "SN")) and len(form) >= 2:
+                    if form not in nouns and form not in _QUERY_TITLE_STOPWORDS:
+                        nouns.append(form)
+            if nouns:
+                return nouns
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Kiwi 내용어 추출 실패, 경량 폴백: %s", exc)
+
+    tokens = _light_korean_tokenize(text)
+    return [
+        token
+        for token in tokens
+        if len(token) >= 2
+        and token not in _QUERY_TITLE_STOPWORDS
+        # 더 긴 토큰의 조각(n-gram)은 뺀다 — 그 자체로는 의미 단위가 아니다.
+        and not any(token != other and token in other for other in tokens)
+    ]
 
 
 def _resolve_tfidf_tokenizer_name() -> str:
@@ -446,7 +514,63 @@ def train_bm25(
     return vectorizer, matrix
 
 
+# 희소 인덱스가 데이터셋의 이 비율보다 적게 덮으면 낡았거나 잘린 것으로 본다.
+LEXICAL_COVERAGE_FLOOR = float(os.getenv("RAG_LEXICAL_COVERAGE_FLOOR", "0.9"))
+
+
+def _warn_if_lexical_index_is_stale(
+    collection_name: str, index_rows: int, dataset_rows: int
+) -> None:
+    """희소 인덱스가 데이터셋을 거의 못 덮으면 크게 남긴다.
+
+    행 수가 인덱스 메타와만 일치하면(예: 둘 다 1) 기존 검사를 그대로 통과한다.
+    실제로 notices 색인이 11,279건에서 1건으로 잘린 채 검색이 예외 없이 계속
+    돌았고, 희소 검색 기여만 조용히 사라졌다. 그때 아무것도 알려주지 않았다.
+
+    검색을 세우지는 않는다 — 밀집 검색만으로도 답은 나오므로, 조용히 나빠지는
+    것만 막으면 된다.
+    """
+    if dataset_rows <= 0 or index_rows >= dataset_rows * LEXICAL_COVERAGE_FLOOR:
+        return
+    logger.error(
+        "희소 인덱스가 데이터셋의 일부만 덮고 있습니다 — '%s' 인덱스 %d행 / 데이터 %d행 "
+        "(%.1f%%). 재색인이 필요합니다. 검색은 밀집 위주로 계속 진행합니다.",
+        collection_name, index_rows, dataset_rows, 100.0 * index_rows / dataset_rows,
+    )
+
+
+def _load_fts_artifact(identifier: str) -> Optional[dict]:
+    """FTS5 백엔드로 희소 인덱스를 읽는다. 없으면 None(호출부가 pkl로 폴백)."""
+    index = _fts.load_fts_index(identifier)
+    if index is None:
+        return None
+    return {
+        "vectorizer": index,
+        # 호출부가 행 수 정합성을 matrix.shape[0]으로 확인한다. BM25 경로와 동일하게
+        # 0열 행렬로 충분하다(문서 본문을 중복 저장하지 않는다).
+        "matrix": np.empty((index.document_count, 0), dtype=np.float32),
+        "chunk_ids": index.chunk_ids,
+        "metadata": {
+            "dataset": identifier,
+            "document_count": index.document_count,
+            "retriever_type": "fts5",
+            "tokenizer": index.tokenizer_name,
+            "source": str(index.db_path),
+        },
+    }
+
+
 def _load_lexical_artifact(identifier: str) -> dict:
+    if LEXICAL_BACKEND == "fts5":
+        artifact = _load_fts_artifact(identifier)
+        if artifact is not None:
+            return artifact
+        # 인덱스가 아직 없을 때 검색을 죽이지 않는다. 재색인 전에도 기존 pkl로 돈다.
+        logger.warning(
+            "RAG_LEXICAL_BACKEND=fts5이지만 '%s' FTS5 인덱스가 없습니다. pkl로 폴백합니다.",
+            identifier,
+        )
+
     path = lexical_artifact_path(identifier)
     # 검증부터 역직렬화 완료까지 공유 잠금을 유지해 검증 후 파일 교체(TOCTOU)도 막는다.
     with _artifact_lock(exclusive=False):
@@ -486,8 +610,13 @@ def load_lexical_with_ids(identifier: str) -> Tuple[Any, np.ndarray, Optional[Li
 
 
 def score_lexical_query(vectorizer: Any, matrix: np.ndarray, query: str) -> np.ndarray:
-    """Return normalized per-row scores for BM25 or legacy TF-IDF."""
-    if isinstance(vectorizer, BM25LexicalIndex):
+    """Return normalized per-row scores for BM25, FTS5, or legacy TF-IDF.
+
+    BM25(pkl)와 FTS5는 둘 다 정규화되지 않은 원점수를 돌려주고, 0..1 정규화는
+    여기 한 곳에서만 한다. 백엔드를 바꿔도 정규화 의미가 달라지지 않아야
+    두 백엔드의 검색 결과를 비교할 수 있다.
+    """
+    if isinstance(vectorizer, (BM25LexicalIndex, Fts5LexicalIndex)):
         raw_scores = np.asarray(vectorizer.score(query), dtype=np.float64)
         positive_max = float(np.max(raw_scores)) if raw_scores.size else 0.0
         scores = (
@@ -625,6 +754,7 @@ def hybrid_search(
     row_ids: List[str] | None = None
     if tfidf_chunk_ids is not None and len(tfidf_chunk_ids) == matrix_rows:
         row_ids = [str(cid) for cid in tfidf_chunk_ids]
+        _warn_if_lexical_index_is_stale(collection_name, matrix_rows, len(chunks_df))
     elif matrix_rows == len(chunks_df):
         row_ids = chunks_df["chunk_id"].astype(str).tolist()
     else:
@@ -710,11 +840,20 @@ def hybrid_search(
             weighted_score = rrf_score / (2.0 / (HYBRID_RRF_K + 1))
         else:
             weighted_score = alpha * v_score + (1.0 - alpha) * s_score
-        # Sparse and dense similarities are both cosine-like scores in [0, 1],
-        # so the sparse score itself is a valid lower bound for an exact-word
-        # match. The weighted score can still win whenever semantic evidence is
-        # stronger.
-        lexical_guard_score = s_score
+        # lexical guard: 정확한 어휘 일치 문서가 밀려나지 않도록 희소 점수를 하한으로 둔다.
+        #
+        # 이 전제는 `weighted` 모드에서만 성립한다. 그때는 weighted_score가
+        # `alpha*dense + (1-alpha)*sparse`라 s_score와 같은 코사인 척도다.
+        #
+        # RRF 모드에서는 척도가 다르다. s_score는 최댓값으로 나눈 값이라 희소 1위
+        # 문서가 **항상 정확히 1.0**인데, RRF 점수는 두 랭킹 모두 1위일 때만 1.0에
+        # 닿는다. 그래서 max()가 희소 상위 문서를 밀집 근거와 무관하게 최상단에
+        # 올려버리고, 융합을 하는 의미가 사라진다.
+        #
+        # 골든 69건 실측: guard를 RRF에서 끄면 키워드 커버리지 58.5% → 62.6%
+        # (개선 6건·악화 0건). 규정 데이터셋이 54.2% → 100%로 가장 크게 움직인다.
+        # 기본값이 rrf로 바뀔 때 함께 손봤어야 했던 부분이다.
+        lexical_guard_score = 0.0 if HYBRID_FUSION_MODE == "rrf" else s_score
         title_score = 0.0
         title = ""
         row_position = id_to_pos.get(str(cid))
@@ -732,7 +871,11 @@ def hybrid_search(
             if "notice" in collection_name.lower()
             else 0.0
         )
-        final_score = max(weighted_score, lexical_guard_score) + 0.18 * title_score + period_adjustment
+        final_score = (
+            max(weighted_score, lexical_guard_score)
+            + HYBRID_TITLE_FOCUS_WEIGHT * title_score
+            + period_adjustment
+        )
         hybrid_results.append((cid, final_score, v_score, s_score))
     
     # 점수순 정렬
@@ -799,9 +942,18 @@ def hybrid_search_with_meta(
         tfidf_chunk_ids,
         academic_period_query,
     )
-    out = hits.copy()
+    # Metadata schemas can contain the same logical field more than once after
+    # an artifact migration (for example, ``department`` was added to the
+    # common fields while it already existed in the schedule/staff fields).
+    # Keep the first occurrence so downstream DataFrame alignment remains
+    # well-defined.  A duplicate-column frame makes even ignore_index concat
+    # fail with "Reindexing only valid with uniquely valued Index objects".
+    out = hits.loc[:, ~hits.columns.duplicated(keep="first")].copy()
     out["title"] = out["chunk_text"].apply(_extract_title)
-    for column in ("topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id"):
+    for column in (
+        "topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id",
+        "department", "visibility",
+    ):
         if column not in out.columns:
             out[column] = ""
         else:
@@ -812,13 +964,14 @@ def hybrid_search_with_meta(
     desired = [
         "chunk_id", "title", "chunk_text", "hybrid_score", "vector_score", "sparse_score",
         "topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id",
+        "department", "visibility",
         "major", "college_name", "entry_year", "source_type", "attachments",
         "course_code", "credit", "grade", "semester", "course_type",
         "curriculum_year", "source_page", "source_priority", "course_code_conflict",
         "availability_status", "data_quality_score", "collection_status",
         "doc_id", "position",  # parent-document 확장(이웃 청크 결합)에 사용
         "is_closed", "restaurant", "meal_date",  # 학식: 휴무 패널티·식당/날짜 표시에 사용
-        "schedule_start", "schedule_end", "department", "campus_scope",
+        "schedule_start", "schedule_end", "campus_scope",
         "filename", "relative_dir", "source_file", "document_key", "source_id",
         "board_code", "article_id", "schedule_id", "staff_id", "course_id", "rule_id",
         "canonical_key", "is_latest",
@@ -826,7 +979,7 @@ def hybrid_search_with_meta(
         "staff_position", "staff_role", "staff_phone",  # 연락처 질의 순위 판단에 사용
         "has_substantive_body",  # 제목만 있는 공지를 근거 자리에서 뒤로 미는 데 사용
     ]
-    existing = [col for col in desired if col in out.columns]
+    existing = list(dict.fromkeys(col for col in desired if col in out.columns))
     return out[existing]
 
 

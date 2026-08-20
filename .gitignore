@@ -53,6 +53,14 @@ src/RAG/artifacts/db_chroma/
 # Chroma 장애·복구 사본과 재색인 실행 로그는 로컬 운영 산출물이다.
 src/RAG/artifacts/db_chroma.*/
 src/RAG/artifacts/rebuilds/
+# 실행 중 상호 배제를 위한 빈 잠금 파일. 프로세스 종료 후 남을 수 있으므로 커밋하지 않는다.
+src/RAG/artifacts/.rag-maintenance.lock
+# FTS5 희소 검색 인덱스. 재색인마다 바뀌는 파생물이라 추적하지 않는다.
+# (pkl과 달리 git이 아니라 artifacts 볼륨 마운트로 컨테이너에 전달된다.)
+src/RAG/artifacts/fts/
+# Obsidian Vault는 SQLite에서 재생성 가능한 파생물이다(마크다운 5천여 개, 24MB).
+src/RAG/artifacts/obsidian_vault/
+src/RAG/artifacts/.obsidian/
 src/RAG/tmp/
 src/RAG/scripts/.codex_*
 /tmp/

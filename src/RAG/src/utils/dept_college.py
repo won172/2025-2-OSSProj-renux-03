@@ -9,10 +9,6 @@ from __future__ import annotations
 import functools
 from typing import Dict, List, Optional
 
-import pandas as pd
-
-from src.config import DATA_DIR
-
 _GRAD_TERMS = ("졸업", "요건", "학점", "이수", "수료", "졸업기준")
 # 학과명을 안 밝힌 질문에 단과대명을 보강할지 결정하는 트리거.
 # 거의 모든 질문에 걸리던 광범위 토큰(안내/일정/신청/학과/전공/학사/수강/등록)은
@@ -26,12 +22,20 @@ _COLLEGE_SCOPE_TERMS = (
 @functools.lru_cache(maxsize=1)
 def _dept_to_college() -> Dict[str, str]:
     mapping: Dict[str, str] = {}
-    path = DATA_DIR / "dongguk_departments_catalog.csv"
     try:
-        df = pd.read_csv(path).fillna("").astype(str)
+        from src.database import SessionLocal
+        from src.pipelines.ingest import load_canonical_source_frame
+
+        session = SessionLocal()
+        try:
+            df = load_canonical_source_frame(session, "courses")
+        finally:
+            session.close()
+        if df.empty:
+            return mapping
         for _, row in df.iterrows():
-            dept = str(row.get("department_name", "")).strip()
-            college = str(row.get("college_name", "")).strip()
+            dept = str(row.get("department_name", row.get("major", ""))).strip()
+            college = str(row.get("college_name", row.get("college", ""))).strip()
             if dept and college and college != "대학":
                 mapping[dept] = college
     except Exception:

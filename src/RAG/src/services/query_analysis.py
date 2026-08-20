@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Literal
+import time
+from typing import Any, Dict, List, Literal
 
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
@@ -59,6 +60,32 @@ class QueryAnalysisResult(BaseModel):
 
 
 parser = PydanticOutputParser(pydantic_object=QueryAnalysisResult)
+
+
+def _record_usage(
+    usage_collector: list[dict[str, Any]] | None,
+    raw: Any,
+    started_at: float,
+    *,
+    failed: bool = False,
+) -> None:
+    """질의분석 호출의 토큰·지연을 다른 LLM 단계와 같은 형식으로 남긴다."""
+    if usage_collector is None:
+        return
+    # 지연 순환 임포트 방지: langchain_chat은 이 모듈을 임포트하지 않지만,
+    # 모듈 최상단에서 끌어오면 API 키 없는 프로세스의 임포트 비용이 늘어난다.
+    from src.services.langchain_chat import _append_usage_record, _extract_usage_metadata
+
+    _append_usage_record(
+        usage_collector,
+        stage="query_analysis",
+        provider="openai",
+        model=OPENAI_QUERY_ANALYSIS_MODEL,
+        usage=_extract_usage_metadata(raw) if raw is not None else None,
+        latency_ms=(time.perf_counter() - started_at) * 1000,
+    )
+    if failed and usage_collector:
+        usage_collector[-1]["failed"] = True
 
 prompt = PromptTemplate(
     template="""당신은 동국대학교 RAG 검색을 위한 질의분석기입니다.
@@ -127,6 +154,13 @@ analysis_chain = None
 
 
 def _get_analysis_chain():
+    """프롬프트+LLM까지만 묶는다. 파싱은 호출부가 따로 한다.
+
+    파서를 체인에 붙이면 AIMessage가 사라지면서 토큰 사용량도 함께 사라진다.
+    실제로 그래서 `rag_query_logs.llm_usage_json`에 query_analysis 단계가
+    한 건도 없었다 — 실측 p50 1,792ms로 생성 다음으로 비싼 단계인데
+    비용 집계에서는 통째로 보이지 않았다.
+    """
     global analysis_chain
     if analysis_chain is None:
         llm = ChatOpenAI(
@@ -136,7 +170,7 @@ def _get_analysis_chain():
             max_retries=1,  # 실패 시 raw 질문으로 폴백되므로 TTFB 누적 방지
             model_kwargs={"response_format": {"type": "json_object"}},
         )
-        analysis_chain = prompt | llm | parser
+        analysis_chain = prompt | llm
     return analysis_chain
 
 
@@ -236,10 +270,16 @@ async def analyze_query(
     query: str,
     history_text: str = "",
     temporal_context: TemporalContext | None = None,
+    usage_collector: list[dict[str, Any]] | None = None,
 ) -> QueryAnalysisResult | None:
     if not query.strip():
         return None
 
+    safe_history = ""
+    started_at = time.perf_counter()
+    # ainvoke 성공 뒤 파싱이 실패하면 except 절도 돌기 때문에, 이 플래그가 없으면
+    # 같은 호출이 두 번 집계된다(테스트가 실제로 잡아냈다).
+    usage_recorded = False
     try:
         temporal = temporal_context or build_temporal_context()
         safe_history = (
@@ -247,15 +287,30 @@ async def analyze_query(
             if history_allows_context_rewrite(query, history_text)
             else ""
         )
-        result = await _get_analysis_chain().ainvoke({
+        raw = await _get_analysis_chain().ainvoke({
             "query": query,
             "history": safe_history.strip() or "(없음)",
             "temporal_context": temporal.prompt_text,
         })
+        _record_usage(usage_collector, raw, started_at)
+        usage_recorded = True
+        result = parser.parse(
+            raw.content if isinstance(raw.content, str) else str(raw.content)
+        )
     except ValidationError as exc:
+        if not usage_recorded:
+            _record_usage(usage_collector, None, started_at, failed=True)
+        elif usage_collector:
+            usage_collector[-1]["failed"] = True
         logging.warning("Query analysis validation failed: %s", exc)
         return None
     except Exception as exc:
+        # 호출은 이미 일어났으므로 파싱이 실패해도 비용은 발생했다. 실패한 호출을
+        # 집계에서 빼면 "왜 토큰이 이만큼 나갔는지" 설명이 맞지 않게 된다.
+        if not usage_recorded:
+            _record_usage(usage_collector, None, started_at, failed=True)
+        elif usage_collector:
+            usage_collector[-1]["failed"] = True
         logging.warning("Query analysis failed: %s", exc)
         return None
 

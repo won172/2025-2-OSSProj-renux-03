@@ -27,7 +27,16 @@ numpy>=1.26.4
 python-dotenv>=1.0.1
 scikit-learn==1.8.0
 rank-bm25>=0.2.2
+# 한국어 형태소 토크나이저. 희소 검색(BM25/FTS5) 색인·질의 양쪽에 쓰인다.
+# 골든 154쌍 실측(scripts/evaluate_retrieval.py)에서 경량 폴백 대비
+# MRR 0.5673 → 0.5934, nDCG@20 0.5217 → 0.5355, 문항 개선 32·악화 20.
+# 지연은 동일했다(p50 93ms). 개선폭이 크지는 않지만 비용이 없어 채택했다.
+# ⚠️ 설치 여부가 바뀌면 어휘가 통째로 달라진다. 빼거나 더할 때는 반드시
+#    scripts/rebuild_lexical_indices.py 로 재색인할 것(안 하면 색인과 질의가
+#    갈려 히트만 조용히 사라진다 — fts_index.load_fts_index가 error를 남긴다).
+kiwipiepy>=0.21.0
 pyarrow>=16.0.0
+openpyxl>=3.1.5        # 교과과정 Excel 원본을 pandas.read_excel로 읽기 위한 런타임 의존성
 beautifulsoup4>=4.12.0 # Added for web scraping
 lxml>=4.9.0            # Added for web scraping (BeautifulSoup's parser)
 pdfplumber>=0.11.0     # D-Flex 학식 PDF 식단표 텍스트/표 추출
