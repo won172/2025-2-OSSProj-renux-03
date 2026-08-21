@@ -985,7 +985,9 @@
   background: none;
   color: var(--ch-ink);
   font-family: inherit;
-  font-size: 14.5px;
+  /* iOS zooms focused form controls below 16px and can keep the viewport enlarged
+     after the keyboard closes. Keep the native app viewport stable. */
+  font-size: 16px;
   line-height: 1.6;
   resize: none;
   padding: 5px 0;
