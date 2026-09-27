@@ -74,8 +74,8 @@ PLAN
 8. **HUMAN APPROVAL**: merge 여부를 human owner에게 요청한다. 직접 merge하지 않는다.
 
 작업이 서로 독립적이면(수정 경로가 겹치지 않고 서로의 결과를 입력으로 쓰지 않으면)
-병렬로 진행할 수 있다. 의존성이 있는 작업은 선행 task가 merge candidate로 확정된 뒤
-그 branch를 기준으로 시작한다. 같은 파일을 여러 task가 동시에 수정하지 않도록 나눈다.
+병렬로 진행할 수 있다. 의존성이 있는 작업은 선행 task가 human 승인으로 `main`에 merge된 뒤
+최신 `origin/main`을 기준으로 시작한다. 다른 task branch를 base로 쓰지 않는다. 같은 파일을 여러 task가 동시에 수정하지 않도록 나눈다.
 
 ## Delegation
 
