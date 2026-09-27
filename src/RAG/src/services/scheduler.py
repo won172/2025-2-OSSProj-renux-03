@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -44,6 +45,7 @@ JOB_LABELS = {
     "refresh_schedule": "학사일정 수집",
     "refresh_meals": "학식 수집",
     "refresh_courses": "교과과정 수집",
+    "refresh_staff": "교직원 연락처 수집",
 }
 
 
@@ -115,26 +117,134 @@ def _finish_ingestion_run(
     seen: int = 0,
     failed: int = 0,
     error: str | None = None,
+    outcome_code: str | None = None,
+    diagnostics: dict | None = None,
+    corpus_revision: str | None = None,
+    source_structures: list | None = None,
+    run_derivatives: bool = False,
 ) -> None:
     """실행 기록을 닫는다. 시작 기록이 없었으면(None) 조용히 넘어간다."""
     if run_id is None:
         return
+    dataset_name: str | None = None
     session = SessionLocal()
     try:
         run = session.query(IngestionRun).filter(IngestionRun.id == run_id).first()
         if run is None:
             return
+        dataset_name = str(run.dataset)
         run.status = status
         run.finished_at = kst_now()
         run.documents_seen = seen
         run.documents_failed = failed
+        run.outcome_code = outcome_code
+        merged_diagnostics: dict = {}
+        if run.diagnostics_json:
+            try:
+                previous = json.loads(run.diagnostics_json)
+                if isinstance(previous, dict):
+                    merged_diagnostics.update(previous)
+            except (TypeError, json.JSONDecodeError):
+                pass
+        if diagnostics is not None:
+            merged_diagnostics.update(diagnostics)
+        if source_structures:
+            from src.services.source_schema import observe_source_structures
+
+            observations = observe_source_structures(
+                session,
+                dataset=run.dataset,
+                ingestion_run_id=run.id,
+                structures=source_structures,
+            )
+            merged_diagnostics["source_schema"] = observations
+            changed_sources = [
+                item["source_name"] for item in observations if item["changed"]
+            ]
+            if changed_sources:
+                logger.warning(
+                    "[scheduler] 원천 구조 변경 감지 dataset=%s sources=%s",
+                    run.dataset,
+                    changed_sources,
+                )
+        if corpus_revision is None and status in {"success", "partial_success"}:
+            try:
+                from src.pipelines.ingest import DATASET_ARTIFACTS
+                from src.services.corpus_revision import frame_corpus_revision
+
+                artifact = DATASET_ARTIFACTS.get(run.dataset)
+                if artifact is not None and artifact.chunk_path.exists():
+                    frame = pd.read_parquet(artifact.chunk_path, columns=["corpus_revision"])
+                    corpus_revision = frame_corpus_revision(frame)
+            except Exception as exc:  # noqa: BLE001 - audit metadata must not fail ingestion.
+                logger.warning(
+                    "[scheduler] corpus revision 조회 실패(run_id=%s): %s",
+                    run_id,
+                    exc,
+                )
+        run.corpus_revision = corpus_revision
         run.error_summary = error
+        run.diagnostics_json = (
+            json.dumps(merged_diagnostics, ensure_ascii=False, sort_keys=True)
+            if merged_diagnostics
+            else None
+        )
         session.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning("[scheduler] 실행 기록 종료 실패(run_id=%s): %s", run_id, exc)
         session.rollback()
     finally:
         session.close()
+
+    if (
+        dataset_name is None
+        or not run_derivatives
+        or status not in {"success", "partial_success"}
+    ):
+        return
+    try:
+        from src.services.derivative_dag import run_post_ingestion_dag
+
+        dag = run_post_ingestion_dag(dataset_name, ingestion_run_id=run_id)
+    except Exception as exc:  # noqa: BLE001 - core corpus is already safely published.
+        logger.error("[scheduler] 파생 DAG 실패 dataset=%s: %s", dataset_name, exc, exc_info=True)
+        dag = {
+            "status": "failed",
+            "failed_stage": "unexpected_error",
+            "error": f"{type(exc).__name__}: {exc}",
+            "stages": [],
+        }
+
+    followup = SessionLocal()
+    try:
+        persisted = followup.query(IngestionRun).filter(IngestionRun.id == run_id).first()
+        if persisted is None:
+            return
+        merged: dict = {}
+        try:
+            decoded = json.loads(persisted.diagnostics_json or "{}")
+            if isinstance(decoded, dict):
+                merged.update(decoded)
+        except (TypeError, json.JSONDecodeError):
+            pass
+        merged["derivative_dag"] = dag
+        persisted.diagnostics_json = json.dumps(merged, ensure_ascii=False, sort_keys=True)
+        if dag.get("status") == "failed":
+            if persisted.status == "success":
+                persisted.status = "partial_success"
+            persisted.outcome_code = "derivative_failure"
+            failure = f"derivative DAG failed at {dag.get('failed_stage') or 'unknown'}"
+            persisted.error_summary = (
+                f"{persisted.error_summary}; {failure}"
+                if persisted.error_summary
+                else failure
+            )
+        followup.commit()
+    except Exception as exc:  # noqa: BLE001
+        followup.rollback()
+        logger.error("[scheduler] 파생 DAG 결과 기록 실패 run_id=%s: %s", run_id, exc)
+    finally:
+        followup.close()
 
 
 def get_scheduler_status() -> dict:
@@ -197,6 +307,74 @@ def _refresh_runtime_dataset_state(dataset: str) -> None:
         logger.error("[scheduler] 런타임 캐시 갱신 실패 dataset=%s: %s", dataset, exc, exc_info=True)
 
 
+def _retry_incomplete_notice_boards(
+    initial: pd.DataFrame,
+    *,
+    crawl,
+    known_ids_by_board: dict[str, set[int]] | None,
+) -> pd.DataFrame:
+    """Retry only incomplete boards once and preserve machine-readable evidence."""
+    initial_attrs = dict(initial.attrs)
+    incomplete = sorted(
+        {
+            str(board).strip()
+            for board in initial_attrs.get("crawl_incomplete_boards", [])
+            if str(board).strip()
+        }
+    )
+    if not incomplete:
+        initial.attrs["crawl_retry"] = {
+            "attempted": False,
+            "initial_incomplete_boards": [],
+            "recovered_boards": [],
+            "final_incomplete_boards": [],
+        }
+        return initial
+
+    retry_error_type = None
+    try:
+        retry = crawl(
+            boards=incomplete,
+            known_ids_by_board=known_ids_by_board,
+            max_pages=RAG_NOTICES_REFRESH_MAX_PAGES,
+            delay=0.2,
+            request_timeout=RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS,
+            request_retries=RAG_SCHEDULER_REQUEST_RETRIES,
+        )
+        final_incomplete = sorted(
+            {
+                str(board).strip()
+                for board in retry.attrs.get("crawl_incomplete_boards", [])
+                if str(board).strip()
+            }
+        )
+        combined = pd.concat([initial, retry], ignore_index=True, sort=False)
+        if "상세URL" in combined.columns:
+            combined.drop_duplicates(subset=["상세URL"], keep="last", inplace=True)
+        recovered = sorted(set(incomplete) - set(final_incomplete))
+        retry_diagnostics = list(retry.attrs.get("crawl_diagnostics") or [])
+    except Exception as exc:  # noqa: BLE001 - preserve the successful boards from pass one.
+        combined = initial.copy()
+        final_incomplete = incomplete
+        recovered = []
+        retry_diagnostics = []
+        retry_error_type = type(exc).__name__
+
+    combined.attrs.update(initial_attrs)
+    combined.attrs["crawl_incomplete_boards"] = final_incomplete
+    combined.attrs["crawl_failed_boards"] = final_incomplete
+    combined.attrs["crawl_status"] = "partial" if final_incomplete else "success"
+    combined.attrs["crawl_retry"] = {
+        "attempted": True,
+        "initial_incomplete_boards": incomplete,
+        "recovered_boards": recovered,
+        "final_incomplete_boards": final_incomplete,
+        "error_type": retry_error_type,
+        "diagnostics": retry_diagnostics,
+    }
+    return combined
+
+
 def refresh_notices_job() -> None:
     """공지 게시판 최근 페이지를 크롤링해 증분 동기화 + 인덱스 갱신한다."""
     from src.crawlers.dongguk_notices import crawl_notices
@@ -232,6 +410,11 @@ def refresh_notices_job() -> None:
             except Exception as audit_exc:  # noqa: BLE001
                 logger.warning("[scheduler] 공지 실패 실행 기록 저장 실패: %s", audit_exc)
             raise
+        df = _retry_incomplete_notice_boards(
+            df,
+            crawl=crawl_notices,
+            known_ids_by_board=known_ids_by_board,
+        )
         crawl_attrs = dict(df.attrs)
         try:
             from src.crawlers.dongguk_library_hours import fetch_library_operation_times
@@ -312,6 +495,15 @@ def refresh_rules_job() -> None:
     run_id = _start_ingestion_run("rules")
     try:
         official = sync_rule_source()
+        from src.services.source_schema import fingerprint_dataframe
+
+        source_structures = [
+            fingerprint_dataframe(
+                official,
+                source_name="official_rules",
+                source_format="html_pdf_projection",
+            )
+        ]
         if official.empty:
             raise RuntimeError("공식 현행 규정 수집 결과가 비었습니다.")
         expected_versions = set(official["source_version"].astype(str))
@@ -331,7 +523,12 @@ def refresh_rules_job() -> None:
         if not official.attrs.get("source_changed") and expected_versions <= indexed_versions:
             message = f"변경 없음 · 공식 {len(official)}건"
             _record_run("refresh_rules", "ok", message)
-            _finish_ingestion_run(run_id, status="success", seen=len(official))
+            _finish_ingestion_run(
+                run_id,
+                status="success",
+                seen=len(official),
+                source_structures=source_structures,
+            )
             logger.info("[scheduler] 현행 규정 변경 없음 — 재임베딩 건너뜀")
             return
         with ingestion_run_context("rules", run_id):
@@ -346,6 +543,8 @@ def refresh_rules_job() -> None:
             run_id,
             status="success",
             seen=len(official),
+            source_structures=source_structures,
+            run_derivatives=True,
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("[scheduler] 현행 규정 갱신 실패: %s", exc, exc_info=True)
@@ -372,36 +571,92 @@ def refresh_meals_job() -> None:
             request_timeout=RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS,
             request_retries=RAG_SCHEDULER_REQUEST_RETRIES,
         )
+        diagnostics = dict(df.attrs.get("crawl_diagnostics") or {})
+        from src.services.source_schema import fingerprint_dataframe
+
+        source_structures = [
+            fingerprint_dataframe(
+                df,
+                source_name="dining_api",
+                source_format="json",
+            )
+        ]
+        requested_days = int(diagnostics.get("requested_days") or 0)
+        fetched_days = int(diagnostics.get("fetched_days") or 0)
+        failed_days = int(diagnostics.get("fetch_failed_days") or 0)
+        parsed_days = int(diagnostics.get("parsed_days_with_rows") or 0)
         if df.empty:
-            logger.warning("[scheduler] 학식 수집 0건 — 기존 인덱스 보존(갱신 건너뜀)")
-            _record_run("refresh_meals", "skipped", "수집 0건 — 기존 인덱스 보존")
+            if requested_days and failed_days >= requested_days:
+                outcome_code = "upstream_unreachable"
+            elif fetched_days and parsed_days == 0:
+                outcome_code = "source_schema_changed"
+            else:
+                outcome_code = "empty_source"
+            message = f"{outcome_code}: 수집 0건 — 기존 인덱스 보존"
+            logger.warning("[scheduler] 학식 %s", message)
+            _record_run("refresh_meals", "partial", message)
             _finish_ingestion_run(
                 run_id,
                 status="partial",
-                error="수집 0건 — 기존 인덱스 보존",
+                error=message,
+                outcome_code=outcome_code,
+                diagnostics=diagnostics,
+                source_structures=source_structures,
             )
             return
         with ingestion_run_context("meals", run_id):
             chunks_df, _, _ = ingest_meals(df)
         _refresh_runtime_dataset_state("meals")
         logger.info("[scheduler] 학식 갱신 완료: %s행 → %s chunks", len(df), len(chunks_df))
-        _record_run("refresh_meals", "ok", f"{len(df)}행 → {len(chunks_df)} chunks")
-        _finish_ingestion_run(run_id, status="success", seen=len(chunks_df))
+        partial = failed_days > 0
+        outcome_code = "partial_source" if partial else "success"
+        run_status = "partial_success" if partial else "success"
+        memory_status = "partial" if partial else "ok"
+        message = f"{outcome_code}: {len(df)}행 → {len(chunks_df)} chunks"
+        _record_run("refresh_meals", memory_status, message)
+        _finish_ingestion_run(
+            run_id,
+            status=run_status,
+            seen=len(chunks_df),
+            failed=failed_days,
+            outcome_code=outcome_code,
+            diagnostics=diagnostics,
+            source_structures=source_structures,
+            run_derivatives=True,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.error("[scheduler] 학식 갱신 실패: %s", exc, exc_info=True)
         _record_run("refresh_meals", "failed", str(exc))
-        _finish_ingestion_run(run_id, status="failed", error=str(exc))
+        _finish_ingestion_run(
+            run_id,
+            status="failed",
+            failed=1,
+            error=str(exc),
+            outcome_code="pipeline_failure",
+        )
 
 
 def _merge_schedule_snapshots(existing: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
-    """수집된 학년도만 교체하고 다른 연도의 과거 일정은 보존한다."""
-    if existing.empty or "학년도" not in existing.columns or "학년도" not in incoming.columns:
-        return incoming.copy()
+    """Apply the schedule snapshot lifecycle policy.
+
+    Incoming academic years are complete replacements. Other named years remain
+    active for historical queries; missing rows in replaced years disappear
+    from the merged frame and canonical ingestion marks their old documents
+    hidden. Once an official year exists, legacy blank-year rows are dropped.
+    """
+    if incoming.empty:
+        raise ValueError("schedule refresh returned an empty snapshot")
+    if "학년도" not in incoming.columns:
+        raise ValueError("schedule snapshot is missing 학년도")
+    if existing.empty or "학년도" not in existing.columns:
+        existing = pd.DataFrame(columns=incoming.columns)
     incoming_years = {
         str(value).strip()
         for value in incoming["학년도"].tolist()
         if str(value).strip()
     }
+    if not incoming_years:
+        raise ValueError("schedule snapshot has no named academic year")
     existing_years = existing["학년도"].astype(str).str.strip()
     preserved = existing[~existing_years.isin(incoming_years)]
     if incoming_years:
@@ -415,7 +670,7 @@ def _merge_schedule_snapshots(existing: pd.DataFrame, incoming: pd.DataFrame) ->
         for name in ("학년도", "내용", "start", "end", "주관부서")
         if name in merged.columns
     ]
-    return merged.drop_duplicates(subset=identity or None, keep="last")
+    return merged.drop_duplicates(subset=identity or None, keep="last").reset_index(drop=True)
 
 
 def refresh_schedule_job() -> None:
@@ -439,6 +694,16 @@ def refresh_schedule_job() -> None:
             timeout=RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS,
         )
         frame = parse_schedule(html)
+        from src.services.source_schema import fingerprint_dataframe, fingerprint_html
+
+        source_structures = [
+            fingerprint_html(html, source_name="official_schedule_page"),
+            fingerprint_dataframe(
+                frame,
+                source_name="official_schedule_projection",
+                source_format="html_projection",
+            ),
+        ]
         if frame.empty:
             logger.warning("[scheduler] 학사일정 수집 0건 — 기존 인덱스 보존")
             _record_run("refresh_schedule", "skipped", "수집 0건 — 기존 인덱스 보존")
@@ -446,6 +711,7 @@ def refresh_schedule_job() -> None:
                 run_id,
                 status="partial",
                 error="수집 0건 — 기존 인덱스 보존",
+                source_structures=source_structures,
             )
             return
         output = frame[["학년도", "구분", "내용", "주관부서", "start", "end"]].copy()
@@ -483,6 +749,8 @@ def refresh_schedule_job() -> None:
             run_id,
             status="success",
             seen=len(output),
+            source_structures=source_structures,
+            run_derivatives=True,
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("[scheduler] 학사일정 갱신 실패: %s", exc, exc_info=True)
@@ -499,6 +767,8 @@ def refresh_courses_job() -> None:
     """학과별 교과과정을 다시 수집하고 courses 인덱스를 갱신합니다."""
     from src.crawlers.dongguk_department_curriculum_content import main as crawl_courses
     from src.pipelines.ingest import ingest_courses
+    from src.config import DATA_SOURCES
+    from src.services.source_schema import fingerprint_tabular_file
 
     start = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
     logger.info("[scheduler] 교과과정 갱신 시작 (%s)", start)
@@ -508,16 +778,151 @@ def refresh_courses_job() -> None:
     run_id = _start_ingestion_run("courses")
     try:
         crawl_courses()
+        source_structures = fingerprint_tabular_file(
+            DATA_SOURCES["courses_all"],
+            source_name="courses_all",
+        )
+        try:
+            from src.crawlers.dongguk_department_curriculum_content import (
+                find_curated_curriculum_workbook,
+            )
+
+            workbook = find_curated_curriculum_workbook()
+            if workbook is not None:
+                source_structures.extend(
+                    fingerprint_tabular_file(
+                        workbook,
+                        source_name="curriculum_links",
+                    )
+                )
+        except (ImportError, OSError, ValueError) as exc:
+            logger.warning("[scheduler] 교과과정 XLSX 구조 fingerprint 생략: %s", exc)
         with ingestion_run_context("courses", run_id):
             chunks_df, _, _ = ingest_courses(refresh_from_csv=True)
         _refresh_runtime_dataset_state("courses")
         logger.info("[scheduler] 교과과정 갱신 완료: %s chunks", len(chunks_df))
         _record_run("refresh_courses", "ok", f"{len(chunks_df)} chunks")
-        _finish_ingestion_run(run_id, status="success", seen=len(chunks_df))
+        _finish_ingestion_run(
+            run_id,
+            status="success",
+            seen=len(chunks_df),
+            source_structures=source_structures,
+            run_derivatives=True,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.error("[scheduler] 교과과정 갱신 실패: %s", exc, exc_info=True)
         _record_run("refresh_courses", "failed", str(exc))
         _finish_ingestion_run(run_id, status="failed", error=str(exc))
+
+
+def refresh_staff_job() -> None:
+    """Collect a complete staff snapshot and stage changes for admin approval."""
+    from src.crawlers.dongguk_staff_contacts import crawl_staff_contacts
+    from src.services.staff_refresh import stage_staff_refresh
+
+    logger.info(
+        "[scheduler] 교직원 연락처 갱신 시작 request_timeout=%ss",
+        RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS,
+    )
+    run_id = _start_ingestion_run("staff")
+    try:
+        frame = crawl_staff_contacts(
+            delay=0.15,
+            request_timeout=RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS,
+        )
+        diagnostics = dict(frame.attrs.get("crawl_diagnostics") or {})
+        from src.services.source_schema import fingerprint_dataframe
+
+        source_structures = [
+            fingerprint_dataframe(
+                frame,
+                source_name="staff_api",
+                source_format="json",
+            )
+        ]
+        failed_departments = int(diagnostics.get("failed_departments") or 0)
+        requested_departments = int(diagnostics.get("requested_departments") or 0)
+        if frame.empty:
+            outcome = (
+                "upstream_unreachable"
+                if requested_departments and failed_departments >= requested_departments
+                else "source_schema_changed"
+            )
+            message = f"{outcome}: 수집 0건 — 기존 명부 보존"
+            _record_run("refresh_staff", "partial", message)
+            _finish_ingestion_run(
+                run_id,
+                status="partial",
+                error=message,
+                outcome_code=outcome,
+                diagnostics=diagnostics,
+                source_structures=source_structures,
+            )
+            return
+        if failed_departments:
+            message = f"partial_source: 실패 부서 {failed_departments}개 — 승인 후보 생성 안 함"
+            _record_run("refresh_staff", "partial", message)
+            _finish_ingestion_run(
+                run_id,
+                status="partial",
+                seen=len(frame),
+                failed=failed_departments,
+                error=message,
+                outcome_code="partial_source",
+                diagnostics=diagnostics,
+                source_structures=source_structures,
+            )
+            return
+
+        review = stage_staff_refresh(frame)
+        diagnostics["review"] = {
+            key: review[key]
+            for key in (
+                "current_rows",
+                "incoming_rows",
+                "added",
+                "removed",
+                "contact_changed",
+                "pending_item_id",
+                "snapshot_sha256",
+            )
+        }
+        if review["pending_item_id"] is None:
+            message = f"변경 없음: {len(frame)}행"
+            _record_run("refresh_staff", "ok", message)
+            _finish_ingestion_run(
+                run_id,
+                status="success",
+                seen=len(frame),
+                outcome_code="no_changes",
+                diagnostics=diagnostics,
+                source_structures=source_structures,
+            )
+            return
+
+        message = (
+            f"승인 대기 #{review['pending_item_id']}: 추가 {review['added']} · "
+            f"삭제 {review['removed']} · 연락처 변경 {review['contact_changed']}"
+        )
+        _record_run("refresh_staff", "partial", message)
+        _finish_ingestion_run(
+            run_id,
+            status="pending_review",
+            seen=len(frame),
+            outcome_code="pending_review",
+            diagnostics=diagnostics,
+            source_structures=source_structures,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[scheduler] 교직원 연락처 갱신 실패: %s", exc, exc_info=True)
+        _record_run("refresh_staff", "failed", str(exc))
+        _finish_ingestion_run(
+            run_id,
+            status="failed",
+            failed=1,
+            error=str(exc),
+            outcome_code="pipeline_failure",
+        )
 
 
 def start_scheduler():
@@ -549,6 +954,7 @@ def start_scheduler():
     schedule_cron = os.getenv("RAG_SCHEDULE_REFRESH_CRON", "0 5 * * *")
     meals_cron = os.getenv("RAG_MEALS_REFRESH_CRON", "30 4 * * *")
     courses_cron = os.getenv("RAG_COURSES_REFRESH_CRON", "0 3 * * 0")
+    staff_cron = os.getenv("RAG_STAFF_REFRESH_CRON", "0 4 * * 0")
     scheduler.add_job(
         refresh_notices_job,
         CronTrigger.from_crontab(notices_cron, timezone="Asia/Seoul"),
@@ -574,11 +980,16 @@ def start_scheduler():
         CronTrigger.from_crontab(courses_cron, timezone="Asia/Seoul"),
         id="refresh_courses", **job_defaults,
     )
+    scheduler.add_job(
+        refresh_staff_job,
+        CronTrigger.from_crontab(staff_cron, timezone="Asia/Seoul"),
+        id="refresh_staff", **job_defaults,
+    )
     scheduler.start()
     _scheduler = scheduler
     logger.info(
-        "[scheduler] 시작됨 — 공지 cron='%s', 규정 cron='%s', 학사일정 cron='%s', 학식 cron='%s', 교과과정 cron='%s' (부팅 시 즉시 실행 안 함)",
-        notices_cron, rules_cron, schedule_cron, meals_cron, courses_cron,
+        "[scheduler] 시작됨 — 공지 cron='%s', 규정 cron='%s', 학사일정 cron='%s', 학식 cron='%s', 교과과정 cron='%s', 교직원 cron='%s' (부팅 시 즉시 실행 안 함)",
+        notices_cron, rules_cron, schedule_cron, meals_cron, courses_cron, staff_cron,
     )
     return scheduler
 
@@ -602,4 +1013,5 @@ __all__ = [
     "refresh_schedule_job",
     "refresh_meals_job",
     "refresh_courses_job",
+    "refresh_staff_job",
 ]

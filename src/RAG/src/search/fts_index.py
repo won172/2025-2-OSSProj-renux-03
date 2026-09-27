@@ -123,6 +123,7 @@ class Fts5LexicalIndex:
     chunk_ids: List[str]
     tokenizer_name: str = TFIDF_TOKENIZER
     db_path: Path = field(default_factory=fts_db_path)
+    corpus_revision: Optional[str] = None
 
     @property
     def document_count(self) -> int:
@@ -181,6 +182,51 @@ class Fts5LexicalIndex:
                 scores[pos] = -float(row["rank"])
         return scores
 
+    def score_subset(self, query: str, positions: Sequence[int]) -> dict[int, float]:
+        """Return raw BM25 only for selected rows of the same FTS snapshot.
+
+        Structured rule retrieval already has an exact document allowlist. A
+        broad OR query need not score thousands of unrelated rows just to rank
+        the few passages inside that document.
+        """
+        selected = tuple(dict.fromkeys(
+            int(pos) for pos in positions if 0 <= int(pos) < self.document_count
+        ))
+        if not selected:
+            return {}
+        if len(selected) > 900:
+            scores = self.score(query)
+            return {pos: float(scores[pos]) for pos in selected}
+        from src.search.hybrid import _kiwi_or_light_korean_tokenize, _light_korean_tokenize
+
+        tokens = (
+            _kiwi_or_light_korean_tokenize(query)
+            if self.tokenizer_name == "korean"
+            else _light_korean_tokenize(query)
+        )
+        match_expr = build_match_expression(tokens)
+        if not match_expr:
+            return {}
+        table = _table_name(self.identifier)
+        placeholders = ",".join("?" for _ in selected)
+        try:
+            conn = _connect(self.db_path, read_only=True)
+        except sqlite3.OperationalError as exc:
+            logger.warning("FTS5 인덱스를 열지 못했습니다(%s): %s", self.db_path, exc)
+            return {}
+        try:
+            rows = conn.execute(
+                f"SELECT rowid, bm25({table}) AS rank FROM {table} "
+                f"WHERE {table} MATCH ? AND rowid IN ({placeholders})",
+                (match_expr, *selected),
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            logger.warning("FTS5 제한 질의 실패(%s): %s", self.identifier, exc)
+            return {}
+        finally:
+            conn.close()
+        return {int(row["rowid"]): -float(row["rank"]) for row in rows}
+
 
 def absent_terms(
     identifier: str, terms: Iterable[str], *, db_path: Optional[Path] = None
@@ -238,6 +284,7 @@ def _build_fts_index_unlocked(
     *,
     db_path: Optional[Path] = None,
     tokenizer_name: Optional[str] = None,
+    corpus_revision: Optional[str] = None,
 ) -> Fts5LexicalIndex:
     """한 데이터셋의 FTS5 인덱스를 (재)구축한다.
 
@@ -284,7 +331,8 @@ def _build_fts_index_unlocked(
                        document_count INTEGER NOT NULL,
                        tokenizer TEXT NOT NULL,
                        chunk_ids TEXT NOT NULL,
-                       tokenizer_backend TEXT
+                       tokenizer_backend TEXT,
+                       corpus_revision TEXT
                    )"""
             )
             # CREATE TABLE IF NOT EXISTS는 이미 있는 테이블에 컬럼을 더하지 않는다.
@@ -293,6 +341,8 @@ def _build_fts_index_unlocked(
             컬럼 = {r["name"] for r in conn.execute("PRAGMA table_info(lexical_meta)")}
             if "tokenizer_backend" not in 컬럼:
                 conn.execute("ALTER TABLE lexical_meta ADD COLUMN tokenizer_backend TEXT")
+            if "corpus_revision" not in 컬럼:
+                conn.execute("ALTER TABLE lexical_meta ADD COLUMN corpus_revision TEXT")
 
             # content=''(contentless)로 토큰 원문을 저장하지 않는다. 필요한 것은
             # bm25() 점수와 행 위치뿐이고 본문은 parquet에 이미 있다. 저장하면
@@ -317,10 +367,10 @@ def _build_fts_index_unlocked(
             )
             conn.execute(
                 "INSERT OR REPLACE INTO lexical_meta "
-                "(identifier, document_count, tokenizer, chunk_ids, tokenizer_backend) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "(identifier, document_count, tokenizer, chunk_ids, tokenizer_backend, corpus_revision) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (identifier, len(ids), tokenizer, json.dumps(ids, ensure_ascii=False),
-                 tokenizer_backend(tokenizer)),
+                 tokenizer_backend(tokenizer), corpus_revision),
             )
             conn.commit()
         finally:
@@ -337,6 +387,7 @@ def _build_fts_index_unlocked(
         chunk_ids=ids,
         tokenizer_name=tokenizer,
         db_path=target,
+        corpus_revision=corpus_revision,
     )
 
 
@@ -347,6 +398,7 @@ def build_fts_index(
     *,
     db_path: Optional[Path] = None,
     tokenizer_name: Optional[str] = None,
+    corpus_revision: Optional[str] = None,
 ) -> Fts5LexicalIndex:
     """Serialize writes to the shared FTS DB, including standalone rebuilds."""
     from src.services.ingest_runtime import serialized_ingest_write
@@ -358,6 +410,7 @@ def build_fts_index(
             chunk_ids,
             db_path=db_path,
             tokenizer_name=tokenizer_name,
+            corpus_revision=corpus_revision,
         )
 
 
@@ -376,14 +429,15 @@ def load_fts_index(
     try:
         try:
             row = conn.execute(
-                "SELECT document_count, tokenizer, chunk_ids, tokenizer_backend "
+                "SELECT document_count, tokenizer, chunk_ids, tokenizer_backend, corpus_revision "
                 "FROM lexical_meta WHERE identifier = ?",
                 (identifier,),
             ).fetchone()
         except sqlite3.OperationalError:
             # tokenizer_backend 이전에 만들어진 인덱스. 재색인하면 채워진다.
             row = conn.execute(
-                "SELECT document_count, tokenizer, chunk_ids, NULL AS tokenizer_backend "
+                "SELECT document_count, tokenizer, chunk_ids, NULL AS tokenizer_backend, "
+                "NULL AS corpus_revision "
                 "FROM lexical_meta WHERE identifier = ?",
                 (identifier,),
             ).fetchone()
@@ -422,4 +476,5 @@ def load_fts_index(
         chunk_ids=ids,
         tokenizer_name=str(row["tokenizer"]),
         db_path=target,
+        corpus_revision=row["corpus_revision"],
     )

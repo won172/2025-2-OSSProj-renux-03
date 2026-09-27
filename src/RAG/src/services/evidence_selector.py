@@ -16,7 +16,11 @@ from src.config import (
     RAG_EVIDENCE_TEXT_CHARS,
     RAG_EVIDENCE_TIMEOUT_SECONDS,
 )
-from src.services.langchain_chat import _append_usage_record, _extract_usage_metadata
+from src.services.langchain_chat import (
+    _append_usage_record,
+    _extract_usage_metadata,
+    openai_prompt_cache_kwargs,
+)
 
 
 class EvidenceGroupDecision(BaseModel):
@@ -73,6 +77,7 @@ def _structured_selector():
         temperature=0,
         timeout=RAG_EVIDENCE_TIMEOUT_SECONDS,
         max_retries=0,
+        model_kwargs=openai_prompt_cache_kwargs("evidence_selection"),
     )
     return llm.with_structured_output(
         EvidenceSelectionDecision,

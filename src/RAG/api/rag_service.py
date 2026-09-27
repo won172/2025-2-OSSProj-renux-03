@@ -79,6 +79,7 @@ from src.database import (
     RagRetrievalLog,
     RagFeedback,
     SourceDocument,
+    OntologyShadowLog,
     init_db,
     kst_now,
     verify_database_writable,
@@ -109,6 +110,7 @@ from src.search.hybrid import (
     read_lexical_metadata,
     score_lexical_query,
 )
+from src.search.fts_index import Fts5LexicalIndex
 from src.services import semantic_cache
 from src.services.answer import format_citations
 from src.services.langchain_chat import (
@@ -144,6 +146,9 @@ from src.services.data_quality import (
     data_quality_mode,
 )
 from src.services.canonical_lineage import build_canonical_lineage_report
+from src.services.ingestion_freshness import build_ingestion_freshness_report
+from src.services.ontology_retrieval import OntologyShadowResult, run_ontology_shadow
+from src.services.retrieval_strategy import RetrievalStrategy, choose_retrieval_strategy
 from src.models.embedding import get_embedder, encode_texts
 from src.services.conversation import (
     detect_smalltalk,
@@ -234,6 +239,163 @@ def _json_or_none(value) -> str | None:
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _source_document_key(source) -> str | None:
+    metadata = getattr(source, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("document_key") or metadata.get("doc_id")
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _execute_ontology_shadow(
+    request_id: str,
+    session_id: str,
+    query: str,
+    route: list[str],
+):
+    """Run and persist ontology observation.
+
+    Candidate blending, when separately enabled, may reuse the returned result;
+    this function itself never mutates retrieval frames.
+    """
+
+    started_at = time.perf_counter()
+    session = SessionLocal()
+    query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()
+    try:
+        from src.services.ontology_build import ontology_projection_is_current
+
+        projection_current, revision_reason = ontology_projection_is_current(session)
+        if not projection_current:
+            latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            session.add(
+                OntologyShadowLog(
+                    request_id=request_id,
+                    session_id=session_id,
+                    query_hash=query_hash,
+                    route_json=_json_or_none(route) or "[]",
+                    max_hops=rag_config.RAG_ONTOLOGY_MAX_HOPS,
+                    max_entities=rag_config.RAG_ONTOLOGY_MAX_ENTITIES,
+                    max_relations=rag_config.RAG_ONTOLOGY_MAX_RELATIONS,
+                    max_documents=rag_config.RAG_ONTOLOGY_MAX_DOCUMENTS,
+                    latency_ms=latency_ms,
+                    status="skipped_stale_revision",
+                    error_summary=revision_reason,
+                )
+            )
+            session.commit()
+            _log_event(
+                logging.WARNING,
+                "ontology_shadow_skipped_stale_revision",
+                request_id=request_id,
+                route=route,
+                reason=revision_reason,
+                latency_ms=latency_ms,
+            )
+            return None
+        result = run_ontology_shadow(
+            session,
+            query,
+            route,
+            max_hops=rag_config.RAG_ONTOLOGY_MAX_HOPS,
+            max_entities=rag_config.RAG_ONTOLOGY_MAX_ENTITIES,
+            max_relations=rag_config.RAG_ONTOLOGY_MAX_RELATIONS,
+            max_documents=rag_config.RAG_ONTOLOGY_MAX_DOCUMENTS,
+        )
+        latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        session.add(
+            OntologyShadowLog(
+                request_id=request_id,
+                session_id=session_id,
+                query_hash=query_hash,
+                route_json=_json_or_none(route) or "[]",
+                linked_entities_json=_json_or_none(
+                    [item.as_dict() for item in result.linked_entities]
+                )
+                or "[]",
+                traversed_relations_json=_json_or_none(
+                    [item.as_dict() for item in result.traversed_relations]
+                )
+                or "[]",
+                document_keys_json=_json_or_none(list(result.document_keys)) or "[]",
+                linked_entity_count=len(result.linked_entities),
+                relation_count=len(result.traversed_relations),
+                document_count=len(result.document_keys),
+                max_hops=result.max_hops,
+                max_entities=rag_config.RAG_ONTOLOGY_MAX_ENTITIES,
+                max_relations=rag_config.RAG_ONTOLOGY_MAX_RELATIONS,
+                max_documents=rag_config.RAG_ONTOLOGY_MAX_DOCUMENTS,
+                relation_limit_reached=(
+                    len(result.traversed_relations)
+                    >= rag_config.RAG_ONTOLOGY_MAX_RELATIONS
+                ),
+                document_limit_reached=(
+                    len(result.document_keys)
+                    >= rag_config.RAG_ONTOLOGY_MAX_DOCUMENTS
+                ),
+                latency_ms=latency_ms,
+                status="success",
+            )
+        )
+        session.commit()
+        _log_event(
+            logging.INFO,
+            "ontology_shadow_completed",
+            request_id=request_id,
+            route=route,
+            entity_count=len(result.linked_entities),
+            relation_count=len(result.traversed_relations),
+            document_count=len(result.document_keys),
+            relation_limit_reached=(
+                len(result.traversed_relations)
+                >= rag_config.RAG_ONTOLOGY_MAX_RELATIONS
+            ),
+            document_limit_reached=(
+                len(result.document_keys)
+                >= rag_config.RAG_ONTOLOGY_MAX_DOCUMENTS
+            ),
+            latency_ms=latency_ms,
+        )
+        return result
+    except Exception as exc:
+        session.rollback()
+        latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        error_summary = f"{type(exc).__name__}: {exc}"[:1000]
+        try:
+            session.add(
+                OntologyShadowLog(
+                    request_id=request_id,
+                    session_id=session_id,
+                    query_hash=query_hash,
+                    route_json=_json_or_none(route) or "[]",
+                    max_hops=rag_config.RAG_ONTOLOGY_MAX_HOPS,
+                    max_entities=rag_config.RAG_ONTOLOGY_MAX_ENTITIES,
+                    max_relations=rag_config.RAG_ONTOLOGY_MAX_RELATIONS,
+                    max_documents=rag_config.RAG_ONTOLOGY_MAX_DOCUMENTS,
+                    latency_ms=latency_ms,
+                    status="failed",
+                    error_summary=error_summary,
+                )
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+        _log_event(
+            logging.ERROR,
+            "ontology_shadow_failed",
+            exc_info=True,
+            request_id=request_id,
+            route=route,
+            latency_ms=latency_ms,
+        )
+        return None
+    finally:
+        session.close()
 
 
 def _safe_package_version(name: str) -> str | None:
@@ -858,6 +1020,7 @@ class DatasetCache:
     chunk_mtime: float
     tfidf_mtime: float
     tfidf_chunk_ids: list | None = None
+    corpus_revision: str | None = None
 
 
 @dataclass(frozen=True)
@@ -901,6 +1064,16 @@ def _new_readiness_state() -> dict:
                 "detail": "not_checked",
                 "datasets": [],
                 "violations": [],
+            },
+            # Freshness is surfaced per feature but does not take the entire API
+            # out of rotation. Date-sensitive direct handlers fail closed below.
+            "ingestion_freshness": {
+                "required": False,
+                "ready": False,
+                "detail": "not_checked",
+                "datasets": [],
+                "stale_datasets": [],
+                "warning_datasets": [],
             },
             "datasets": {
                 "required": True,
@@ -1077,6 +1250,35 @@ def _resolve_retrieval_route(raw_query: str, analysis: QueryAnalysisMeta) -> lis
         route.append("notices")
     if _should_append_notices_for_schedule_query(raw_query, route):
         route.append("notices")
+    # Generic words such as "캠퍼스", "학점", and "교육과정" can add a broad
+    # companion corpus even when the user identified one exact directory or
+    # entry-cohort standard. Keep genuinely compound/operational requests on
+    # the multi-dataset path, but let these narrow lookups reach SQL evidence.
+    compact = re.sub(r"\s+", "", raw_query)
+    if analysis.result is None or not _is_compound_analysis(analysis):
+        if (
+            set(route) == {"staff", "notices"}
+            and choose_retrieval_strategy(raw_query, ["staff"]).mode == "structured"
+            and (analysis.result is None or analysis.result.intent == "staff")
+            and not any(term in compact.replace("장학팀", "") for term in (
+                "공지", "장학", "모집", "신청", "기숙사", "시설", "도서관",
+                "와이파이", "셔틀", "운영시간", "분실물", "학생증",
+                "변경", "최신", "최근", "현재", "지금",
+            ))
+        ):
+            route = ["staff"]
+        elif (
+            "rules" in route
+            and set(route).issubset({"rules", "courses", "notices"})
+            and choose_retrieval_strategy(raw_query, ["rules"]).mode == "structured"
+            and (analysis.result is None or analysis.result.intent == "rules")
+            and not any(term in compact for term in (
+                "과목", "교과목", "강의", "수업", "신청", "기간", "공지",
+                "마감", "담당", "연락처", "전화", "교환학생",
+                "변경", "개정", "최신", "최근", "현재", "지금", "올해", "이번",
+            ))
+        ):
+            route = ["rules"]
     # "이번 주 마감 추천채용"처럼 공지 자체의 접수 마감을 묻는 질문은
     # apply_deadline 범위 조회가 정답이다. "이번 주" 때문에 추가된 schedule이
     # 날짜가 겹치는 학사일정으로 근거 후보를 독점하지 못하게 한다.
@@ -1116,10 +1318,9 @@ def _semantic_cache_namespace(major: str, *, allow_wise: bool = False) -> str:
     # v1 product always uses the Seoul/BMC namespace because WISE questions are
     # rejected before cache lookup and WISE answers are never written.
     campus_scope = "wise_allowed" if allow_wise else "seoul_bmc"
-    # Invalidate answers cached before title-priority period scope, restricted
-    # audience filtering, contact completeness, and the wider safe parent
-    # window were enforced.
-    return f"{user_scope}|retrieval-v9-active-deadline:{campus_scope}"
+    # Invalidate answers cached before the exact SQL relationship path changed
+    # which document can ground staff, course, and cohort-rule answers.
+    return f"{user_scope}|retrieval-v10-structured:{campus_scope}"
 
 
 def _should_cache_answer(
@@ -1266,6 +1467,7 @@ SCHOOL_INFO_TERMS = (
     "사무실",
     "내선",
     "교과",
+    "교양",
     "전공",
     "수업",
     "강의",
@@ -1357,6 +1559,11 @@ _SOURCE_INTERNAL_COLUMNS = {
     "citation_number",
     "selector_fallback",
     "campus_allow_wise",
+    "ontology_match",
+    "ontology_document_rank",
+    "ontology_document_key",
+    "ontology_temporal_rank",
+    "structured_match",
 } | _SOURCE_SCORE_COLUMNS
 
 
@@ -1795,11 +2002,17 @@ def _try_direct_answer(query: str, today: date) -> DirectAnswer | None:
                 return notice_period
 
         if is_meal_direct_question(query):
+            stale = _stale_direct_answer("meals", today)
+            if stale is not None:
+                return stale
             meal = answer_meal(query, _load_meal_rows_for_direct_answer(), today, split_meal_corners)
             if meal is not None:
                 return meal
 
         if is_schedule_direct_question(query, today):
+            stale = _stale_direct_answer("schedule", today)
+            if stale is not None:
+                return stale
             schedule = answer_schedule_when(query, _load_schedule_rows_for_direct_answer(), today)
             if schedule is not None:
                 return schedule
@@ -1807,6 +2020,51 @@ def _try_direct_answer(query: str, today: date) -> DirectAnswer | None:
         # 구제 경로 실패가 폴백 응답 자체를 막아서는 안 된다.
         _log_event(logging.WARNING, "direct_answer_failed", exc_info=True)
     return None
+
+
+def _stale_direct_answer(dataset: str, today: date) -> DirectAnswer | None:
+    """Fail closed when a current date-sensitive canonical snapshot is stale.
+
+    Historical ``as_of`` evaluation remains reproducible; freshness describes
+    the live collector, not the age of a frozen evaluation fixture.
+    """
+    if today != kst_now().date():
+        return None
+    session = None
+    try:
+        session = SessionLocal()
+        report = build_ingestion_freshness_report(session, datasets=(dataset,))
+        # A snapshot can still be within its age budget while repeated failed
+        # refreshes make it operationally unsafe.  Only the fully healthy state
+        # may answer current date-sensitive questions.
+        if report["datasets"][0]["state"] == "healthy":
+            return None
+    except Exception:
+        _log_event(
+            logging.WARNING,
+            "direct_answer_freshness_check_failed",
+            dataset=dataset,
+            exc_info=True,
+        )
+    finally:
+        if session is not None:
+            session.close()
+
+    if dataset == "meals":
+        return DirectAnswer(
+            answer=(
+                "최신 학식 데이터를 확인하지 못해 현재 식단을 안내할 수 없습니다. "
+                "동국대학교 생활협동조합 식단표에서 최신 메뉴를 확인해 주세요."
+            ),
+            kind="meal_stale",
+        )
+    return DirectAnswer(
+        answer=(
+            "최신 학사일정 데이터를 확인하지 못해 현재 일정을 확정해서 안내할 수 없습니다. "
+            "동국대학교 공식 학사일정에서 최신 내용을 확인해 주세요."
+        ),
+        kind="schedule_stale",
+    )
 
 
 def _try_future_unannounced_answer(query: str, today: date) -> DirectAnswer | None:
@@ -2287,10 +2545,20 @@ def _should_append_rules_route(query: str, route: List[str]) -> bool:
 
 def _should_append_notices_for_rules_query(query: str, route: List[str]) -> bool:
     """Operational student rules are often published as time-bound notices."""
+    time_sensitive = any(term in query for term in (
+        "변경", "개정", "최신", "최근", "현재", "지금", "올해", "이번",
+    ))
     return (
         "rules" in route
         and "notices" not in route
-        and any(term in query for term in RULES_NOTICE_SUPPORT_TERMS)
+        # Explicit entry-year standards are sourced from official guide
+        # documents. Adding a generic notice route defeats the exact SQL
+        # scope; time-sensitive or operational queries still retain notices.
+        and (time_sensitive or choose_retrieval_strategy(query, route).mode != "structured")
+        and (
+            any(term in query for term in RULES_NOTICE_SUPPORT_TERMS)
+            or (time_sensitive and "교양" in query)
+        )
     )
 
 
@@ -2406,7 +2674,11 @@ def _can_skip_query_analysis(
         raw_query,
         QueryAnalysisMeta(result=None, used=False, failed=False),
     )
-    if deterministic_route not in (["notices"], ["staff"], ["courses"]):
+    if deterministic_route not in (["notices"], ["staff"], ["courses"], ["rules"]):
+        return False
+    if deterministic_route == ["rules"] and (
+        choose_retrieval_strategy(raw_query, deterministic_route).mode != "structured"
+    ):
         return False
     if deterministic_route == ["notices"]:
         # keyword_route의 미매칭 기본값도 notices이므로, 공지/시설 어휘가
@@ -3451,6 +3723,386 @@ def _apply_grounding_failure_policy(
     return candidate_answer + "\n\n" + guard_answer
 
 
+def _ontology_document_keys_by_dataset(
+    result: OntologyShadowResult | None,
+    route: List[str],
+) -> Dict[str, tuple[str, ...]]:
+    """Return a bounded, route-safe document allowlist for candidate blending."""
+
+    if result is None or not rag_config.RAG_ONTOLOGY_CANDIDATES_ENABLED:
+        return {}
+    allowed = set(route).intersection(
+        rag_config.RAG_ONTOLOGY_CANDIDATE_DATASETS
+    )
+    limit = rag_config.RAG_ONTOLOGY_CANDIDATE_DOCUMENTS_PER_DATASET
+    grouped: Dict[str, List[str]] = {dataset: [] for dataset in allowed}
+    for raw_key in result.document_keys:
+        document_key = str(raw_key or "").strip()
+        dataset = document_key.partition(":")[0]
+        if dataset not in allowed:
+            continue
+        keys = grouped[dataset]
+        if document_key not in keys and len(keys) < limit:
+            keys.append(document_key)
+    return {
+        dataset: tuple(keys)
+        for dataset, keys in grouped.items()
+        if keys
+    }
+
+
+def _structured_document_keys_by_dataset(
+    result: OntologyShadowResult | None,
+    dataset: str | None,
+) -> Dict[str, tuple[str, ...]]:
+    """Accept only canonical evidence for the single planned SQL route."""
+
+    if result is None or dataset not in {"staff", "courses", "rules"}:
+        return {}
+    prefix = f"{dataset}:"
+    keys = tuple(dict.fromkeys(
+        key for key in result.document_keys
+        if isinstance(key, str) and key.startswith(prefix)
+    ))[:rag_config.RAG_ONTOLOGY_MAX_DOCUMENTS]
+    return {dataset: keys} if keys else {}
+
+
+@dataclass(frozen=True)
+class _RetrievalPlan:
+    route: List[str]
+    strategy: RetrievalStrategy
+    ontology_document_keys_by_dataset: Dict[str, tuple[str, ...]]
+    structured_document_keys_by_dataset: Dict[str, tuple[str, ...]]
+
+
+async def _plan_retrieval(
+    *,
+    raw_query: str,
+    query_for_retrieval: str,
+    analysis_meta: QueryAnalysisMeta,
+    request_id: str,
+    session_id: str,
+    stage_timings: dict[str, float],
+) -> _RetrievalPlan:
+    """Share route, revision-checked SQL evidence, and flags across both APIs."""
+    started_at = time.perf_counter()
+    route = _resolve_retrieval_route(raw_query, analysis_meta)
+    _mark_stage(stage_timings, "routing", started_at)
+    strategy = (
+        choose_retrieval_strategy(query_for_retrieval, route)
+        if rag_config.RAG_STRUCTURED_RETRIEVAL_ENABLED
+        else RetrievalStrategy("hybrid")
+    )
+    ontology_result = None
+    if (
+        rag_config.RAG_ONTOLOGY_SHADOW_ENABLED
+        or rag_config.RAG_ONTOLOGY_CANDIDATES_ENABLED
+        or strategy.mode == "structured"
+    ):
+        started_at = time.perf_counter()
+        ontology_result = await run_in_threadpool(
+            _execute_ontology_shadow,
+            request_id,
+            session_id,
+            query_for_retrieval,
+            route,
+        )
+        _mark_stage(stage_timings, "ontology_shadow", started_at)
+    ontology_keys = _ontology_document_keys_by_dataset(ontology_result, route)
+    structured_keys = _structured_document_keys_by_dataset(
+        ontology_result, strategy.dataset,
+    )
+    _log_event(
+        logging.INFO,
+        "retrieval_strategy_selected",
+        request_id=request_id,
+        strategy=strategy.mode,
+        dataset=strategy.dataset,
+        structured_document_count=sum(len(keys) for keys in structured_keys.values()),
+    )
+    return _RetrievalPlan(route, strategy, ontology_keys, structured_keys)
+
+
+def _ontology_candidate_lexical_score(query: str, row: pd.Series) -> float:
+    query_terms = meaningful_lexical_terms(query)
+    if not query_terms:
+        return 0.0
+    evidence_terms = meaningful_lexical_terms(
+        " ".join(
+            str(row.get(column) or "")
+            for column in (
+                "title",
+                "chunk_text",
+                "department",
+                "topics",
+                "category",
+            )
+        )
+    )
+    return len(query_terms.intersection(evidence_terms)) / len(query_terms)
+
+
+def _ontology_candidate_hits(
+    *,
+    chunks_df: pd.DataFrame,
+    dataset: str,
+    document_keys: tuple[str, ...],
+    query: str,
+    where_filter: Dict | None,
+    date_filter: QueryDateFilter | None,
+    as_of: date | None = None,
+    chunks_per_document: int = 1,
+) -> pd.DataFrame:
+    """Materialize canonical chunks from relation-supported documents.
+
+    Candidates come only from the already loaded canonical chunk projection.
+    They must cross the same metadata/date filters as ordinary retrieval before
+    they are marked for a bounded shortlist slot.
+    """
+
+    if chunks_df.empty or not document_keys:
+        return chunks_df.iloc[:0].copy()
+
+    identities = pd.Series("", index=chunks_df.index, dtype="object")
+    if "document_key" in chunks_df.columns:
+        identities = chunks_df["document_key"].fillna("").astype(str).str.strip()
+    if "doc_id" in chunks_df.columns:
+        fallback = chunks_df["doc_id"].fillna("").astype(str).str.strip()
+        identities = identities.where(identities.ne(""), fallback)
+
+    candidates = chunks_df.loc[identities.isin(document_keys)].copy()
+    if candidates.empty:
+        return candidates
+    candidates["ontology_document_key"] = identities.loc[candidates.index]
+    if where_filter:
+        candidates = candidates[
+            candidates.apply(
+                lambda row: _matches_where_filter(row, where_filter),
+                axis=1,
+            )
+        ].copy()
+    if candidates.empty:
+        return candidates
+
+    candidates["dataset"] = dataset
+    candidates, _ = _apply_date_filter(candidates, dataset, date_filter)
+    if candidates.empty:
+        return candidates
+
+    rank_by_key = {
+        document_key: rank
+        for rank, document_key in enumerate(document_keys, start=1)
+    }
+    candidates["ontology_document_rank"] = candidates[
+        "ontology_document_key"
+    ].map(rank_by_key)
+    candidates["ontology_match"] = 1
+    candidates["vector_score"] = 0.0
+    candidates["sparse_score"] = candidates.apply(
+        lambda row: _ontology_candidate_lexical_score(query, row),
+        axis=1,
+    )
+    candidates["hybrid_score"] = 0.0
+    candidates["ontology_temporal_rank"] = 0.0
+    if dataset == "schedule":
+        candidates = _apply_schedule_calendar_alignment(candidates, query)
+        if as_of is not None and "schedule_start" in candidates.columns:
+            starts = pd.to_datetime(
+                candidates["schedule_start"],
+                errors="coerce",
+            )
+            ends = pd.to_datetime(
+                candidates.get("schedule_end", candidates["schedule_start"]),
+                errors="coerce",
+            ).fillna(starts)
+            anchor = pd.Timestamp(as_of)
+            compact_query = re.sub(r"\s+", "", query)
+            explicit_past = any(
+                token in compact_query
+                for token in ("언제였", "기간이었", "지난학기", "과거")
+            ) and "아직안지났" not in compact_query
+
+            temporal_ranks: list[float] = []
+            for start, end in zip(starts, ends):
+                if pd.isna(start):
+                    temporal_ranks.append(float(10**9))
+                    continue
+                effective_end = start if pd.isna(end) else end
+                if start <= anchor <= effective_end:
+                    temporal_ranks.append(0.0)
+                elif effective_end < anchor:
+                    distance = max((anchor - effective_end).days, 0)
+                    temporal_ranks.append(
+                        float(distance if explicit_past else 10**6 + distance)
+                    )
+                else:
+                    distance = max((start - anchor).days, 0)
+                    temporal_ranks.append(
+                        float(10**6 + distance if explicit_past else distance)
+                    )
+            candidates["ontology_temporal_rank"] = temporal_ranks
+
+    candidates["_ontology_position"] = pd.to_numeric(
+        candidates.get("position", pd.Series(0, index=candidates.index)),
+        errors="coerce",
+    ).fillna(0)
+    candidates.sort_values(
+        [
+            "ontology_temporal_rank",
+            "ontology_document_rank",
+            "sparse_score",
+            "_ontology_position",
+        ],
+        ascending=[True, True, False, True],
+        kind="stable",
+        inplace=True,
+    )
+    if chunks_per_document > 0:
+        candidates = candidates.groupby(
+            "ontology_document_key", sort=False, group_keys=False
+        ).head(chunks_per_document)
+    return candidates.drop(columns=["_ontology_position"], errors="ignore")
+
+
+def _rank_structured_rule_hits(
+    hits: pd.DataFrame,
+    *,
+    chunks_df: pd.DataFrame,
+    vectorizer,
+    matrix,
+    tfidf_chunk_ids: list | None,
+    query: str,
+) -> pd.DataFrame:
+    """Rank passages only inside SQL-matched rule documents using FTS5/BM25."""
+
+    if hits.empty:
+        return hits
+    scoped_hits = hits.copy()
+    if matrix is not None:
+        if tfidf_chunk_ids is not None and len(tfidf_chunk_ids) == matrix.shape[0]:
+            row_ids = [str(chunk_id) for chunk_id in tfidf_chunk_ids]
+        elif matrix.shape[0] == len(chunks_df):
+            row_ids = chunks_df["chunk_id"].astype(str).tolist()
+        else:
+            row_ids = []
+        if row_ids:
+            lexical_started_at = time.perf_counter()
+            try:
+                if isinstance(vectorizer, Fts5LexicalIndex):
+                    position_by_id = {chunk_id: index for index, chunk_id in enumerate(row_ids)}
+                    positions = [
+                        position_by_id[chunk_id]
+                        for chunk_id in scoped_hits["chunk_id"].astype(str)
+                        if chunk_id in position_by_id
+                    ]
+                    raw_scores = vectorizer.score_subset(query, positions)
+                    maximum = max(raw_scores.values(), default=0.0)
+                    score_by_id = {
+                        row_ids[position]: raw / maximum
+                        for position, raw in raw_scores.items()
+                    } if maximum > 0 else {}
+                else:
+                    scores = score_lexical_query(vectorizer, matrix, query)
+                    score_by_id = dict(zip(row_ids, scores))
+            except Exception:
+                _log_event(logging.WARNING, "structured_lexical_rerank_failed", exc_info=True)
+            else:
+                exact_scores = scoped_hits["chunk_id"].astype(str).map(score_by_id).fillna(0.0)
+                scoped_hits["sparse_score"] = np.maximum(
+                    pd.to_numeric(scoped_hits["sparse_score"], errors="coerce").fillna(0.0),
+                    exact_scores,
+                )
+            finally:
+                lexical_ms = (time.perf_counter() - lexical_started_at) * 1000
+                _log_event(
+                    logging.WARNING if lexical_ms >= 100 else logging.INFO,
+                    "structured_rule_lexical_scored",
+                    backend=type(vectorizer).__name__,
+                    candidate_chunks=len(scoped_hits),
+                    query_chars=len(query),
+                    latency_ms=round(lexical_ms, 2),
+                )
+    scoped_hits["_structured_position"] = pd.to_numeric(
+        scoped_hits.get("position", pd.Series(0, index=scoped_hits.index)),
+        errors="coerce",
+    ).fillna(0)
+    scoped_hits.sort_values(
+        ["ontology_document_rank", "sparse_score", "_structured_position"],
+        ascending=[True, False, True], kind="stable", inplace=True,
+    )
+    scoped_hits = scoped_hits.groupby(
+        "ontology_document_key", sort=False, group_keys=False
+    ).head(3)
+    return scoped_hits.drop(columns=["_structured_position"])
+
+
+def _merge_ontology_candidate_hits(
+    hits: pd.DataFrame,
+    candidates: pd.DataFrame,
+) -> pd.DataFrame:
+    """Mark existing hits and append only ontology chunks missing from top-k."""
+
+    if candidates.empty:
+        return hits
+    if hits.empty:
+        return candidates.reset_index(drop=True)
+
+    merged = hits.copy()
+    merged["ontology_match"] = pd.to_numeric(
+        merged.get(
+            "ontology_match",
+            pd.Series(0, index=merged.index),
+        ),
+        errors="coerce",
+    ).fillna(0)
+    if "ontology_document_rank" not in merged.columns:
+        merged["ontology_document_rank"] = np.nan
+    if "ontology_document_key" not in merged.columns:
+        merged["ontology_document_key"] = ""
+    if "ontology_temporal_rank" not in merged.columns:
+        merged["ontology_temporal_rank"] = np.nan
+
+    existing_ids = (
+        merged.get("chunk_id", pd.Series("", index=merged.index))
+        .fillna("")
+        .astype(str)
+    )
+    candidate_ids = (
+        candidates.get("chunk_id", pd.Series("", index=candidates.index))
+        .fillna("")
+        .astype(str)
+    )
+    existing_index_by_id = {
+        chunk_id: index
+        for index, chunk_id in zip(merged.index, existing_ids)
+        if chunk_id
+    }
+    missing_rows: list[pd.Series] = []
+    for candidate_index, candidate in candidates.iterrows():
+        chunk_id = candidate_ids.loc[candidate_index]
+        existing_index = existing_index_by_id.get(chunk_id) if chunk_id else None
+        if existing_index is None:
+            missing_rows.append(candidate)
+            continue
+        merged.at[existing_index, "ontology_match"] = 1
+        merged.at[existing_index, "ontology_document_rank"] = candidate.get(
+            "ontology_document_rank"
+        )
+        merged.at[existing_index, "ontology_document_key"] = candidate.get(
+            "ontology_document_key"
+        )
+        merged.at[existing_index, "ontology_temporal_rank"] = candidate.get(
+            "ontology_temporal_rank"
+        )
+    if missing_rows:
+        merged = pd.concat(
+            [merged, pd.DataFrame(missing_rows)],
+            ignore_index=True,
+            sort=False,
+        )
+    return merged.reset_index(drop=True)
+
+
 async def _retrieve_frames(
     *,
     route: List[str],
@@ -3467,6 +4119,9 @@ async def _retrieve_frames(
     current_operational_notice_terms: List[str] | None = None,
     allow_wise: bool = False,
     period_query: str | None = None,
+    ontology_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
+    structured_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
+    as_of: date | None = None,
 ) -> tuple[List[pd.DataFrame], bool, List[str]]:
     frames: List[pd.DataFrame] = []
     date_filter_eliminated_any = False
@@ -3523,6 +4178,36 @@ async def _retrieve_frames(
                 board_filter,
             )
         final_filter = current_dataset_filter if current_dataset_filter else None
+        structured_keys = (structured_document_keys_by_dataset or {}).get(dataset, ())
+        structured_hits = _ontology_candidate_hits(
+            chunks_df=chunks_df,
+            dataset=dataset,
+            document_keys=structured_keys,
+            query=query,
+            where_filter=final_filter,
+            date_filter=date_filter,
+            as_of=as_of,
+            chunks_per_document=(0 if dataset == "rules" else 1),
+        ) if structured_keys else chunks_df.iloc[:0].copy()
+        if not structured_hits.empty:
+            structured_hits, _ = apply_campus_safety_boundary(
+                structured_hits, allow_wise=allow_wise,
+            )
+            if dataset == "rules":
+                # Keep lexical scoring off the event loop like hybrid search.
+                structured_hits = await run_in_threadpool(
+                    functools.partial(
+                        _rank_structured_rule_hits,
+                        structured_hits,
+                        chunks_df=chunks_df,
+                        vectorizer=vectorizer,
+                        matrix=matrix,
+                        tfidf_chunk_ids=tfidf_chunk_ids,
+                        query=query,
+                    )
+                )
+            structured_hits["structured_match"] = 1
+        structured_applied = not structured_hits.empty
         # 학식은 코퍼스가 작고 날짜 필터로 좁혀지므로, 해당 주의 모든 식당이 후보에
         # 남도록 top_k를 키운다(작게 잡으면 그날 운영 중인 식당이 잘려 휴무로 오인됨).
         dataset_top_k = max(DEFAULT_TOP_K * 2, RAG_RETRIEVAL_TOP_K_PER_DATASET)
@@ -3533,7 +4218,10 @@ async def _retrieve_frames(
             # eligible pool so evidence selection can preserve multiple
             # independently open opportunities.
             dataset_top_k = max(dataset_top_k, 100)
-        if (
+        if structured_applied:
+            hits = structured_hits
+            eliminated = False
+        elif (
             dataset == "notices"
             and active_notice_query
             and active_notice_as_of is not None
@@ -3613,6 +4301,31 @@ async def _retrieve_frames(
             hits, eliminated = _apply_date_filter(hits, dataset, date_filter)
             if dataset == "schedule":
                 hits = _apply_schedule_calendar_alignment(hits, query)
+
+        ontology_keys = (
+            ()
+            if structured_applied
+            else (ontology_document_keys_by_dataset or {}).get(dataset, ())
+        )
+        if ontology_keys:
+            ontology_hits = _ontology_candidate_hits(
+                chunks_df=chunks_df,
+                dataset=dataset,
+                document_keys=ontology_keys,
+                query=query,
+                where_filter=final_filter,
+                date_filter=date_filter,
+                as_of=as_of,
+            )
+            hits = _merge_ontology_candidate_hits(hits, ontology_hits)
+            _log_event(
+                logging.INFO,
+                "ontology_candidates_materialized",
+                request_id=request_id,
+                dataset=dataset,
+                requested_documents=len(ontology_keys),
+                materialized_chunks=len(ontology_hits),
+            )
         hits, campus_blocked = apply_campus_safety_boundary(hits, allow_wise=allow_wise)
         if campus_blocked:
             _log_event(
@@ -3642,6 +4355,7 @@ async def _retrieve_frames(
             filter=final_filter,
             date_filter=None if date_filter is None else date_filter.label,
             hits=len(hits),
+            retrieval_mode="structured_sql" if structured_applied else "existing_route",
         )
 
         if not hits.empty:
@@ -3666,13 +4380,16 @@ async def _retrieve_frames_for_queries(
     active_notice_as_of: date | None = None,
     current_operational_notice_terms: List[str] | None = None,
     allow_wise: bool = False,
+    ontology_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
+    structured_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
+    as_of: date | None = None,
 ) -> tuple[List[pd.DataFrame], bool, List[str]]:
     all_frames: List[pd.DataFrame] = []
     date_filter_eliminated_any = False
     unavailable_datasets: List[str] = []
 
     period_query = queries[0] if queries else ""
-    for query_candidate in queries:
+    for query_index, query_candidate in enumerate(queries):
         frames, eliminated, unavailable = await _retrieve_frames(
             route=route,
             query=query_candidate,
@@ -3688,6 +4405,19 @@ async def _retrieve_frames_for_queries(
             current_operational_notice_terms=current_operational_notice_terms,
             allow_wise=allow_wise,
             period_query=period_query,
+            # One graph observation must contribute at most once. Repeating
+            # it for every query expansion would manufacture RRF agreement.
+            ontology_document_keys_by_dataset=(
+                ontology_document_keys_by_dataset
+                if query_index == 0
+                else None
+            ),
+            structured_document_keys_by_dataset=(
+                structured_document_keys_by_dataset
+                if query_index == 0
+                else None
+            ),
+            as_of=as_of,
         )
         for frame in frames:
             if frame.empty:
@@ -3697,6 +4427,14 @@ async def _retrieve_frames_for_queries(
             all_frames.append(tagged)
         date_filter_eliminated_any = date_filter_eliminated_any or eliminated
         unavailable_datasets.extend(unavailable)
+        if query_index == 0 and any(
+            "structured_match" in frame.columns
+            and frame["structured_match"].eq(1).any()
+            for frame in frames
+        ):
+            # Query expansion would search the unrestricted corpus again and
+            # undo the exact SQL scope established by this first pass.
+            break
 
     return all_frames, date_filter_eliminated_any, list(dict.fromkeys(unavailable_datasets))
 
@@ -3996,6 +4734,45 @@ def _build_balanced_shortlist(
         # the row chosen for metadata.
         best["sparse_score"] = float(group["_numeric_sparse"].max())
         best["_numeric_sparse"] = float(group["_numeric_sparse"].max())
+        ontology_match = pd.to_numeric(
+            group.get(
+                "ontology_match",
+                pd.Series(0, index=group.index),
+            ),
+            errors="coerce",
+        ).fillna(0)
+        best["ontology_match"] = int(ontology_match.max() > 0)
+        ontology_ranks = pd.to_numeric(
+            group.get(
+                "ontology_document_rank",
+                pd.Series(np.nan, index=group.index),
+            ),
+            errors="coerce",
+        ).dropna()
+        best["ontology_document_rank"] = (
+            float(ontology_ranks.min()) if not ontology_ranks.empty else np.nan
+        )
+        ontology_temporal_ranks = pd.to_numeric(
+            group.get(
+                "ontology_temporal_rank",
+                pd.Series(np.nan, index=group.index),
+            ),
+            errors="coerce",
+        ).dropna()
+        best["ontology_temporal_rank"] = (
+            float(ontology_temporal_ranks.min())
+            if not ontology_temporal_ranks.empty
+            else np.nan
+        )
+        ontology_keys = [
+            str(value).strip()
+            for value in group.get(
+                "ontology_document_key",
+                pd.Series("", index=group.index),
+            ).tolist()
+            if str(value).strip()
+        ]
+        best["ontology_document_key"] = ontology_keys[0] if ontology_keys else ""
         matched_queries: list[str] = []
         if "matched_query" in group.columns:
             for value in group["matched_query"].tolist():
@@ -4030,6 +4807,46 @@ def _build_balanced_shortlist(
             lexical_index = int(lexical_ranked.index[0])
             if lexical_index not in selected_indices:
                 selected_indices.append(lexical_index)
+
+        # Reserve a small, explicit slot for relation-grounded documents. The
+        # feature flag and per-dataset document cap bound this expansion; the
+        # downstream evidence selector still decides whether the chunk is fit
+        # to support an answer.
+        ontology_ranked = group[
+            pd.to_numeric(
+                group.get(
+                    "ontology_match",
+                    pd.Series(0, index=group.index),
+                ),
+                errors="coerce",
+            ).fillna(0).gt(0)
+        ].copy()
+        if not ontology_ranked.empty:
+            ontology_ranked["_ontology_rank"] = pd.to_numeric(
+                ontology_ranked.get("ontology_document_rank"),
+                errors="coerce",
+            ).fillna(10**9)
+            ontology_ranked["_ontology_temporal_rank"] = pd.to_numeric(
+                ontology_ranked.get("ontology_temporal_rank"),
+                errors="coerce",
+            ).fillna(10**9)
+            ontology_ranked.sort_values(
+                [
+                    "_ontology_temporal_rank",
+                    "_ontology_rank",
+                    "_numeric_sparse",
+                    "_numeric_hybrid",
+                ],
+                ascending=[True, True, False, False],
+                kind="stable",
+                inplace=True,
+            )
+            for index in ontology_ranked.head(
+                rag_config.RAG_ONTOLOGY_CANDIDATE_SLOTS_PER_DATASET
+            ).index:
+                numeric_index = int(index)
+                if numeric_index not in selected_indices:
+                    selected_indices.append(numeric_index)
 
         for index in ranked_local.index:
             numeric_index = int(index)
@@ -5054,12 +5871,14 @@ def _save_rag_evaluation_log(
         session.flush()
 
         for rank, source in enumerate(sources, start=1):
+            document_key = _source_document_key(source)
             session.add(
                 RagRetrievalLog(
                     query_log_id=query_log.id,
                     rank=rank,
                     dataset=source.source,
                     chunk_id=source.chunk_id,
+                    document_key=document_key,
                     title=source.title,
                     url=source.url,
                     published_at=source.published_at,
@@ -5076,6 +5895,45 @@ def _save_rag_evaluation_log(
                     snippet=source.snippet[:2000],
                 )
             )
+
+        if (
+            rag_config.RAG_ONTOLOGY_SHADOW_ENABLED
+            or rag_config.RAG_ONTOLOGY_CANDIDATES_ENABLED
+        ):
+            shadow_log = (
+                session.query(OntologyShadowLog)
+                .filter(OntologyShadowLog.request_id == request_id)
+                .order_by(
+                    OntologyShadowLog.created_at.desc(),
+                    OntologyShadowLog.id.desc(),
+                )
+                .first()
+            )
+            if shadow_log is not None:
+                retrieved_document_keys = sorted(
+                    {
+                        document_key
+                        for source in sources
+                        if (document_key := _source_document_key(source)) is not None
+                    }
+                )
+                try:
+                    graph_document_keys = set(
+                        json.loads(shadow_log.document_keys_json or "[]")
+                    )
+                except (TypeError, ValueError):
+                    graph_document_keys = set()
+                overlap_document_keys = sorted(
+                    graph_document_keys.intersection(retrieved_document_keys)
+                )
+                shadow_log.retrieved_document_keys_json = (
+                    _json_or_none(retrieved_document_keys) or "[]"
+                )
+                shadow_log.overlap_document_keys_json = (
+                    _json_or_none(overlap_document_keys) or "[]"
+                )
+                shadow_log.retrieved_document_count = len(retrieved_document_keys)
+                shadow_log.overlap_document_count = len(overlap_document_keys)
 
         session.commit()
     except Exception:
@@ -5436,6 +6294,18 @@ def _ensure_dataset_locked(key: str) -> Tuple[pd.DataFrame, object, object, list
         if not artifact_is_csv and chunk_path.exists() and vectorizer_path.exists():
             chunks_df = pd.read_parquet(chunk_path)
             tfidf_metadata = read_lexical_metadata(key)
+            from src.services.corpus_revision import frame_corpus_revision
+
+            artifact_corpus_revision = frame_corpus_revision(chunks_df)
+            lexical_corpus_revision = tfidf_metadata.get("corpus_revision")
+            if (
+                artifact_corpus_revision is not None
+                and lexical_corpus_revision != artifact_corpus_revision
+            ):
+                raise ValueError(
+                    f"{key} corpus revision mismatch: "
+                    f"artifact={artifact_corpus_revision} lexical={lexical_corpus_revision}"
+                )
             artifact_version = tfidf_metadata.get("sklearn_version")
             if artifact_version and artifact_version != sklearn_version:
                 _log_event(
@@ -5469,6 +6339,9 @@ def _ensure_dataset_locked(key: str) -> Tuple[pd.DataFrame, object, object, list
         vectorizer_mtime = vectorizer_path.stat().st_mtime if vectorizer_path.exists() else -1.0
 
     chunks_df = enrich_retrieval_fields(chunks_df)
+    from src.services.corpus_revision import frame_corpus_revision
+
+    corpus_revision = frame_corpus_revision(chunks_df)
     _datasets[key] = DatasetCache(
         chunks=chunks_df,
         vectorizer=vectorizer,
@@ -5477,6 +6350,7 @@ def _ensure_dataset_locked(key: str) -> Tuple[pd.DataFrame, object, object, list
         chunk_mtime=chunk_mtime,
         tfidf_mtime=vectorizer_mtime,
         tfidf_chunk_ids=tfidf_chunk_ids,
+        corpus_revision=corpus_revision,
     )
     return chunks_df, vectorizer, matrix, tfidf_chunk_ids
 
@@ -5538,6 +6412,7 @@ def refresh_runtime_dataset_state(targets: List[str] | None = None) -> dict[str,
         errors=errors,
     )
     quality_snapshot = _refresh_data_quality_readiness()
+    freshness_snapshot = _refresh_ingestion_freshness_readiness()
     lineage_snapshot = _refresh_canonical_lineage_readiness()
     _log_event(
         logging.INFO if not errors and lineage_snapshot.get("gate_passed") else logging.ERROR,
@@ -5547,6 +6422,7 @@ def refresh_runtime_dataset_state(targets: List[str] | None = None) -> dict[str,
         dense_counts=dense_counts,
         errors=errors,
         data_quality_gate_passed=quality_snapshot.get("gate_passed"),
+        freshness_gate_passed=freshness_snapshot.get("gate_passed"),
         canonical_lineage_gate_passed=lineage_snapshot.get("gate_passed"),
     )
     return {
@@ -5556,6 +6432,7 @@ def refresh_runtime_dataset_state(targets: List[str] | None = None) -> dict[str,
         "dense_errors": dense_errors,
         "errors": errors,
         "data_quality": quality_snapshot,
+        "ingestion_freshness": freshness_snapshot,
         "canonical_lineage": lineage_snapshot,
     }
 
@@ -5618,6 +6495,45 @@ def _refresh_data_quality_readiness() -> dict[str, object]:
         _log_event(
             logging.ERROR if mode == "strict" else logging.WARNING,
             "runtime_data_quality_refresh_failed",
+            error=error,
+            exc_info=True,
+        )
+        return {"gate_passed": False, "error": error}
+
+
+def _refresh_ingestion_freshness_readiness() -> dict[str, object]:
+    """Expose stale datasets without making unrelated RAG features unavailable."""
+    try:
+        session = SessionLocal()
+        try:
+            report = build_ingestion_freshness_report(session)
+        finally:
+            session.close()
+        gate_passed = bool(report["gate_passed"])
+        _set_readiness_check(
+            "ingestion_freshness",
+            ready=gate_passed,
+            detail="fresh" if gate_passed else "stale_or_warning",
+            datasets=report["datasets"],
+            stale_datasets=report["stale_datasets"],
+            warning_datasets=report["warning_datasets"],
+            error=None,
+        )
+        return report
+    except Exception as exc:  # noqa: BLE001 - optional operational signal
+        error = _readiness_error("ingestion_freshness_report_failed", exc)
+        _set_readiness_check(
+            "ingestion_freshness",
+            ready=False,
+            detail="failed",
+            datasets=[],
+            stale_datasets=[],
+            warning_datasets=[],
+            error=error,
+        )
+        _log_event(
+            logging.WARNING,
+            "ingestion_freshness_refresh_failed",
             error=error,
             exc_info=True,
         )
@@ -5694,6 +6610,7 @@ def _run_required_startup_checks() -> None:
         _log_event(logging.ERROR, "startup_component_failed", component="database", error=error, exc_info=True)
 
     _refresh_data_quality_readiness()
+    _refresh_ingestion_freshness_readiness()
 
     dataset_counts: dict[str, int] = {}
     dense_counts: dict[str, int] = {}
@@ -6271,6 +7188,7 @@ async def rag_admin_status():
                     "collection": artifacts.collection,
                     "chroma_count": chroma_count,
                     "cached_chunk_count": 0 if cache is None else len(cache.chunks),
+                    "corpus_revision": None if cache is None else cache.corpus_revision,
                     "chunk_artifact_exists": chunk_artifact_exists,
                     "chunk_artifact_mtime": _format_mtime(chunk_path),
                     "latest_document_published_at": _get_latest_document_published_at(cache),
@@ -6451,6 +7369,17 @@ async def rag_admin_status():
             _log_event(logging.WARNING, "scheduler_status_failed", exc_info=True)
             scheduler_status = {"enabled": False, "jobs": []}
 
+        try:
+            ingestion_freshness = build_ingestion_freshness_report(session)
+        except Exception:
+            _log_event(logging.WARNING, "ingestion_freshness_status_failed", exc_info=True)
+            ingestion_freshness = {
+                "gate_passed": False,
+                "datasets": [],
+                "stale_datasets": [],
+                "warning_datasets": [],
+            }
+
         status_dict = {
             "status": "degraded" if has_degraded_dataset else "ok",
             "generated_at": generated_at,
@@ -6461,6 +7390,7 @@ async def rag_admin_status():
             "grounding": grounding,
             "feedback": feedback,
             "notices_ingestion": notices_ingestion,
+            "ingestion_freshness": ingestion_freshness,
             "scheduler": scheduler_status,
         }
         try:
@@ -6506,6 +7436,12 @@ async def rag_admin_status():
                         "indexed_documents": 0,
                     },
                     "quality_summary": {"parse_failed": 0, "severities": {}, "recent_checks": []},
+                },
+                "ingestion_freshness": {
+                    "gate_passed": False,
+                    "datasets": [],
+                    "stale_datasets": [],
+                    "warning_datasets": [],
                 },
                 "error": str(exc),
             },
@@ -6653,6 +7589,7 @@ def _reload_notices_cache(context: str) -> None:
     except Exception as exc:
         logging.error(f"❌ [Admin] Failed to reload notices cache ({context}): {exc}")
     _refresh_data_quality_readiness()
+    _refresh_ingestion_freshness_readiness()
     _refresh_canonical_lineage_readiness()
 
 
@@ -6778,6 +7715,104 @@ def _record_review(item: PendingItem, req: ReviewActionRequest | None) -> None:
     )
 
 
+def _start_staff_approval_run() -> int | None:
+    from src.services.scheduler import _start_ingestion_run
+
+    return _start_ingestion_run("staff")
+
+
+def _finish_staff_approval_run(run_id: int | None, **kwargs: object) -> None:
+    from src.services.scheduler import _finish_ingestion_run
+
+    _finish_ingestion_run(run_id, **kwargs)
+
+
+def _approve_staff_refresh_item(
+    item_id: int,
+    req: ReviewActionRequest | None,
+) -> dict[str, object]:
+    """Apply an immutable reviewed staff snapshot, then publish its status."""
+    from src.services.staff_refresh import apply_staff_refresh_payload
+    from src.services.ingest_runtime import ingestion_run_context
+
+    session = SessionLocal()
+    try:
+        item = session.query(PendingItem).filter(PendingItem.id == item_id).first()
+        if item is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        if item.status in {"approved", "approved_manually"}:
+            return {"status": item.status, "message": "이미 승인된 항목입니다."}
+        if item.status == "applying":
+            raise HTTPException(status_code=409, detail="이미 적용 중인 항목입니다.")
+        payload = json.loads(item.data or "{}")
+        item.status = "applying"
+        session.commit()
+    except HTTPException:
+        session.rollback()
+        raise
+    except (TypeError, json.JSONDecodeError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=f"staff snapshot payload가 올바르지 않습니다: {exc}")
+    finally:
+        session.close()
+
+    approval_run_id = _start_staff_approval_run()
+    try:
+        with ingestion_run_context("staff", approval_run_id):
+            result = apply_staff_refresh_payload(payload)
+        refresh_runtime_dataset_state(["staff"])
+    except Exception as exc:
+        _finish_staff_approval_run(
+            approval_run_id,
+            status="failed",
+            failed=1,
+            error=f"{type(exc).__name__}: {exc}",
+            outcome_code="approval_apply_failed",
+            diagnostics={"pending_item_id": item_id},
+        )
+        recovery = SessionLocal()
+        try:
+            item = recovery.query(PendingItem).filter(PendingItem.id == item_id).first()
+            if item is not None:
+                item.status = "pending"
+                item.review_note = f"적용 실패: {type(exc).__name__}: {exc}"[:1000]
+                recovery.commit()
+        finally:
+            recovery.close()
+        _log_event(
+            logging.ERROR,
+            "staff_refresh_approval_failed",
+            item_id=item_id,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="교직원 명부 적용에 실패했습니다.")
+
+    completed = SessionLocal()
+    try:
+        item = completed.query(PendingItem).filter(PendingItem.id == item_id).first()
+        if item is None:
+            raise HTTPException(status_code=404, detail="Item not found after apply")
+        item.status = "approved"
+        item.disabled = False
+        _record_review(item, req)
+        completed.commit()
+    finally:
+        completed.close()
+    _finish_staff_approval_run(
+        approval_run_id,
+        status="success",
+        seen=int(result.get("rows") or 0),
+        outcome_code="approved_review",
+        diagnostics={
+            "pending_item_id": item_id,
+            "snapshot_sha256": result.get("snapshot_sha256"),
+            "chunks": int(result.get("chunks") or 0),
+        },
+        run_derivatives=True,
+    )
+    return {"status": "approved", **result}
+
+
 @app.post("/admin/approve/{item_id}")
 async def approve_pending(item_id: int, req: ReviewActionRequest | None = None):
     session = SessionLocal()
@@ -6792,6 +7827,10 @@ async def approve_pending(item_id: int, req: ReviewActionRequest | None = None):
 
         if item.status in ("approved", "approved_manually"):
             return {"status": item.status, "message": "이미 승인된 항목입니다."}
+
+        if item.source_type == "staff_refresh":
+            session.close()
+            return _approve_staff_refresh_item(item_id, req)
 
         notice, chunk_ids = _index_pending_item(session, item, target_collection)
 
@@ -6937,6 +7976,12 @@ async def update_pending_item(item_id: int, req: UpdateItemRequest):
         item = session.query(PendingItem).filter(PendingItem.id == item_id).first()
         if not item:
             raise HTTPException(status_code=404, detail="Item not found")
+
+        if item.source_type == "staff_refresh":
+            raise HTTPException(
+                status_code=400,
+                detail="교직원 스냅샷은 변경할 수 없습니다. 반려 후 새 수집을 실행하세요.",
+            )
 
         required = _SUBMIT_REQUIRED_FIELDS.get(item.source_type, ())
         missing = [field for field in required if not str(parsed.get(field, "")).strip()]
@@ -7636,9 +8681,17 @@ async def ask_stream(req: AskRequest, request: Request):
 
         notice_visibility_filter = _notice_visibility_where_filter(user_major)
 
-        stage_started_at = time.perf_counter()
-        route = _resolve_retrieval_route(raw_query, analysis_meta)
-        _mark_stage(stage_timings, "routing", stage_started_at)
+        retrieval_plan = await _plan_retrieval(
+            raw_query=raw_query,
+            query_for_retrieval=query_for_retrieval,
+            analysis_meta=analysis_meta,
+            request_id=request_id,
+            session_id=session_id,
+            stage_timings=stage_timings,
+        )
+        route = retrieval_plan.route
+        ontology_document_keys_by_dataset = retrieval_plan.ontology_document_keys_by_dataset
+        structured_document_keys_by_dataset = retrieval_plan.structured_document_keys_by_dataset
 
         entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
         stage_started_at = time.perf_counter()
@@ -7668,6 +8721,9 @@ async def ask_stream(req: AskRequest, request: Request):
             active_notice_as_of=temporal_context.as_of if active_notice_query else None,
             current_operational_notice_terms=current_operational_notice_terms,
             allow_wise=allow_wise,
+            ontology_document_keys_by_dataset=ontology_document_keys_by_dataset,
+            structured_document_keys_by_dataset=structured_document_keys_by_dataset,
+            as_of=temporal_context.as_of,
         )
 
         if not frames and date_filter is not None and date_filter.relaxed_start and date_filter.relaxed_end:
@@ -7686,6 +8742,9 @@ async def ask_stream(req: AskRequest, request: Request):
                 active_notice_as_of=temporal_context.as_of if active_notice_query else None,
                 current_operational_notice_terms=current_operational_notice_terms,
                 allow_wise=allow_wise,
+                ontology_document_keys_by_dataset=ontology_document_keys_by_dataset,
+                structured_document_keys_by_dataset=structured_document_keys_by_dataset,
+                as_of=temporal_context.as_of,
             )
             if relaxed_frames:
                 frames = relaxed_frames
@@ -7731,6 +8790,11 @@ async def ask_stream(req: AskRequest, request: Request):
 
         topic_aligned = False
         min_score = retrieval_policy.min_score
+        structured_scoped = (
+            not merged.empty
+            and "structured_match" in merged.columns
+            and merged["structured_match"].fillna(0).eq(1).any()
+        )
 
         fallback_reason = None
         if merged.empty:
@@ -7747,6 +8811,10 @@ async def ask_stream(req: AskRequest, request: Request):
                 fallback_reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
             else:
                 fallback_reason = FALLBACK_REASON_NO_RESULTS
+        elif structured_scoped:
+            # Revision-checked SQL relation evidence already established the
+            # document scope. A zero dense score is expected on this path.
+            topic_aligned = True
         # RRF는 순위 합의도이므로 RRF 점수 자체가 아니라 원 dense/BM25 신호의
         # 하한을 본다. 최신/진행중/날짜표 조회는 결정적 구조화 경로라 제외한다.
         elif rag_config.HYBRID_FUSION_MODE == "rrf" and not (
@@ -8544,9 +9612,17 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     notice_visibility_filter = _notice_visibility_where_filter(user_major)
 
     _log_event(logging.INFO, "ask_filters", request_id=request_id, filters=final_where_filter)
-    stage_started_at = time.perf_counter()
-    route = _resolve_retrieval_route(raw_query, analysis_meta)
-    _mark_stage(stage_timings, "routing", stage_started_at)
+    retrieval_plan = await _plan_retrieval(
+        raw_query=raw_query,
+        query_for_retrieval=query_for_retrieval,
+        analysis_meta=analysis_meta,
+        request_id=request_id,
+        session_id=session_id,
+        stage_timings=stage_timings,
+    )
+    route = retrieval_plan.route
+    ontology_document_keys_by_dataset = retrieval_plan.ontology_document_keys_by_dataset
+    structured_document_keys_by_dataset = retrieval_plan.structured_document_keys_by_dataset
     entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
     stage_started_at = time.perf_counter()
     date_filter = await run_in_threadpool(
@@ -8580,6 +9656,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         active_notice_as_of=temporal_context.as_of if active_notice_query else None,
         current_operational_notice_terms=current_operational_notice_terms,
         allow_wise=allow_wise,
+        ontology_document_keys_by_dataset=ontology_document_keys_by_dataset,
+        structured_document_keys_by_dataset=structured_document_keys_by_dataset,
+        as_of=temporal_context.as_of,
     )
 
     if not frames and date_filter is not None and date_filter.relaxed_start and date_filter.relaxed_end:
@@ -8605,6 +9684,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             active_notice_as_of=temporal_context.as_of if active_notice_query else None,
             current_operational_notice_terms=current_operational_notice_terms,
             allow_wise=allow_wise,
+            ontology_document_keys_by_dataset=ontology_document_keys_by_dataset,
+            structured_document_keys_by_dataset=structured_document_keys_by_dataset,
+            as_of=temporal_context.as_of,
         )
         if relaxed_frames:
             frames = relaxed_frames
@@ -8651,6 +9733,11 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
 
         topic_aligned = False
         min_score = retrieval_policy.min_score
+        structured_scoped = (
+            not current_merged.empty
+            and "structured_match" in current_merged.columns
+            and current_merged["structured_match"].fillna(0).eq(1).any()
+        )
 
         reason = None
         if current_merged.empty:
@@ -8665,6 +9752,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
             else:
                 reason = FALLBACK_REASON_NO_RESULTS
+        elif structured_scoped:
+            # SQL relation evidence has no dense score by design.
+            topic_aligned = True
         elif rag_config.HYBRID_FUSION_MODE == "rrf" and not (
             recent_notice_query
             or active_notice_query
@@ -9251,6 +10341,7 @@ def _build_evaluation_fingerprint() -> dict[str, object]:
                 rag_config.ACTIVE_NOTICE_UNKNOWN_MAX_AGE_DAYS
             ),
             "single_query_retrieval": rag_config.RAG_SINGLE_QUERY_RETRIEVAL,
+            "structured_retrieval_enabled": rag_config.RAG_STRUCTURED_RETRIEVAL_ENABLED,
             "recency_weight": rag_config.RECENCY_WEIGHT,
             "hybrid_fusion_mode": rag_config.HYBRID_FUSION_MODE,
             "hybrid_rrf_k": rag_config.HYBRID_RRF_K,

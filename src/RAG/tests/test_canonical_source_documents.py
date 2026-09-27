@@ -53,5 +53,12 @@ def test_static_projection_is_backfilled_and_reloaded_from_source_documents(monk
     course_frame = ingest.load_canonical_source_frame(session, "courses")
     assert schedule_frame.iloc[0]["title"] == "개강"
     assert course_frame.iloc[0]["course_code"] == "C1"
+    course_document_key = (
+        session.query(db.SourceDocument.document_key)
+        .filter(db.SourceDocument.dataset == "courses")
+        .scalar()
+    )
+    course_chunks = ingest.build_course_chunks(course_frame)
+    assert set(course_chunks["doc_id"].astype(str)) == {course_document_key}
     assert session.query(db.SourceDocument).count() == 2
     session.close()

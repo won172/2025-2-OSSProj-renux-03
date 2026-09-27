@@ -58,8 +58,8 @@ def test_실패한_실행은_사유와_함께_기록된다(scheduler_module):
     assert jobs["refresh_meals"]["last_message"] == "connection timed out"
 
 
-def test_학식_수집_0건은_실패가_아니라_건너뜀으로_기록한다(scheduler_module, monkeypatch):
-    """0건 수집은 크롤 실패와 다르다 — 기존 인덱스를 보존한 정상 동작이므로 구분해 남긴다."""
+def test_학식_수집_0건은_부분실패와_원인코드로_기록한다(scheduler_module, monkeypatch):
+    """0건은 기존 인덱스를 보존하되 운영 경보가 필요한 부분 실패다."""
     import pandas as pd
 
     monkeypatch.setitem(
@@ -70,11 +70,25 @@ def test_학식_수집_0건은_실패가_아니라_건너뜀으로_기록한다(
     sys.modules["src.crawlers.dongguk_meals"].crawl_meals = lambda **_: pd.DataFrame()
     monkeypatch.setitem(sys.modules, "src.pipelines.ingest", type(sys)("src.pipelines.ingest"))
     sys.modules["src.pipelines.ingest"].ingest_meals = lambda df: (df, None, None)
+    finished: list[dict] = []
+    monkeypatch.setattr(scheduler_module, "_start_ingestion_run", lambda _dataset: 1)
+    monkeypatch.setattr(
+        scheduler_module,
+        "_finish_ingestion_run",
+        lambda _run_id, **kwargs: finished.append(kwargs),
+    )
 
     scheduler_module.refresh_meals_job()
 
     jobs = {job["id"]: job for job in scheduler_module.get_scheduler_status()["jobs"]}
-    assert jobs["refresh_meals"]["last_status"] == "skipped"
+    assert jobs["refresh_meals"]["last_status"] == "partial"
+    assert "empty_source" in jobs["refresh_meals"]["last_message"]
+    assert len(finished) == 1
+    assert finished[0]["status"] == "partial"
+    assert finished[0]["error"] == "empty_source: 수집 0건 — 기존 인덱스 보존"
+    assert finished[0]["outcome_code"] == "empty_source"
+    assert finished[0]["diagnostics"] == {}
+    assert finished[0]["source_structures"][0].source_name == "dining_api"
 
 
 # ---------------------------------------------------------------- 필터 파싱

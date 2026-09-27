@@ -84,20 +84,34 @@ def _dataset_report(
         for chunk_id, doc_id in zip(artifact_chunk_values, artifact_doc_values)
         if chunk_id
     }
+    artifact_revision_by_chunk = {
+        chunk_id: _identity(revision)
+        for chunk_id, revision in zip(
+            artifact_chunk_values,
+            frame.get("corpus_revision", pd.Series([""] * len(frame))).tolist(),
+        )
+        if chunk_id
+    }
 
     chroma_values, metadatas = collection_snapshot_loader(str(artifact.collection))
     chroma_ids = {value for value in chroma_values if value}
     metadata_missing = 0
     metadata_doc_id_mismatch = 0
+    metadata_revision_mismatch = 0
     for index, chunk_id in enumerate(chroma_values):
         metadata = metadatas[index] if index < len(metadatas) else None
         if not isinstance(metadata, dict):
             metadata_missing += 1
             metadata_doc_id = ""
+            metadata_values: dict[str, Any] = {}
         else:
+            metadata_values = metadata
             metadata_doc_id = _identity(metadata.get("doc_id"))
         if metadata_doc_id != artifact_parent_by_chunk.get(chunk_id, ""):
             metadata_doc_id_mismatch += 1
+        expected_revision = artifact_revision_by_chunk.get(chunk_id, "")
+        if expected_revision and _identity(metadata_values.get("corpus_revision")) != expected_revision:
+            metadata_revision_mismatch += 1
 
     source_artifact_delta = len(source_keys - artifact_doc_ids) + len(artifact_doc_ids - source_keys)
     artifact_chroma_delta = len(artifact_chunk_ids - chroma_ids) + len(chroma_ids - artifact_chunk_ids)
@@ -120,6 +134,7 @@ def _dataset_report(
         "chroma_missing_artifact": len(chroma_ids - artifact_chunk_ids),
         "chroma_metadata_missing": metadata_missing,
         "chroma_metadata_doc_id_mismatch": metadata_doc_id_mismatch,
+        "chroma_metadata_revision_mismatch": metadata_revision_mismatch,
     }
     violations = [
         {"dataset": dataset, "metric": metric, "count": count}
@@ -147,7 +162,7 @@ def _dataset_report(
                 len(artifact_chunk_ids | chroma_ids),
             ),
             "chroma_metadata_mismatch": _ratio(
-                metadata_doc_id_mismatch,
+                metadata_doc_id_mismatch + metadata_revision_mismatch,
                 len(chroma_values),
             ),
         },

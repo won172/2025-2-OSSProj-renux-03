@@ -1,11 +1,11 @@
 {
   "collections": {
     "dongguk_notices": {
-      "active": "dongguk_notices__build__notices-d8e39a9b11c7-d8ec766b",
-      "build_id": "notices-d8e39a9b11c7-d8ec766b",
-      "previous": "dongguk_notices",
-      "source_artifact_sha256": "d8e39a9b11c7237ebf844af0536393010a1a89b6bed68d1ea9d3ac5f45316f61",
-      "switched_at": "2026-08-13T03:25:24.221688+00:00"
+      "active": "dongguk_notices__build__notices-6bebbbe22c58-d8ec766b",
+      "build_id": "notices-6bebbbe22c58-d8ec766b",
+      "previous": "dongguk_notices__build__notices-d8e39a9b11c7-d8ec766b",
+      "source_artifact_sha256": "6bebbbe22c5879e269098d6a1229b61bdeab486a126a91b8a074a6303932a446",
+      "switched_at": "2026-09-21T09:47:03.447239+00:00"
     }
   },
   "schema_version": 1

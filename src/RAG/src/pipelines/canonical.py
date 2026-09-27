@@ -99,10 +99,27 @@ def source_document_key(dataset: str, source_id: str) -> str:
     return f"{dataset_text}:{source_text}"
 
 
+def validate_source_document_identity(
+    dataset: str,
+    source_id: str,
+    document_key: str,
+) -> str:
+    """Validate a persisted/projected key against the canonical contract."""
+    expected = source_document_key(dataset, source_id)
+    actual = str(document_key or "").strip()
+    if actual != expected:
+        raise ValueError(
+            f"canonical document identity mismatch for {dataset}: "
+            f"expected={expected!r} actual={actual!r}"
+        )
+    return expected
+
+
 __all__ = [
     "CANONICAL_PAYLOAD_SCHEMA_VERSION",
     "canonical_hash",
     "canonical_json",
     "normalize_payload",
     "source_document_key",
+    "validate_source_document_identity",
 ]

@@ -1,6 +1,8 @@
 """공지 수집/색인 누락 방지 회귀 테스트."""
 from __future__ import annotations
 
+import json
+
 from datetime import date
 import sys
 from pathlib import Path
@@ -219,6 +221,8 @@ def test_incomplete_crawl_never_hides_unseen_source_documents(monkeypatch):
         assert document.status == "active"
         assert document.miss_count == 0
         assert run.status == "partial_success"
+        assert run.outcome_code == "partial_boards"
+        assert json.loads(run.diagnostics_json)["incomplete_boards"] == ["일반공지"]
         assert "missing detection disabled" in str(run.error_summary)
         assert result.crawl_incomplete_boards == ["일반공지"]
     finally:
@@ -242,6 +246,8 @@ def test_pre_collection_failure_is_persisted_in_ingestion_history(monkeypatch):
         assert run.id == run_id
         assert run.dataset == "notices"
         assert run.status == "failed"
+        assert run.outcome_code == "upstream_unreachable"
+        assert json.loads(run.diagnostics_json)["error_type"] == "str"
         assert run.finished_at is not None
         assert run.error_summary == "crawl: all boards unreachable"
     finally:

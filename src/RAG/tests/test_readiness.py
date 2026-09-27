@@ -28,6 +28,7 @@ def _successful_dataset(key: str):
 def _prepare_successful_checks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rag_service, "_validate_required_configuration", lambda: "ok")
     monkeypatch.setattr(rag_service, "init_db", lambda: None)
+    monkeypatch.setattr(rag_service, "backfill_manual_notice_department_scopes", lambda: [])
     monkeypatch.setattr(rag_service, "verify_database_writable", lambda: None)
     monkeypatch.setattr(rag_service, "_ensure_dataset", _successful_dataset)
     monkeypatch.setattr(rag_service, "count_items", lambda _collection: 1)

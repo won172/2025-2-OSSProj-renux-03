@@ -139,8 +139,14 @@ def test_normalize_whitespace_still_breaks_sentences():
     assert normalize_whitespace("끝났다. 2026년에는 달라진다.") == "끝났다.\n2026년에는 달라진다."
 
 
-def test_normalize_whitespace_still_breaks_numbered_lists():
-    assert normalize_whitespace("1. 신청 대상 2. 신청 기간") == "1.\n신청 대상 2.\n신청 기간"
+def test_normalize_whitespace_keeps_list_markers_with_their_content():
+    """항목 번호는 내용과 같은 줄에 있어야 한다.
+
+    예전 동작은 "1.\n신청 대상 2.\n신청 기간"이었다. 항목 번호만 줄 끝에 남고
+    다음 항목("2.")이 앞 항목의 내용에 붙는다. 분할기가 줄 경계를 쓰기 때문에
+    "1."만 청크 끝에 남고 "신청 대상"은 다음 청크로 넘어갈 수 있었다.
+    """
+    assert normalize_whitespace("1. 신청 대상 2. 신청 기간") == "1. 신청 대상\n2. 신청 기간"
 
 
 def test_normalize_whitespace_breaks_after_a_phone_number_sentence():
@@ -149,3 +155,88 @@ def test_normalize_whitespace_breaks_after_a_phone_number_sentence():
         normalize_whitespace("문의: 02-2260-3699. 학사지원팀입니다.")
         == "문의: 02-2260-3699.\n학사지원팀입니다."
     )
+
+
+# ---------- 구조 보존 (회귀) ----------
+
+def test_normalize_whitespace_keeps_urls_and_emails_intact():
+    """URL의 구두점은 값의 일부다.
+
+    구두점 정규화가 URL을 통과하던 동안 공지 청크의 36.8%, 과목 청크의 95.6%에
+    "https: / / www. dongguk. edu/ apply? id=3" 형태로 깨진 링크가 들어갔다.
+    신청 링크는 공지 답변에서 학생이 가장 필요로 하는 값이다.
+    """
+    assert (
+        normalize_whitespace("신청: https://www.dongguk.edu/apply?id=3 에서 하세요")
+        == "신청: https://www.dongguk.edu/apply?id=3 에서 하세요"
+    )
+    assert (
+        normalize_whitespace("문의: haksa@dongguk.edu 로 보내주세요")
+        == "문의: haksa@dongguk.edu 로 보내주세요"
+    )
+
+
+def test_normalize_whitespace_preserves_paragraph_boundaries():
+    """분할기의 첫 구분자 ``"\n\n"``이 실제로 매치되어야 한다.
+
+    예전 구현은 ``\n{2,}``를 단일 ``\n``으로 눌러서 문단 경계가 입력에
+    남지 않았고, RecursiveCharacterTextSplitter의 문단 분할이 죽어 있었다.
+    """
+    out = normalize_whitespace("첫째 문단입니다.\n\n둘째 문단입니다.")
+    assert "\n\n" in out
+
+
+def test_normalize_whitespace_joins_hard_wraps_but_keeps_real_breaks():
+    """하드랩만 잇고 진짜 줄 경계는 남긴다.
+
+    공지 본문 줄바꿈 202,784개 중 67.9%는 하드랩이고 32.1%(65,026개)는 실제
+    경계다. 예전처럼 전부 공백으로 접으면 이 코퍼스에 남은 유일한 구조 신호가
+    사라진다.
+    """
+    # 앞줄이 문장부호 없이 끝나면 하드랩으로 보고 잇는다.
+    assert "\n" not in normalize_whitespace("장학금 신청 기간을\n안내드립니다")
+    # 앞줄이 종결되면 경계를 남긴다.
+    assert "\n" in normalize_whitespace("안내드립니다.\n신청 방법은 다음과 같습니다")
+    # 뒷줄이 새 항목으로 시작하면 경계를 남긴다.
+    assert "\n" in normalize_whitespace("대상은 다음과 같다\n- 재학생")
+
+
+def test_normalize_whitespace_is_idempotent():
+    """to_chunks → chunk_text 경로에서 두 번 적용되므로 결과가 안정해야 한다."""
+    sample = (
+        "모집 안내입니다.\n\n1. 대상: 재학생 2. 기간: 2026.03.02 ~ 03.10\n"
+        "신청은 https://www.dongguk.edu/apply?id=3 에서 합니다."
+    )
+    once = normalize_whitespace(sample)
+    assert normalize_whitespace(once) == once
+
+
+def test_strip_html_marks_block_boundaries_as_paragraphs():
+    """블록 경계는 인라인 분절과 구분되어야 normalize_whitespace가 판단할 수 있다."""
+    out = strip_html("<p>첫째 문단</p><p>둘째 문단</p>")
+    assert "\n\n" in out
+    # 인라인 태그는 문단 경계를 만들지 않는다.
+    assert "\n\n" not in strip_html("<p>굵은 <b>강조</b> 텍스트</p>").strip()
+
+
+def test_normalize_whitespace_keeps_korean_ordinals_with_their_content():
+    """공문서의 "가. / 나." 순서표도 숫자 번호와 같은 규칙을 따라야 한다.
+
+    예전 동작에서는 "…말한다. 가. 이사장"과 "가. 2026-1학기"가 모두 "가."만 줄
+    끝에 남기고 내용과 갈라졌다(공지·학칙 샘플에서 6,145곳).
+    """
+    assert (
+        normalize_whitespace("다음 각 목을 말한다. 가. 이사장 나. 교직원")
+        == "다음 각 목을 말한다.\n가. 이사장\n나. 교직원"
+    )
+    assert normalize_whitespace("지원자격 가. 2026-1학기 재학생") == "지원자격\n가. 2026-1학기 재학생"
+    # 항목 번호만 남은 줄은 다음 줄의 내용과 붙는다.
+    assert normalize_whitespace("가.\n명칭: 현장체험 프로그램") == "가. 명칭: 현장체험 프로그램"
+
+
+def test_normalize_whitespace_does_not_treat_dates_or_words_as_list_items():
+    """날짜("5.4.")와 약어("석.")는 새 항목이 아니므로 앞줄과 잇는다."""
+    assert "\n" not in normalize_whitespace("신청기한\n5.4. (월)17:00까지")
+    assert normalize_whitespace("모집 과정은\n석. 박사 과정").startswith("모집 과정은 석.")
+    # 콜론으로 끝난 라벨은 값과 같은 줄에 남는다.
+    assert normalize_whitespace("모집기간:\n2026.05.10까지") == "모집기간: 2026.05.10까지"

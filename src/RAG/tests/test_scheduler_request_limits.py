@@ -11,7 +11,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.crawlers import dongguk_meals, dongguk_notices  # noqa: E402
+from src.crawlers import dongguk_meals, dongguk_notices, dongguk_staff_contacts  # noqa: E402
 from src.services import scheduler  # noqa: E402
 
 
@@ -173,6 +173,27 @@ def test_dflex_fetches_share_the_explicit_request_limits(monkeypatch):
     ]
 
 
+def test_staff_crawl_passes_timeout_to_tree_and_each_department(monkeypatch):
+    calls: list[tuple[str, float]] = []
+
+    def tree(*, timeout):
+        calls.append(("tree", timeout))
+        return [{"id": "dept-1", "parent": "#", "text": "교무팀"}]
+
+    def staff(_dept_seq, *, timeout):
+        calls.append(("staff", timeout))
+        return [{"staff_seq": "1", "staff_name": "김**", "telephone": "1234"}]
+
+    monkeypatch.setattr(dongguk_staff_contacts, "fetch_dept_tree", tree)
+    monkeypatch.setattr(dongguk_staff_contacts, "fetch_staff_for_dept", staff)
+
+    frame = dongguk_staff_contacts.crawl_staff_contacts(delay=0, request_timeout=4.5)
+
+    assert calls == [("tree", 4.5), ("staff", 4.5)]
+    assert frame["원천ID"].tolist() == ["1"]
+    assert frame.attrs["crawl_diagnostics"]["failed_departments"] == 0
+
+
 def test_scheduler_jobs_pass_and_log_configured_request_limits(monkeypatch, caplog):
     calls: dict[str, dict] = {}
 
@@ -203,6 +224,8 @@ def test_scheduler_jobs_pass_and_log_configured_request_limits(monkeypatch, capl
     monkeypatch.setattr(scheduler, "RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS", 8.0)
     monkeypatch.setattr(scheduler, "RAG_SCHEDULER_REQUEST_RETRIES", 2)
     monkeypatch.setattr(scheduler, "_refresh_runtime_dataset_state", lambda _dataset: None)
+    monkeypatch.setattr(scheduler, "_start_ingestion_run", lambda _dataset: 1)
+    monkeypatch.setattr(scheduler, "_finish_ingestion_run", lambda *_args, **_kwargs: None)
 
     with caplog.at_level(logging.INFO, logger=scheduler.__name__):
         scheduler.refresh_notices_job()

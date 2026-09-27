@@ -379,6 +379,10 @@ def crawl_meals(
 
     records: List[dict] = []
     failed = 0
+    fetched = 0
+    parsed_days_with_rows = 0
+    parse_empty_days = 0
+    failure_types: dict[str, int] = {}
     cur = start
     while cur <= end:
         try:
@@ -387,10 +391,17 @@ def crawl_meals(
                 timeout=request_timeout,
                 retries=request_retries,
             )
+            fetched += 1
             day_records = parse_day_menus(html, cur)
+            if day_records:
+                parsed_days_with_rows += 1
+            else:
+                parse_empty_days += 1
             records.extend(day_records)
         except Exception as exc:  # noqa: BLE001 — 하루 실패가 전체 수집을 막지 않도록
             failed += 1
+            failure_name = type(exc).__name__
+            failure_types[failure_name] = failure_types.get(failure_name, 0) + 1
             print(f"⚠️ 식단 수집 실패 ({cur}): {exc}")
         if delay:
             time.sleep(delay)
@@ -400,6 +411,7 @@ def crawl_meals(
         print(f"⚠️ 식단 수집 실패 {failed}일치 (수집 레코드 {len(records)}건)")
 
     # D-Flex(경영관) 주간 PDF 식단표 병합 — 수집 윈도우([start, end]) 안의 날짜만.
+    dflex_record_count = 0
     if include_dflex:
         try:
             dflex_records = crawl_dflex_meals(
@@ -407,6 +419,7 @@ def crawl_meals(
                 request_timeout=request_timeout,
                 request_retries=request_retries,
             )
+            dflex_record_count = len(dflex_records)
             for rec in dflex_records:
                 try:
                     rec_date = datetime.strptime(rec["date"], "%Y-%m-%d").date()
@@ -418,13 +431,26 @@ def crawl_meals(
             print(f"⚠️ D-Flex 식단 병합 실패: {exc}")
 
     columns = ["date", "weekday", "restaurant", "menu_text", "is_closed"]
+    requested_days = (end - start).days + 1
+    diagnostics = {
+        "requested_days": requested_days,
+        "fetched_days": fetched,
+        "fetch_failed_days": failed,
+        "parsed_days_with_rows": parsed_days_with_rows,
+        "parse_empty_days": parse_empty_days,
+        "failure_types": failure_types,
+        "dflex_record_count": dflex_record_count,
+    }
     if not records:
-        return pd.DataFrame(columns=columns)
+        empty = pd.DataFrame(columns=columns)
+        empty.attrs["crawl_diagnostics"] = diagnostics
+        return empty
     df = pd.DataFrame(records)[columns]
     # (날짜, 식당) 중복 제거 후 정렬.
     df.drop_duplicates(subset=["date", "restaurant"], keep="first", inplace=True)
     df.sort_values(by=["date", "restaurant"], inplace=True)
     df.reset_index(drop=True, inplace=True)
+    df.attrs["crawl_diagnostics"] = diagnostics
     return df
 
 

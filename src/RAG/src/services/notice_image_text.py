@@ -131,18 +131,29 @@ def collect_notice_image_text(
         known = {}
     results: list[NoticeImageText] = []
     urls = extract_official_image_urls(content_html, detail_url=detail_url)
-    for image_url in urls[: config.RAG_NOTICE_IMAGE_OCR_MAX_IMAGES]:
+    ocr_calls = 0
+    # 캐시 조회 범위와 유료 OCR 범위는 다르다. 캐시에 있으면 크기·순서와 무관하게
+    # 쓰고, 캐시 미스만 OCR 상한(장수·바이트) 안에서 모델로 전사한다.
+    for image_url in urls[: config.RAG_NOTICE_IMAGE_CACHE_MAX_IMAGES]:
         try:
             response = http_get(image_url, timeout=timeout)
             payload, content_type = _response_image_bytes(
                 response,
-                max_bytes=config.RAG_NOTICE_IMAGE_OCR_MAX_BYTES,
+                max_bytes=config.RAG_NOTICE_IMAGE_DOWNLOAD_MAX_BYTES,
             )
             digest = hashlib.sha256(payload).hexdigest()
             cached = known.get(digest) or {}
             text = str(cached.get("text") or "").strip()
-            method = "verified_sha256_cache" if text else ""
-            if not text and config.RAG_NOTICE_IMAGE_OCR_ENABLED:
+            # 캐시 레코드가 전사 방식을 기록하면 그대로 쓴다. 백필 스크립트가 쓴 본문과
+            # 재수집 결과가 글자 단위로 같아야 content_hash가 흔들리지 않는다.
+            method = str(cached.get("method") or "verified_sha256_cache") if text else ""
+            if (
+                not text
+                and config.RAG_NOTICE_IMAGE_OCR_ENABLED
+                and ocr_calls < config.RAG_NOTICE_IMAGE_OCR_MAX_IMAGES
+                and len(payload) <= config.RAG_NOTICE_IMAGE_OCR_MAX_BYTES
+            ):
+                ocr_calls += 1
                 text = _transcribe_with_openai(
                     payload,
                     content_type,

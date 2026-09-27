@@ -67,9 +67,11 @@ def test_intent_scoped_route_is_used_by_both_endpoints(monkeypatch):
 
     ask_source = inspect.getsource(rag_service.ask)
     stream_source = inspect.getsource(rag_service.ask_stream)
+    plan_source = inspect.getsource(rag_service._plan_retrieval)
 
-    assert "_resolve_retrieval_route(" in ask_source
-    assert "_resolve_retrieval_route(" in stream_source
+    assert "await _plan_retrieval(" in ask_source
+    assert "await _plan_retrieval(" in stream_source
+    assert "_resolve_retrieval_route(" in plan_source
     assert "_routerless_retrieval_route()" not in ask_source
     assert "_routerless_retrieval_route()" not in stream_source
     assert "_select_answer_evidence" in ask_source

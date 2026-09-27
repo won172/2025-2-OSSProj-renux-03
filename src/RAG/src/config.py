@@ -161,6 +161,13 @@ RAG_NOTICE_IMAGE_OCR_MAX_BYTES = int(
 RAG_NOTICE_IMAGE_OCR_MIN_TEXT_CHARS = int(
     os.getenv("RAG_NOTICE_IMAGE_OCR_MIN_TEXT_CHARS", "20")
 )
+# 캐시 조회는 유료 OCR 호출과 분리한다. 로컬 백필로 채운 SHA 캐시에는 3장째 이후
+# 이미지와 5MB가 넘는 원본 포스터도 들어 있어서, 재수집이 OCR 상한(2장·5MB)을
+# 캐시 조회에까지 적용하면 이미 확보한 전사문이 조용히 사라진다.
+RAG_NOTICE_IMAGE_CACHE_MAX_IMAGES = int(os.getenv("RAG_NOTICE_IMAGE_CACHE_MAX_IMAGES", "6"))
+RAG_NOTICE_IMAGE_DOWNLOAD_MAX_BYTES = int(
+    os.getenv("RAG_NOTICE_IMAGE_DOWNLOAD_MAX_BYTES", str(32 * 1024 * 1024))
+)
 RAG_SEMANTIC_CACHE_ENABLED = os.getenv("RAG_SEMANTIC_CACHE_ENABLED", "0") == "1"
 RAG_SEMANTIC_CACHE_THRESHOLD = float(os.getenv("RAG_SEMANTIC_CACHE_THRESHOLD", "0.97"))
 RAG_SEMANTIC_CACHE_TTL_SECONDS = int(os.getenv("RAG_SEMANTIC_CACHE_TTL_SECONDS", "1800"))
@@ -195,6 +202,14 @@ OPENAI_CHAT_MAX_RETRIES = int(os.getenv("OPENAI_CHAT_MAX_RETRIES", "2"))
 # Keep these values aligned with the billing page for the deployed model.
 OPENAI_CHAT_INPUT_COST_PER_1M = float(os.getenv("OPENAI_CHAT_INPUT_COST_PER_1M", "0"))
 OPENAI_CHAT_OUTPUT_COST_PER_1M = float(os.getenv("OPENAI_CHAT_OUTPUT_COST_PER_1M", "0"))
+# 프롬프트 캐시 히트분(usage의 cached_tokens) 단가. 0이면 일반 입력 단가로 계산해
+# 기존 추정치와 같게 유지한다.
+OPENAI_CHAT_CACHED_INPUT_COST_PER_1M = float(
+    os.getenv("OPENAI_CHAT_CACHED_INPUT_COST_PER_1M", "0")
+)
+# OpenAI 자동 프롬프트 캐싱은 prefix가 같은 요청이 같은 서버로 갈 때만 적중한다.
+# 단계별 고정 키(<prefix>-<stage>)를 붙여 라우팅을 모은다. 빈 값이면 키를 보내지 않는다.
+OPENAI_PROMPT_CACHE_KEY_PREFIX = os.getenv("OPENAI_PROMPT_CACHE_KEY_PREFIX", "dongttok").strip()
 
 # 답변 생성용 로컬(Ollama) 모델 설정.
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -235,6 +250,50 @@ RAG_STREAM_BUFFER_UNTIL_GROUNDED = (
 RAG_SEARCH_ALL_DATASETS = os.getenv("RAG_SEARCH_ALL_DATASETS", "0") == "1"
 # 검색 시 질문을 여러 서브쿼리로 펼치지 않고, 사용자 질문 1개로만 검색한다.
 RAG_SINGLE_QUERY_RETRIEVAL = os.getenv("RAG_SINGLE_QUERY_RETRIEVAL", "1") == "1"
+# Exact, single-dataset relationship questions try the revision-checked SQLite
+# projection before lexical/vector retrieval. Missing or stale evidence falls
+# back to the ordinary hybrid path.
+RAG_STRUCTURED_RETRIEVAL_ENABLED = os.getenv("RAG_STRUCTURED_RETRIEVAL_ENABLED", "1") == "1"
+# 온톨로지 shadow는 기존 검색과 독립적으로 후보를 관찰한다. candidate blend는
+# 별도 flag이며 기본 비활성이다. 켜더라도 검증된 route와 작은 문서 quota 안에서만
+# 기존 필터/evidence selector 앞 shortlist에 후보를 추가한다.
+RAG_ONTOLOGY_SHADOW_ENABLED = os.getenv("RAG_ONTOLOGY_SHADOW_ENABLED", "0") == "1"
+RAG_ONTOLOGY_CANDIDATES_ENABLED = (
+    os.getenv("RAG_ONTOLOGY_CANDIDATES_ENABLED", "0") == "1"
+)
+_ONTOLOGY_CANDIDATE_DATASETS = {"notices", "rules", "schedule"}
+RAG_ONTOLOGY_CANDIDATE_DATASETS = tuple(
+    dataset
+    for dataset in (
+        item.strip()
+        for item in os.getenv(
+            "RAG_ONTOLOGY_CANDIDATE_DATASETS",
+            "rules,schedule,notices",
+        ).split(",")
+    )
+    if dataset in _ONTOLOGY_CANDIDATE_DATASETS
+)
+RAG_ONTOLOGY_CANDIDATE_DOCUMENTS_PER_DATASET = min(
+    3,
+    max(
+        1,
+        int(os.getenv("RAG_ONTOLOGY_CANDIDATE_DOCUMENTS_PER_DATASET", "2")),
+    ),
+)
+# 첫 운영 실험에서는 기존 dataset shortlist 세 자리 중 관계 후보가 강제로
+# 차지할 수 있는 자리를 하나로 고정한다. 나머지 관계 문서는 중복 확인과
+# temporal/lexical 우선순위 계산에만 사용한다.
+RAG_ONTOLOGY_CANDIDATE_SLOTS_PER_DATASET = min(
+    1,
+    max(
+        1,
+        int(os.getenv("RAG_ONTOLOGY_CANDIDATE_SLOTS_PER_DATASET", "1")),
+    ),
+)
+RAG_ONTOLOGY_MAX_HOPS = min(2, max(1, int(os.getenv("RAG_ONTOLOGY_MAX_HOPS", "2"))))
+RAG_ONTOLOGY_MAX_ENTITIES = max(1, int(os.getenv("RAG_ONTOLOGY_MAX_ENTITIES", "8")))
+RAG_ONTOLOGY_MAX_RELATIONS = max(1, int(os.getenv("RAG_ONTOLOGY_MAX_RELATIONS", "100")))
+RAG_ONTOLOGY_MAX_DOCUMENTS = max(1, int(os.getenv("RAG_ONTOLOGY_MAX_DOCUMENTS", "50")))
 # 하이브리드 검색은 이 개수의 결과를 데이터셋별 후단 정렬에 넘긴다. 내부 dense/sparse
 # 후보는 5배(기본 100개)까지 모으므로 recency가 top-k 절단 전에 개입할 여지가 생긴다.
 RAG_RETRIEVAL_TOP_K_PER_DATASET = int(
@@ -377,6 +436,8 @@ __all__ = [
     "RAG_NOTICE_IMAGE_OCR_MAX_IMAGES",
     "RAG_NOTICE_IMAGE_OCR_MAX_BYTES",
     "RAG_NOTICE_IMAGE_OCR_MIN_TEXT_CHARS",
+    "RAG_NOTICE_IMAGE_CACHE_MAX_IMAGES",
+    "RAG_NOTICE_IMAGE_DOWNLOAD_MAX_BYTES",
     "RAG_SEMANTIC_CACHE_ENABLED",
     "RAG_SEMANTIC_CACHE_THRESHOLD",
     "RAG_SEMANTIC_CACHE_TTL_SECONDS",
@@ -393,6 +454,8 @@ __all__ = [
     "OPENAI_CHAT_MAX_RETRIES",
     "OPENAI_CHAT_INPUT_COST_PER_1M",
     "OPENAI_CHAT_OUTPUT_COST_PER_1M",
+    "OPENAI_CHAT_CACHED_INPUT_COST_PER_1M",
+    "OPENAI_PROMPT_CACHE_KEY_PREFIX",
     "OLLAMA_BASE_URL",
     "OLLAMA_CHAT_MODEL",
     "OLLAMA_CHAT_TEMPERATURE",
