@@ -434,18 +434,48 @@ def refresh_notices_job() -> None:
                 df.attrs.update(crawl_attrs)
         except Exception as exc:  # noqa: BLE001 - 공지 전체 갱신은 도서관 API와 독립적이다.
             logger.warning("[scheduler] 도서관 운영시간 병합 실패 — 공지만 갱신: %s", exc)
-        summary = sync_notices(df, allow_missing_detection=False, mode="full-sync")
+        # 증분 목록은 앞쪽 페이지만 보므로, 사이트에서 삭제된 최근 공지는 설정된
+        # 삭제 감지(RAG_NOTICE_DELETION_CHECK_MODE, 기본 off)로만 확인된다.
+        summary = sync_notices(
+            df,
+            allow_missing_detection=False,
+            mode="full-sync",
+            deletion_check=True,
+        )
         _refresh_runtime_dataset_state("notices")
         logger.info(
-            "[scheduler] 공지 갱신 완료 seen=%s new=%s updated=%s deleted=%s failed=%s incomplete_boards=%s",
+            "[scheduler] 공지 갱신 완료 seen=%s new=%s updated=%s deleted=%s failed=%s incomplete_boards=%s "
+            "deletion_checked=%s deletion_strike_1=%s deletion_confirmed=%s deletion_unknown=%s deletion_capped=%s",
             summary.get("seen"), summary.get("new"), summary.get("updated"),
             summary.get("deleted"), summary.get("failed"), summary.get("incomplete_boards"),
+            summary.get("deletion_checked"), summary.get("deletion_strike_1"),
+            summary.get("deletion_confirmed"), summary.get("deletion_unknown"),
+            summary.get("deletion_capped"),
         )
+        message = (
+            f"신규 {summary.get('new', 0)} · 수정 {summary.get('updated', 0)} · "
+            f"실패 {summary.get('failed', 0)} · 미완료 게시판 {summary.get('incomplete_boards', 0)}"
+        )
+        if summary.get("deletion_checked"):
+            message += (
+                f" · 삭제확인 {summary.get('deletion_checked', 0)}"
+                f"(확정 {summary.get('deletion_confirmed', 0)})"
+            )
+        # enforce 모드의 상한 초과만 운영 경보 대상이다. dry_run은 아무것도 적용하지
+        # 않으므로 기록만 남기고 실행 상태·webhook에는 영향을 주지 않는다.
+        deletion_capped_enforced = bool(
+            summary.get("deletion_capped") and summary.get("deletion_enforce")
+        )
+        if deletion_capped_enforced:
+            message += " · 삭제 감지 안전 상한 초과(미적용)"
+        elif summary.get("deletion_capped"):
+            message += " · 삭제 감지 dry_run 상한 초과"
         _record_run(
             "refresh_notices",
-            "partial" if summary.get("incomplete_boards") else "ok",
-            f"신규 {summary.get('new', 0)} · 수정 {summary.get('updated', 0)} · "
-            f"실패 {summary.get('failed', 0)} · 미완료 게시판 {summary.get('incomplete_boards', 0)}",
+            "partial"
+            if summary.get("incomplete_boards") or deletion_capped_enforced
+            else "ok",
+            message,
         )
         _start_faq_draft_worker()
     except Exception as exc:  # noqa: BLE001 — 한 번의 실패가 스케줄러를 죽이지 않도록
