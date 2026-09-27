@@ -27,6 +27,7 @@ jobs:
           cache-dependency-path: src/RenuxServer/wwwroot/frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build
 
   backend:
@@ -41,6 +42,11 @@ jobs:
           dotnet-version: 9.0.x
       - run: dotnet restore RenuxServer.sln
       - run: dotnet build RenuxServer.sln --configuration Release --no-restore
+      # 계약 테스트 프로젝트는 RenuxServer.sln에 포함되지 않으므로 --no-build/--no-restore를
+      # 쓸 수 없다. dotnet run이 테스트 프로젝트만 restore·build하고, 참조하는
+      # RenuxServer는 위 Release 빌드 결과를 증분 재사용한다. 실패 시 non-zero로 종료한다.
+      - name: Run backend contract tests
+        run: dotnet run --project Tests/RenuxServer.ContractTests.csproj --configuration Release
 
   rag-python:
     runs-on: ubuntu-latest
