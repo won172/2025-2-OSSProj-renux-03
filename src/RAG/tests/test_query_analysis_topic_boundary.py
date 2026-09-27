@@ -93,7 +93,7 @@ async def test_analysis_hides_history_when_previous_topic_does_not_overlap(monke
                 "parsing_error": None,
             }
 
-    monkeypatch.setattr(query_analysis, "analysis_chain", FakeChain())
+    monkeypatch.setattr(query_analysis, "_build_analysis_chain", FakeChain)
     result = await query_analysis.analyze_query(
         "샤갈",
         "사용자: 현재 모집 중인 공모전 알려줘\n동똑이: 코오롱 챌린지입니다.",
