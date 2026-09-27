@@ -85,3 +85,18 @@ def _운영_유지보수_잠금_보호(tmp_path_factory, monkeypatch):
     임시 = tmp_path_factory.mktemp("maintenance") / ".rag-maintenance.lock"
     monkeypatch.setenv(MAINTENANCE_LOCK_ENV, str(임시))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _질의분석_체인_초기화():
+    """질의분석 체인 싱글턴을 테스트 전후로 비운다.
+
+    테스트는 `query_analysis._build_analysis_chain`을 가짜 factory로 바꿔 주입한다.
+    이전 테스트의 가짜 체인이 캐시에 남으면 다음 테스트가 그것을 받거나, 순서에 따라
+    실제 ChatOpenAI 체인을 받게 된다. 전후로 비워 실행 순서와 무관하게 만든다.
+    """
+    from src.services import query_analysis
+
+    query_analysis.reset_analysis_chain()
+    yield
+    query_analysis.reset_analysis_chain()
