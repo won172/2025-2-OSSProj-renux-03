@@ -59,8 +59,8 @@ Last Updated: 2026-09-27
 
 ## Task Board
 
-멀티 agent 작업의 handoff 표. **Orchestrator만 갱신한다.** 구현·QA agent는 Completion Report로
-결과를 전달하고 이 표를 직접 수정하지 않는다. 절차는 [AGENTS.md](../AGENTS.md),
+멀티 agent 작업의 handoff 표. **Orchestrator가 일괄 갱신 PR(`docs/status-*`)로만 갱신한다.**
+task PR과 구현·QA agent는 이 문서를 수정하지 않고, 결과는 Completion Report로 전달한다. 절차는 [AGENTS.md](../AGENTS.md),
 [CLAUDE.md](../CLAUDE.md)를 따른다.
 
 Status 값:
@@ -80,6 +80,7 @@ Status 값:
 | CI에 RAG 무작위 순서 pytest 단계 추가 | P0 후속 | RAG/Backend (CI) | `chore/ci-random-order` | `ci-random-order` | Review | 로컬: 순서 고정 2단계·무작위(seed 12345) 976 passed/1 skipped. Orchestrator 재검증: seed 987654 동일 | `pytest-randomly==5.0.0`은 `requirements-dev.txt`에만. 설치 시 로컬 기본 실행도 무작위가 되므로 `-p no:randomly` 필요. 재실행은 같은 seed 사용 | merge 승인 대기 |
 | 질의분석 체인 주입 지점 통일·싱글턴 초기화 (pipeline-audit 03 P0) | P0 | RAG/Backend | `refactor/query-analysis-chain` | `query-analysis-chain` | Review | 978 passed/1 skipped (일반·빈 DB, seed 1/2/3). 프롬프트·모델 설정·structured output kwargs가 origin/main과 동일함을 해시로 확인. Orchestrator 재검증: seed 555111·순서 고정 동일 | 공개 `analysis_chain` 제거, 주입 지점은 `_build_analysis_chain` 하나. `reset_analysis_chain()`은 공개 함수(현재 conftest만 호출) | merge 승인 대기. 다음: audit 03 공통 `QueryPlan` |
 | grounding 미검사를 통과로 표시하지 않도록 `verification_status` 4상태 도입 (pipeline-audit 04 P0) | P0 | RAG/Backend | `fix/grounding-verification-status` | `grounding-verification-status` | Review | 로컬(2026-09-27): 신규 22개 포함 전체 RAG 1000 passed/1 skipped(일반·빈 DB). Orchestrator 재검증: 순서 고정 동일, 무작위 seed 424242(빈 DB) 동일. 독립 QA APPROVE(모든 terminal 경로 12+12개 status 명시 확인) | RAG 측만 변경. C#·프런트는 아직 `grounded`만 읽으며 stale 직접응답은 이제 `grounded=null`. 캐시는 passed만 기록하나 기존 미검증 캐시 항목은 `unavailable`로 제공됨(캐시 기본 OFF, namespace 미변경). 검증기 장애·비활성 시 캐시 미기록. 실제 endpoint 답변 비교 미확인 | merge 승인 대기. 후속: C#·프런트 `verification_status` 전달·표시 task |
+| 골든 후보 평가를 fail-closed 릴리스 gate로 전환 (pipeline-audit 07 P0) | P0 | RAG/Backend (CI) | `chore/golden-release-gate` | `golden-release-gate` | Review | 로컬(2026-09-27): gate 테스트 74 passed, 전체 RAG 1019 passed/1 skipped(일반·빈 DB). Orchestrator 재검증: 순서 고정 동일, 무작위 seed 424242(빈 DB) 동일, dispatch·URL 없음 exit 1 / PR·URL 없음 exit 0. 독립 QA APPROVE(minor 4건 반영) | workflow_dispatch 실제 실행은 후보 endpoint가 없어 미실행(릴리스 증거 아님). threshold 0.75/0.80/0.70/0.80 유지(감사 권고 0.85는 human 결정). PR run에 secret이 있으면 merge ref와 build_revision 불일치로 실패할 수 있음(기존 동작) | merge 승인 대기. 이후 후보 endpoint 승인 시 전체 190문항 실행 |
 
 Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 완료된 행은 다음 갱신 때 Recently Completed로 옮긴다.
@@ -187,6 +188,9 @@ Next Action:
   로컬 HTTP 테스트를 위한 소켓 권한을 허용한 재실행 결과다.
 - 9월 27일 CI가 프런트 `npm test`와 백엔드 계약 테스트를 실제 실행 (PR #8, pipeline-audit P0).
 - 9월 27일 멀티 agent 개발 규칙(AGENTS.md, CLAUDE.md, Task Board) 도입 (PR #7).
+- 9월 27일 RAG 테스트 순서 독립성 검증 및 실제 Chroma·유지보수 잠금 격리 (PR #10).
+- 9월 27일 CI에 RAG 무작위 순서 pytest 단계 추가, `requirements-dev.txt` 도입 (PR #11).
+- 9월 27일 질의분석 체인 주입 지점 통일·싱글턴 초기화·동시 첫 생성 잠금 (PR #12).
 
 ## Agent Tasks
 
