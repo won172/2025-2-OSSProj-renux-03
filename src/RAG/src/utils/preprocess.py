@@ -6,7 +6,7 @@ import html as html_module
 import re
 import unicodedata
 from datetime import datetime, date
-from typing import Any, Iterable, List, Optional
+from typing import Any, Callable, Iterable, List, Optional
 
 from pandas import DataFrame
 
@@ -338,19 +338,193 @@ def chunk_text(text: str, size: int, overlap: int) -> List[str]:
         return segments
 
 
+# --- 규정 조문 분할 ---------------------------------------------------------
+#
+# 학칙·규정은 조문(제N조)이 자연스러운 검색 단위다. 고정 길이 분할은 청크의
+# 86%를 문장 중간에서 시작하게 만들어, 특정 조문 질의에서 조문이 반토막 나거나
+# 인접 조문과 섞였다(pipeline-audit 09 P0-3).
+#
+# 조문 시작 판정 휴리스틱(본문 속 참조 "제5조에 따라"를 경계로 오인하지 않기 위함):
+#   1. 후보는 ``제N조``, ``제N조의M``, 그리고 ``제N장``/``제N절`` 제목이다.
+#   2. 후보 바로 뒤(괄호 제목이 있으면 그 뒤)가 참조형 조사·연결어
+#      ("에 따라", "에서 정한", "의 규정", "를", "및", "제M항" 등)로 이어지면 참조다.
+#   3. 줄 머리에 있는 조 후보는 2만 통과하면 경계다.
+#   4. 줄 중간(원문 대부분이 줄바꿈 없는 한 줄이다)의 조 후보는 괄호 제목
+#      ``제12조(수강신청)``이 붙어 있어야 하고, 바로 앞이 ``「…」``·``법``·``령``·
+#      ``동``·``같은``·여는 괄호가 아니어야 한다(외부 법령·괄호 속 인용 배제).
+#      괄호 제목 뒤가 ``의 ``/``로 ``/``는 ``/``에도 ``(조사+공백)이면, 바로 앞이
+#      문장 종결 부호가 아닌 한 참조로 본다.
+#   5. 장·절 후보는 뒤에 공백과 제목 단어가 와야 하며, 독립 청크가 되지 않고
+#      다음 조문 앞에 붙는다.
+# 조 경계가 하나도 없으면 기존 ``chunk_text`` 분할을 그대로 쓴다.
+_RULE_MARKER_RE = re.compile(
+    r"제[^\S\n]*(?P<num>\d+)[^\S\n]*"
+    r"(?:(?P<article>조(?:[^\S\n]*의[^\S\n]*\d+)?)|(?P<heading>[장절]))"
+)
+_RULE_TITLE_RE = re.compile(r"[^\S\n]*\([^()\n]{1,40}\)")
+_RULE_REFERENCE_SUFFIX_RE = re.compile(
+    r"^[^\S\n]*(?:"
+    r"에[^\S\n]*(?:따|의|서|규정|정|해당|불구|준|관한|대한|의한)"
+    r"|의[^\S\n]*(?:규정|규칙|요건|기준|절차|내용|적용|각|개정)"
+    r"|제[^\S\n]*\d+[^\S\n]*[항호]"
+    r"|(?:를|을|과|와|및|또는|부터|까지|내지|중|에)(?![가-힣])"
+    r"|[,·ㆍ~∼]"
+    r")"
+)
+_RULE_REFERENCE_PREFIX_RE = re.compile(r"(?:」|법|령|동|같은|[(\[「『])[^\S\n]*$")
+_RULE_HEADING_FOLLOW_RE = re.compile(r"[^\S\n]+[가-힣]")
+# 줄 중간의 ``제N조(제목)`` 뒤에 조사+공백이 오면 참조다
+# ("4 제51조(학사과정의 수료와 졸업)의 졸업학점 개정내용은…",
+# "제65조의 2(징계의결에 관한 특례)의 신설내용"). 실제 조문은 괄호 제목 뒤에
+# 곧바로 본문이 오므로(``제1조(목적)이 법인은…``) ``이``는 넣지 않는다.
+_RULE_MIDLINE_TITLE_PARTICLE_RE = re.compile(r"^(?:의|로|는|에도)[^\S\n]")
+_RULE_SENTENCE_END_RE = re.compile(r"[.!?。][^\S\n]*$")
+
+
+def _is_line_start(text: str, pos: int) -> bool:
+    before = text[:pos].rstrip(" \t")
+    return not before or before.endswith("\n")
+
+
+def _rule_article_boundaries(text: str) -> List[tuple[int, str, str]]:
+    """``(시작 위치, 종류, 조문 제목)`` 목록. 종류는 ``article`` 또는 ``heading``."""
+    boundaries: List[tuple[int, str, str]] = []
+    for match in _RULE_MARKER_RE.finditer(text):
+        start, end = match.start(), match.end()
+        line_start = _is_line_start(text, start)
+        after = text[end:]
+        if match.group("heading"):
+            if _RULE_REFERENCE_SUFFIX_RE.match(after):
+                continue
+            if not _RULE_HEADING_FOLLOW_RE.match(after):
+                continue
+            if not line_start and _RULE_REFERENCE_PREFIX_RE.search(text[:start]):
+                continue
+            boundaries.append((start, "heading", ""))
+            continue
+
+        title_match = _RULE_TITLE_RE.match(after)
+        rest = after[title_match.end():] if title_match else after
+        if _RULE_REFERENCE_SUFFIX_RE.match(rest):
+            continue
+        if not line_start:
+            if not title_match:
+                continue
+            if _RULE_REFERENCE_PREFIX_RE.search(text[:start]):
+                continue
+            if _RULE_MIDLINE_TITLE_PARTICLE_RE.match(rest) and not _RULE_SENTENCE_END_RE.search(
+                text[:start]
+            ):
+                continue
+        heading = re.sub(r"\s+", "", match.group(0))
+        if title_match:
+            heading += title_match.group(0).strip()
+        boundaries.append((start, "article", heading))
+    return boundaries
+
+
+def split_rule_articles(
+    text: str,
+    size: int,
+    overlap: int,
+    *,
+    min_segment_chars: int = 40,
+) -> List[str]:
+    """규정 본문을 조문 경계로 1차 분할하고, 긴 조문만 2차 분할합니다.
+
+    - 한 조문 = 한 조각이 기본이다. ``size``를 넘는 조문은 ``chunk_text``로 다시
+      나누고, 두 번째 조각부터 ``제12조(수강신청)`` 같은 조문 제목을 앞에 붙인다.
+    - 장·절 제목과 ``min_segment_chars`` 미만의 짧은 조각(예: ``제3조(삭제)``)은
+      다음 조각 앞에 붙인다. 마지막 조각이 짧으면 앞 조각 뒤에 붙인다.
+    - 조문 경계가 없으면 ``chunk_text(text, size, overlap)``와 같다.
+    """
+    if not text:
+        return []
+    normalized = normalize_whitespace(text)
+    if not normalized:
+        return []
+
+    boundaries = _rule_article_boundaries(normalized)
+    if not any(kind == "article" for _, kind, _ in boundaries):
+        return chunk_text(normalized, size, overlap)
+
+    # [본문, 조문 제목] 단위. 첫 경계 앞의 머리말은 제목 없는 단위다.
+    units: List[List[str]] = []
+    ends = [pos for pos, _, _ in boundaries[1:]] + [len(normalized)]
+    preamble = normalized[: boundaries[0][0]].strip()
+    if preamble:
+        units.append([preamble, ""])
+    pending_heading = ""
+    for (pos, kind, heading), end in zip(boundaries, ends):
+        body = normalized[pos:end].strip()
+        if not body:
+            continue
+        if kind == "heading":
+            pending_heading = f"{pending_heading}\n{body}".strip()
+            continue
+        if pending_heading:
+            body = f"{pending_heading}\n{body}"
+            pending_heading = ""
+        units.append([body, heading])
+    if pending_heading:
+        if units:
+            units[-1][0] = f"{units[-1][0]}\n{pending_heading}"
+        else:
+            units.append([pending_heading, ""])
+
+    # 짧은 조각은 다음 조각(마지막이면 앞 조각)에 합친다.
+    merged: List[List[str]] = []
+    carry: Optional[List[str]] = None
+    for body, heading in units:
+        if carry is not None:
+            body = f"{carry[0]}\n{body}"
+            heading = heading or carry[1]
+            carry = None
+        if len(body) < min_segment_chars:
+            carry = [body, heading]
+            continue
+        merged.append([body, heading])
+    if carry is not None:
+        if merged:
+            merged[-1][0] = f"{merged[-1][0]}\n{carry[0]}"
+        else:
+            merged.append(carry)
+
+    segments: List[str] = []
+    for body, heading in merged:
+        if len(body) <= size:
+            segments.append(body)
+            continue
+        prefix_len = len(heading) + 1 if heading else 0
+        inner_size = max(size - prefix_len, overlap + 1, size // 2)
+        for index, piece in enumerate(chunk_text(body, inner_size, overlap)):
+            # 첫 조각은 원문 머리(장 제목·합쳐진 짧은 조문 포함)로 시작하므로 그대로 둔다.
+            if index and heading and not piece.startswith(heading):
+                piece = f"{heading}\n{piece}"
+            segments.append(piece)
+    return [segment.strip() for segment in segments if segment.strip()]
+
+
 def to_chunks(
     docs: Iterable[dict],
     *,
     chunk_size: int | None = None,
     chunk_overlap: int = 0,
     include_title: bool = True,
+    segmenter: Optional[Callable[[str], List[str]]] = None,
 ) -> List[dict]:
-    """문서 딕셔너리를 Chroma가 사용할 수 있는 청크 딕셔너리로 바꿉니다."""
+    """문서 딕셔너리를 Chroma가 사용할 수 있는 청크 딕셔너리로 바꿉니다.
+
+    ``segmenter``가 주어지면 ``chunk_size`` 대신 그 함수로 본문을 나눈다
+    (예: 규정의 조문 단위 분할).
+    """
     chunks: List[dict] = []
     for doc in docs:
         text = doc.get("text") or ""
         segments = [text]
-        if chunk_size:
+        if segmenter is not None:
+            segments = segmenter(text) or [text]
+        elif chunk_size:
             segments = chunk_text(text, chunk_size, chunk_overlap) or [text]
 
         for idx, segment in enumerate(segments):
@@ -383,5 +557,6 @@ __all__ = [
     "apply_cleaning",
     "build_document_rows",
     "chunk_text",
+    "split_rule_articles",
     "to_chunks",
 ]

@@ -17,6 +17,11 @@ BM25/FTS5 색인에만 쓰인다.
     python scripts/rebuild_lexical_indices.py --backup-dir artifacts/rebuilds/lexical-before
     python scripts/rebuild_lexical_indices.py --datasets notices rules
     python scripts/rebuild_lexical_indices.py --restore artifacts/rebuilds/lexical-before
+
+**Lineage gate.** 희소 인덱스 재구축은 lineage 검사의 입력(SourceDocument, Parquet,
+Chroma)을 바꾸지 않는다. 따라서 strict canonical lineage 검사를 재구축 **전**에
+실행하고, 실패하면 아무것도 덮어쓰지 않고 종료 코드 1로 끝난다(불일치 Parquet로
+희소 인덱스를 게시하지 않는다). 비상 시에만 `--skip-lineage-gate`로 건너뛴다.
 """
 from __future__ import annotations
 
@@ -35,6 +40,7 @@ from src.pipelines.ingest import DATASET_ARTIFACTS, _train_lexical_indices  # no
 from src.search import fts_index as fts  # noqa: E402
 from src.search.hybrid import _load_kiwi  # noqa: E402
 from src.services.retrieval_context import enrich_retrieval_fields  # noqa: E402
+from scripts import _lineage_gate  # noqa: E402
 
 
 def _artifact_paths() -> list[Path]:
@@ -130,13 +136,14 @@ def show_state() -> None:
         print(f"{identifier:<10} {count:>8,}  {tokenizer:<10} {backend}")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--datasets", nargs="+", choices=list(DATASET_ARTIFACTS), metavar="DATASET")
     parser.add_argument("--backup-dir", type=Path, help="재색인 전에 현재 인덱스를 여기 복사")
     parser.add_argument("--restore", type=Path, help="백업에서 되돌리고 종료")
     parser.add_argument("--state", action="store_true", help="현재 인덱스 상태만 출력")
-    args = parser.parse_args()
+    _lineage_gate.add_skip_argument(parser)
+    args = parser.parse_args(argv)
 
     if args.state:
         show_state()
@@ -147,6 +154,14 @@ def main() -> int:
         return 0 if restored else 1
 
     targets = args.datasets or list(DATASET_ARTIFACTS)
+    gate = _lineage_gate.run_lineage_gate(
+        targets,
+        skip=args.skip_lineage_gate,
+        phase=_lineage_gate.PRE_PUBLISH,
+        stage="rebuild_lexical_indices (before rebuild)",
+    )
+    if gate["exit_code"]:
+        return int(gate["exit_code"])
     if args.backup_dir:
         backup(args.backup_dir)
 

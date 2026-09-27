@@ -122,7 +122,13 @@ from src.services.langchain_chat import (
     get_recent_history_text,
 )
 from src.services.source_contract import source_reference
-from src.services.grounding import check_answer_grounding
+from src.services.grounding import (
+    VERIFICATION_FAILED,
+    VERIFICATION_NOT_REQUIRED,
+    VERIFICATION_PASSED,
+    VERIFICATION_UNAVAILABLE,
+    check_answer_grounding,
+)
 from src.services.query_analysis import QueryAnalysisResult, analyze_query
 from src.services.router import keyword_route
 from src.services.course_recommendation import (
@@ -1332,8 +1338,15 @@ def _should_cache_answer(
     *,
     recent_notice_query: bool = False,
     active_notice_query: bool = False,
+    verification_status: str | None = None,
 ) -> bool:
     if recent_notice_query or active_notice_query:
+        return False
+    # Only a completed, positive grounding check may be replayed from cache.
+    # ``grounded is None`` (checker unavailable/disabled) and not_required
+    # terminal answers are never cached; deterministic direct answers bypass
+    # the cache entirely and are not written here.
+    if verification_status != VERIFICATION_PASSED:
         return False
     if fallback_triggered:
         return False
@@ -1346,6 +1359,44 @@ def _should_cache_answer(
     if answer is not None and not answer.strip():
         return False
     return True
+
+
+def _verification_status_from_grounding(grounding_result) -> str:
+    """Map a generated answer's grounding result to its verification status.
+
+    A generated answer always needs verification, so a missing result (check
+    disabled, skipped, or crashed before returning) is ``unavailable``.
+    """
+    if grounding_result is None:
+        return VERIFICATION_UNAVAILABLE
+    status = getattr(grounding_result, "status", None)
+    if status in (
+        VERIFICATION_PASSED,
+        VERIFICATION_FAILED,
+        VERIFICATION_UNAVAILABLE,
+        VERIFICATION_NOT_REQUIRED,
+    ):
+        return status
+    return VERIFICATION_UNAVAILABLE
+
+
+def _cached_verification_status(hit: dict) -> str:
+    """Status for a semantic-cache hit; legacy entries predate the field."""
+    status = hit.get("verification_status")
+    if status in (
+        VERIFICATION_PASSED,
+        VERIFICATION_FAILED,
+        VERIFICATION_UNAVAILABLE,
+        VERIFICATION_NOT_REQUIRED,
+    ):
+        return status
+    # Legacy entries only stored ``grounded`` when a check completed.
+    grounded = hit.get("grounded")
+    if grounded is True:
+        return VERIFICATION_PASSED
+    if grounded is False:
+        return VERIFICATION_FAILED
+    return VERIFICATION_UNAVAILABLE
 
 
 def _grounding_allows_followups(grounding_enabled: bool, grounding_result) -> bool:
@@ -1586,6 +1637,10 @@ class AskResponse(BaseModel):
     suggested_question_details: list[SuggestedQuestionDetail] = Field(default_factory=list)
     grounded: bool | None = None
     grounding_score: float | None = None
+    relevance_score: float | None = None
+    # passed | failed | unavailable | not_required.  Conservative default: an
+    # answer is never reported as verified unless a path says so explicitly.
+    verification_status: str = VERIFICATION_UNAVAILABLE
     fallback_triggered: bool = False
     fallback_reason: str | None = None
 
@@ -2020,6 +2075,21 @@ def _try_direct_answer(query: str, today: date) -> DirectAnswer | None:
         # 구제 경로 실패가 폴백 응답 자체를 막아서는 안 된다.
         _log_event(logging.WARNING, "direct_answer_failed", exc_info=True)
     return None
+
+
+_FAIL_CLOSED_DIRECT_ANSWER_KINDS = frozenset({"meal_stale", "schedule_stale"})
+
+
+def _direct_answer_grounding(direct: DirectAnswer) -> tuple[bool | None, float | None]:
+    """``(grounded, grounding_score)`` for a deterministic direct answer.
+
+    Fresh structured-table answers keep their deterministic grounded=True.
+    Fail-closed stale notices carry no factual claim from the table, so they
+    must not claim to be grounded.
+    """
+    if direct.kind in _FAIL_CLOSED_DIRECT_ANSWER_KINDS:
+        return None, None
+    return True, 1.0
 
 
 def _stale_direct_answer(dataset: str, today: date) -> DirectAnswer | None:
@@ -5955,7 +6025,9 @@ def _update_grounding_log(request_id: str, result) -> None:
         if query_log is None:
             return
         query_log.grounding_checked = bool(result.checked)
-        query_log.grounding_grounded = bool(result.grounded)
+        query_log.grounding_grounded = (
+            None if result.grounded is None else bool(result.grounded)
+        )
         query_log.grounding_score = result.score
         session.commit()
     except Exception:
@@ -8162,6 +8234,8 @@ def _completion_stream_event(
     sources: list[SourceChunk] | list[dict],
     suggested_question_details: list[SuggestedQuestionDetail] | list[dict] | None = None,
     resolved_intents: list[str] | None = None,
+    verification_status: str = VERIFICATION_UNAVAILABLE,
+    relevance_score: float | None = None,
 ) -> str:
     """Build final persistence metadata; callers emit it immediately before ``done``."""
     serialized_sources = [
@@ -8173,6 +8247,8 @@ def _completion_stream_event(
         "request_id": request_id,
         "grounded": grounded,
         "grounding_score": grounding_score,
+        "relevance_score": relevance_score,
+        "verification_status": verification_status,
         "suggested_questions": suggested_questions,
         "suggested_question_details": [
             detail.model_dump() if hasattr(detail, "model_dump") else detail
@@ -8244,6 +8320,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 request_id=request_id,
                 grounded=None,
                 grounding_score=None,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
                 fallback_reason=None,
                 sources=[],
@@ -8316,6 +8393,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 request_id=request_id,
                 grounded=None,
                 grounding_score=None,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
                 fallback_reason=FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
                 sources=[],
@@ -8376,6 +8454,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 request_id=request_id,
                 grounded=True if recommendation_sources else None,
                 grounding_score=1.0 if recommendation_sources else None,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
                 fallback_reason=None,
                 sources=recommendation_sources,
@@ -8409,6 +8488,8 @@ async def ask_stream(req: AskRequest, request: Request):
                     request_id=request_id,
                     grounded=hit.get("grounded"),
                     grounding_score=hit.get("grounding_score"),
+                    relevance_score=hit.get("relevance_score"),
+                    verification_status=_cached_verification_status(hit),
                     suggested_questions=hit.get("suggested_questions", []),
                     fallback_reason=None,
                     sources=hit.get("sources", []),
@@ -8437,6 +8518,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 request_id=request_id,
                 grounded=None,
                 grounding_score=None,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
                 fallback_reason=None,
                 sources=[],
@@ -8475,6 +8557,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 request_id=request_id,
                 grounded=None,
                 grounding_score=None,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
                 fallback_reason=None,
                 sources=[],
@@ -8491,6 +8574,7 @@ async def ask_stream(req: AskRequest, request: Request):
         )
         if direct is not None:
             direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
+            direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
             direct_suggestion_details = _direct_answer_suggestions(direct, direct_sources)
             direct_suggestions = [
                 detail.question for detail in direct_suggestion_details
@@ -8509,7 +8593,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 direct_route[0], None, None, None, False, None,
                 False, False, json.dumps([raw_query], ensure_ascii=False), 1.0,
                 direct_sources, stage_timings, llm_usage,
-                deterministically_grounded=True,
+                deterministically_grounded=direct_grounded is True,
             )
             await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer)
             _log_event(
@@ -8522,8 +8606,9 @@ async def ask_stream(req: AskRequest, request: Request):
             )
             yield _completion_stream_event(
                 request_id=request_id,
-                grounded=True,
-                grounding_score=1.0,
+                grounded=direct_grounded,
+                grounding_score=direct_grounding_score,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=direct_suggestions,
                 suggested_question_details=direct_suggestion_details,
                 fallback_reason=None,
@@ -8581,6 +8666,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 request_id=request_id,
                 grounded=None,
                 grounding_score=None,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
                 fallback_reason=None,
                 sources=[],
@@ -8628,6 +8714,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 request_id=request_id,
                 grounded=None,
                 grounding_score=None,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
                 fallback_reason=None,
                 sources=[],
@@ -8869,6 +8956,7 @@ async def ask_stream(req: AskRequest, request: Request):
             )
             if direct is not None:
                 direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
+                direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
                 direct_suggestion_details = _direct_answer_suggestions(
                     direct,
                     direct_sources,
@@ -8896,7 +8984,7 @@ async def ask_stream(req: AskRequest, request: Request):
                     analysis_meta.used, analysis_meta.failed, None, top_hybrid_score,
                     direct_sources,
                     stage_timings, llm_usage,
-                    deterministically_grounded=True,
+                    deterministically_grounded=direct_grounded is True,
                 )
                 await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer)
                 _log_event(
@@ -8908,8 +8996,9 @@ async def ask_stream(req: AskRequest, request: Request):
                 )
                 yield _completion_stream_event(
                     request_id=request_id,
-                    grounded=True,
-                    grounding_score=1.0,
+                    grounded=direct_grounded,
+                    grounding_score=direct_grounding_score,
+                    verification_status=VERIFICATION_NOT_REQUIRED,
                     suggested_questions=direct_suggestions,
                     suggested_question_details=direct_suggestion_details,
                     fallback_reason=None,
@@ -8947,6 +9036,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 request_id=request_id,
                 grounded=None,
                 grounding_score=None,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
                 fallback_reason=fallback_reason,
                 sources=[],
@@ -9026,6 +9116,7 @@ async def ask_stream(req: AskRequest, request: Request):
         grounding_result = None
         grounded_flag: bool | None = None
         grounding_score: float | None = None
+        relevance_score: float | None = None
         if RAG_GROUNDING_CHECK_ENABLED and len(sources) > 0:
             try:
                 stage_started_at = time.perf_counter()
@@ -9040,6 +9131,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 if grounding_result.checked:
                     grounded_flag = grounding_result.grounded
                     grounding_score = grounding_result.score
+                    relevance_score = grounding_result.relevance_score
                 if grounding_result.checked and not grounding_result.grounded:
                     yield f"data: {json.dumps({'type': 'grounding', 'grounded': False, 'score': grounding_result.score, 'reason': grounding_result.reason}, ensure_ascii=False)}\n\n"
                     guard_text = _build_grounding_confirmation_answer(
@@ -9064,6 +9156,7 @@ async def ask_stream(req: AskRequest, request: Request):
                     request_id=request_id,
                     error=str(exc),
                 )
+        verification_status = _verification_status_from_grounding(grounding_result)
         final_answer = "".join(full_answer)
         # 정서적 고통이 함께 나타난 학사 질문은 절차를 그대로 답하고 상담 창구만
         # 덧붙인다. 자퇴 절차는 학생이 실제로 필요로 하는 정보라 막으면 안 된다.
@@ -9116,6 +9209,7 @@ async def ask_stream(req: AskRequest, request: Request):
             final_answer,
             recent_notice_query=recent_notice_query,
             active_notice_query=active_notice_query,
+            verification_status=verification_status,
         ):
             await run_in_threadpool(
                 semantic_cache.put,
@@ -9131,12 +9225,16 @@ async def ask_stream(req: AskRequest, request: Request):
                     "resolved_intents": resolved_intents,
                     "grounded": grounded_flag,
                     "grounding_score": grounding_score,
+                    "relevance_score": relevance_score,
+                    "verification_status": verification_status,
                 },
             )
         yield _completion_stream_event(
             request_id=request_id,
             grounded=grounded_flag,
             grounding_score=grounding_score,
+            relevance_score=relevance_score,
+            verification_status=verification_status,
             suggested_questions=suggested_questions,
             fallback_reason=None,
             sources=sources,
@@ -9190,6 +9288,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             route=["crisis_support"],
             sources=[],
             resolved_intents=["crisis_support"],
+            verification_status=VERIFICATION_NOT_REQUIRED,
             fallback_triggered=False,
             fallback_reason=None,
         )
@@ -9246,6 +9345,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             resolved_intents=["unknown"],
             grounded=None,
             grounding_score=None,
+            verification_status=VERIFICATION_NOT_REQUIRED,
             fallback_triggered=True,
             fallback_reason=FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
         )
@@ -9291,6 +9391,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             sources=recommendation_sources,
             grounded=True if recommendation_sources else None,
             grounding_score=1.0 if recommendation_sources else None,
+            verification_status=VERIFICATION_NOT_REQUIRED,
             fallback_triggered=False,
             fallback_reason=None,
         )
@@ -9325,6 +9426,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 ],
                 grounded=hit.get("grounded"),
                 grounding_score=hit.get("grounding_score"),
+                relevance_score=hit.get("relevance_score"),
+                verification_status=_cached_verification_status(hit),
                 fallback_triggered=False,
                 fallback_reason=None,
             )
@@ -9349,6 +9452,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             route=["smalltalk"],
             sources=[],
             resolved_intents=["smalltalk"],
+            verification_status=VERIFICATION_NOT_REQUIRED,
             fallback_triggered=False,
             fallback_reason=None,
         )
@@ -9387,6 +9491,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             resolved_intents=route,
             grounded=None,
             grounding_score=None,
+            verification_status=VERIFICATION_NOT_REQUIRED,
             fallback_triggered=False,
             fallback_reason=None,
         )
@@ -9398,6 +9503,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     )
     if direct is not None:
         direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
+        direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
         direct_suggestion_details = _direct_answer_suggestions(direct, direct_sources)
         direct_suggestions = [
             detail.question for detail in direct_suggestion_details
@@ -9411,7 +9517,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             direct_route[0], None, None, None, False, None,
             False, False, json.dumps([raw_query], ensure_ascii=False), 1.0,
             direct_sources, stage_timings, llm_usage,
-            deterministically_grounded=True,
+            deterministically_grounded=direct_grounded is True,
         )
         await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer)
         _log_event(
@@ -9431,8 +9537,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             resolved_intents=direct_route,
             suggested_questions=direct_suggestions,
             suggested_question_details=direct_suggestion_details,
-            grounded=True,
-            grounding_score=1.0,
+            grounded=direct_grounded,
+            grounding_score=direct_grounding_score,
+            verification_status=VERIFICATION_NOT_REQUIRED,
             fallback_triggered=False,
             fallback_reason=None,
         )
@@ -9499,6 +9606,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             route=["unknown"],
             sources=[],
             resolved_intents=["unknown"],
+            verification_status=VERIFICATION_NOT_REQUIRED,
             fallback_triggered=False,
             fallback_reason=None,
         )
@@ -9551,6 +9659,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             route=["unknown"],
             sources=[],
             resolved_intents=["unknown"],
+            verification_status=VERIFICATION_NOT_REQUIRED,
             fallback_triggered=False,
             fallback_reason=None,
         )
@@ -9810,6 +9919,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         )
         if direct is not None:
             direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
+            direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
             direct_suggestion_details = _direct_answer_suggestions(direct, direct_sources)
             direct_suggestions = [
                 detail.question for detail in direct_suggestion_details
@@ -9828,7 +9938,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 json.dumps(matched_queries, ensure_ascii=False), top_hybrid_score,
                 direct_sources,
                 stage_timings, llm_usage,
-                deterministically_grounded=True,
+                deterministically_grounded=direct_grounded is True,
             )
             await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer)
             _log_event(
@@ -9847,8 +9957,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 resolved_intents=route,
                 suggested_questions=direct_suggestions,
                 suggested_question_details=direct_suggestion_details,
-                grounded=True,
-                grounding_score=1.0,
+                grounded=direct_grounded,
+                grounding_score=direct_grounding_score,
+                verification_status=VERIFICATION_NOT_REQUIRED,
                 fallback_triggered=False,
                 fallback_reason=None,
             )
@@ -9921,6 +10032,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 if analysis_meta.result is not None
                 else []
             ),
+            verification_status=VERIFICATION_NOT_REQUIRED,
             fallback_triggered=True,
             fallback_reason=fallback_reason,
         )
@@ -9989,6 +10101,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     grounding_result = None
     grounded: bool | None = None
     grounding_score: float | None = None
+    relevance_score: float | None = None
     if RAG_GROUNDING_CHECK_ENABLED and len(sources) > 0:
         try:
             stage_started_at = time.perf_counter()
@@ -10003,6 +10116,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             if grounding_result.checked:
                 grounded = grounding_result.grounded
                 grounding_score = grounding_result.score
+                relevance_score = grounding_result.relevance_score
                 if not grounding_result.grounded:
                     guard_answer = _build_grounding_confirmation_answer(
                         grounding_result,
@@ -10021,6 +10135,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 request_id=request_id,
                 error=str(exc),
             )
+    verification_status = _verification_status_from_grounding(grounding_result)
     # 비스트림도 본 응답과 추천 생성의 수명주기를 분리한다. 클라이언트가
     # request_id로 /followups를 호출하므로 응답 지연에는 추천 LLM 시간이 포함되지 않는다.
     resolved_intents = list(
@@ -10085,6 +10200,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         answer,
         recent_notice_query=recent_notice_query,
         active_notice_query=active_notice_query,
+        verification_status=verification_status,
     ):
         await run_in_threadpool(
             semantic_cache.put,
@@ -10103,6 +10219,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 "resolved_intents": resolved_intents,
                 "grounded": grounded,
                 "grounding_score": grounding_score,
+                "relevance_score": relevance_score,
+                "verification_status": verification_status,
             },
         )
 
@@ -10117,6 +10235,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         suggested_question_details=[SuggestedQuestionDetail(**detail) for detail in suggested_question_details],
         grounded=grounded,
         grounding_score=grounding_score,
+        relevance_score=relevance_score,
+        verification_status=verification_status,
         fallback_triggered=False,
         fallback_reason=None,
     )

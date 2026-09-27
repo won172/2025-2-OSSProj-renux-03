@@ -115,7 +115,7 @@ worktree로 이동하도록 한다. 한 worktree에는 한 번에 한 agent만 �
 5. Agent에게 해당 worktree 할당
 6. 구현
 7. test
-8. review 후 task branch에 STATUS.md Task Board 행 추가 (아래 STATUS.md 관리)
+8. review (task branch에서는 STATUS.md를 수정하지 않는다. 아래 STATUS.md 관리)
 9. merge candidate 보고
 
 Human owner가 merge를 승인하고 실제 merge가 완료된 것이 확인된 후
@@ -126,6 +126,8 @@ Human owner가 merge를 승인하고 실제 merge가 완료된 것이 확인된 
     (uncommitted 변경이 있으면 실패한다. `--force`를 쓰지 말고 원인을 확인한다.)
 12. 필요 없는 local branch 정리: `git branch -d <branch>` (merge되지 않았으면 실패하는 `-d`만 사용,
     `-D` 금지)
+
+13. STATUS.md 일괄 갱신 PR에 결과를 반영한다 (아래 STATUS.md 관리).
 
 remote branch 삭제는 자동으로 하지 않고 필요 여부를 human owner에게 보고한다.
 merge되지 않고 폐기되는 task는 worktree·branch를 삭제하지 말고 `Blocked` 또는 폐기 여부를
@@ -139,13 +141,15 @@ merge되지 않고 폐기되는 task는 worktree·branch를 삭제하지 말고 
   (`Planned` → `In Progress` → `Review` → `Completed`, 또는 `Blocked`).
 - agent의 Completion Report와 QA 결과를 Tests, Known Issues, Next Action에 요약한다.
 - 측정값에는 측정일과 로컬/운영 범위를 함께 적는다.
-- primary checkout은 `main`이므로 STATUS.md를 거기서 직접 commit하지 않는다. 대신:
-  - **task 진행 기록**: Orchestrator가 REVIEW를 마친 뒤 해당 task branch에 STATUS.md 갱신을
-    마지막 커밋으로 추가한다(`Review` 상태로 기록). 구현 agent에게는 STATUS.md를 수정하게 하지 않는다.
-  - **`Completed` 전환·task와 무관한 갱신**: merge 이후의 사실이므로 다음 task PR에 함께 넣거나,
-    별도 `docs/status-<slug>` branch/worktree로 PR을 연다.
-  - 병렬 task가 같은 STATUS.md 영역을 고치면 충돌할 수 있다. task PR에서는 자기 Task Board 행만
-    수정하고, 공통 섹션(Current Priorities, Known Issues 등) 갱신은 별도 docs PR로 모은다.
+- **task PR은 STATUS.md를 수정하지 않는다.** 병렬 task가 모두 Task Board에 행을 추가하면
+  PR끼리 반드시 충돌하기 때문이다(PR #11·#12에서 실제로 발생). 구현 agent도 수정하지 않는다.
+- STATUS.md는 Orchestrator의 **일괄 갱신 PR**로만 바꾼다:
+  - task 묶음이 merge되었을 때, 또는 새 task 시작·`Blocked` 등 기록할 상태 변화가 쌓였을 때
+    최신 `origin/main`에서 `docs/status-<slug>` branch/worktree를 만들어 한 번에 갱신한다.
+  - Task Board 행(`In Progress`/`Review`/`Completed`/`Blocked`)과 공통 섹션(Current Priorities,
+    Known Issues, Recently Completed 등)을 함께 갱신한다. `Completed`는 merge를 확인한 뒤에만 쓴다.
+  - 일괄 갱신 PR은 동시에 하나만 연다. 열려 있는 동안 추가 변경은 같은 branch에 이어서 커밋한다.
+- 진행 중 상태는 human owner에게 대화로 보고한다. STATUS.md는 실시간 현황판이 아니라 handoff 스냅샷이다.
 
 ## Integration
 
