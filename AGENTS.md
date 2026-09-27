@@ -194,8 +194,10 @@ CI(`.github/workflows/ci.yml`)와 같은 명령이다. 저장소 루트 기준 �
 | Frontend | `cd src/RenuxServer/wwwroot/frontend && npm ci && npm run lint && npm test && npm run build` |
 | Main Backend | `cd src/RenuxServer && dotnet restore RenuxServer.sln && dotnet build RenuxServer.sln --configuration Release --no-restore` |
 | Backend 계약 테스트 | `cd src/RenuxServer && dotnet run --project Tests/RenuxServer.ContractTests.csproj --configuration Release` |
-| RAG | `cd src/RAG && python -m pytest -q` |
-| RAG (빈 DB) | `cd src/RAG && RAG_DATABASE_FILE="$(mktemp -d)/empty-rag.db" python -m pytest -q` |
+| RAG 의존성 | `cd src/RAG && python -m pip install -r requirements-dev.txt` (런타임 + `pytest-randomly`) |
+| RAG | `cd src/RAG && python -m pytest -q -p no:randomly` |
+| RAG (빈 DB) | `cd src/RAG && RAG_DATABASE_FILE="$(mktemp -d)/empty-rag.db" python -m pytest -q -p no:randomly` |
+| RAG (무작위 순서) | `cd src/RAG && RAG_DATABASE_FILE="$(mktemp -d)/empty-rag-random.db" python -m pytest -p randomly --randomly-seed=<seed>` — CI 실패 재현 시 로그의 seed 사용 |
 
 주의:
 
