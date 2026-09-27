@@ -85,11 +85,10 @@ Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 2026-09-27 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
 
 - Remote: `origin` = `github.com/won172/2025-2-OSSProj-renux-03` (fork, upstream `CSID-DGU/2025-2-OSSProj-renux-03`).
-- `origin/main`: branch protection 없음. 로컬 `main`은 `origin/main`보다 6커밋 뒤.
-- 현재 RAG 개발선 `feature/ontology`(`4b62d12`)는 `main`에 없는 커밋 73개를 가진다.
+- `origin/main`: branch protection 없음.
+- `feature/ontology`(`4b62d12`)는 PR #6으로 `main`에 merge됐다(`cd9f7a2`, 트리 동일).
   이 문서와 ARCHITECTURE.md는 이 코드 기준이다.
-- **새 task의 base branch는 human 결정 대기** (Human Decisions Required 참고).
-  결정 전까지는 RAG 코드에 의존하는 task를 `origin/main`에서 시작하지 않는다.
+- 새 task의 base branch는 `origin/main`이다.
 - 규칙 도입 전 branch(`codex/*`, `auto/*`, `redesign/*`, `v2-agentic-graph-rag`,
   `docs/*-20260927`)는 정리하지 않고 유지한다.
 - `git worktree list`에 `/private/tmp/dongttok-release-eval.*` 가 `prunable`로 남아 있다
@@ -219,8 +218,6 @@ Next:
 - 실로그 변경 후보의 relevance·관계 정확성 사람 판정 및 검토 담당자 확정.
 - 실제 평가에 사용할 후보 endpoint/검증 환경과 모델 호출 비용 승인.
 - 품질·정합성 gate 통과 후 운영 배포 여부 승인. 현재 배포를 승인한 상태는 아니다.
-- 멀티 agent task의 base branch: `feature/ontology`를 먼저 `main`에 merge할지, 그 전까지
-  `feature/ontology`를 integration branch로 지정해 task PR 대상으로 쓸지 결정.
 - GitHub `main` branch protection(직접 push·force push 차단, PR·CI 필수) 적용 여부.
   원격 저장소 설정 변경이므로 agent가 수행하지 않는다.
 
