@@ -34,3 +34,54 @@ def _운영_FTS_인덱스_보호(tmp_path_factory, monkeypatch):
     임시 = tmp_path_factory.mktemp("fts") / "lexical_fts.db"
     monkeypatch.setattr(fts_index, "fts_db_path", lambda: 임시)
     yield
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "real_chroma: 로컬 아티팩트 통합 검사처럼 운영 Chroma 경로를 명시적으로 읽어야 하는 테스트",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _운영_Chroma_보호(request, tmp_path_factory, monkeypatch):
+    """Chroma 클라이언트를 테스트마다 임시 디렉터리로 돌리고 싱글턴을 비운다.
+
+    `chroma_client.get_client()`는 프로세스 전역 싱글턴이고 운영
+    `artifacts/db_chroma`를 연다. `count_items`를 가짜로 바꾸지 않은 테스트
+    (readiness의 dense count probe)가 운영 Chroma를 열어, 빈 checkout에서는
+    `chroma.sqlite3`를 새로 만들고 데이터가 있는 checkout에서는 운영 파일을 갱신했다.
+    싱글턴과 컬렉션 LRU 캐시를 테스트마다 비워 이전 테스트의 클라이언트가 남지 않게 한다.
+
+    `src.config.CHROMA_DIR`는 바꾸지 않는다. staged rebuild 안전 검사는 그 값을
+    운영 경로로 보고 거부해야 하므로 그대로 두는 편이 더 엄격하다.
+
+    실제 로컬 인덱스를 읽는 통합 smoke 검사는 `@pytest.mark.real_chroma`로 명시한다.
+    그때도 싱글턴·캐시는 비워 다른 테스트와 클라이언트를 공유하지 않는다.
+    """
+    from src.vectorstore import chroma_client
+
+    # 테스트가 `_get_physical_collection`을 가짜 함수로 바꿀 수 있으므로(그 undo는
+    # 이 fixture 정리 뒤에 일어난다) 실제 LRU 함수를 먼저 잡아 두고 그것을 비운다.
+    실제_컬렉션_캐시 = chroma_client._get_physical_collection
+    if request.node.get_closest_marker("real_chroma") is None:
+        임시 = tmp_path_factory.mktemp("chroma") / "db_chroma"
+        monkeypatch.setattr(chroma_client, "CHROMA_DIR", 임시)
+    monkeypatch.setattr(chroma_client, "_client_instance", None)
+    실제_컬렉션_캐시.cache_clear()
+    yield
+    실제_컬렉션_캐시.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _운영_유지보수_잠금_보호(tmp_path_factory, monkeypatch):
+    """공용 유지보수 잠금 파일을 테스트마다 임시 경로로 돌린다.
+
+    기본 경로는 운영 `artifacts/.rag-maintenance.lock`이다. 테스트가 이 잠금을 잡는
+    동안 같은 checkout의 스케줄러·관리 작업은 `MaintenanceLockBusy`로 거부된다.
+    """
+    from src.services.maintenance_lock import MAINTENANCE_LOCK_ENV
+
+    임시 = tmp_path_factory.mktemp("maintenance") / ".rag-maintenance.lock"
+    monkeypatch.setenv(MAINTENANCE_LOCK_ENV, str(임시))
+    yield
