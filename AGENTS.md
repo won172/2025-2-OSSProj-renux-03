@@ -193,7 +193,7 @@ CI(`.github/workflows/ci.yml`)와 같은 명령이다. 저장소 루트 기준 �
 | Secret scan | `bash scripts/scan-secrets.sh` |
 | Frontend | `cd src/RenuxServer/wwwroot/frontend && npm ci && npm run lint && npm test && npm run build` |
 | Main Backend | `cd src/RenuxServer && dotnet restore RenuxServer.sln && dotnet build RenuxServer.sln --configuration Release --no-restore` |
-| Backend 계약 테스트 | `cd src/RenuxServer/Tests && dotnet run` |
+| Backend 계약 테스트 | `cd src/RenuxServer && dotnet run --project Tests/RenuxServer.ContractTests.csproj --configuration Release` |
 | RAG | `cd src/RAG && python -m pytest -q` |
 | RAG (빈 DB) | `cd src/RAG && RAG_DATABASE_FILE="$(mktemp -d)/empty-rag.db" python -m pytest -q` |
 

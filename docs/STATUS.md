@@ -75,7 +75,7 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| _(없음 — 첫 task는 human 승인 후 등록)_ | | | | | | | | |
+| CI에서 프런트 `npm test`·백엔드 계약 테스트 실행 (pipeline-audit P0) | P0 | RAG/Backend (CI) | `chore/ci-contract-tests` | `ci-contract-tests` (제거됨) | Completed | 로컬 `npm test` 50/50, 계약 테스트 통과; PR #8 CI 4개 job 통과 | 계약 테스트는 product telemetry 계약만 다룸 | Recently Completed로 이동 |
 
 Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 완료된 행은 다음 갱신 때 Recently Completed로 옮긴다.
@@ -85,7 +85,8 @@ Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 2026-09-27 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
 
 - Remote: `origin` = `github.com/won172/2025-2-OSSProj-renux-03` (fork, upstream `CSID-DGU/2025-2-OSSProj-renux-03`).
-- `origin/main`: branch protection 없음.
+- `origin/main`: branch protection 없음. 적용하려면 human이 설정해야 한다(agent 권한으로 차단됨).
+- 이후 merge: PR #7 멀티 agent 문서(`bf80760`), PR #8 CI 테스트 실행(`cc77463`).
 - `feature/ontology`(`4b62d12`)는 PR #6으로 `main`에 merge됐다(`cd9f7a2`, 트리 동일).
   이 문서와 ARCHITECTURE.md는 이 코드 기준이다.
 - 새 task의 base branch는 `origin/main`이다.
@@ -180,6 +181,8 @@ Next Action:
 - 구조형/실로그 SQL 우선 검색 비교와 데이터셋별 cold/warm 측정 분리.
 - 9월 27일 전체 RAG pytest: 977 passed, 9 deprecation warnings.
   로컬 HTTP 테스트를 위한 소켓 권한을 허용한 재실행 결과다.
+- 9월 27일 CI가 프런트 `npm test`와 백엔드 계약 테스트를 실제 실행 (PR #8, pipeline-audit P0).
+- 9월 27일 멀티 agent 개발 규칙(AGENTS.md, CLAUDE.md, Task Board) 도입 (PR #7).
 
 ## Agent Tasks
 

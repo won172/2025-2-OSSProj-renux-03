@@ -106,14 +106,16 @@ worktree로 이동하도록 한다. 한 worktree에는 한 번에 한 agent만 �
    `git branch --list <branch>`, `git worktree list`.
 3. branch 생성 + 4. 전용 worktree 생성을 한 번에 한다:
    ```bash
-   git worktree add -b <prefix>/<slug> ../dongttok-worktrees/<slug> origin/main
+   git worktree add --no-track -b <prefix>/<slug> ../dongttok-worktrees/<slug> origin/main
    ```
+   `--no-track`은 필수다. 없으면 새 branch가 `origin/main`을 upstream으로 추적해
+   인자 없는 push가 main을 향할 수 있다. push는 항상 `git push -u origin <branch>`로 한다.
    base는 항상 방금 fetch한 `origin/main`이다. 다른 branch를 base로 쓰지 않는다.
    작업 도중 main이 앞서 나가도 임의로 rebase하지 않고, 필요하면 human에게 보고한다.
-5. Agent에게 해당 worktree 할당 (docs/STATUS.md Task Board에 `In Progress`로 기록)
+5. Agent에게 해당 worktree 할당
 6. 구현
 7. test
-8. review (`Review`로 기록)
+8. review 후 task branch에 STATUS.md Task Board 행 추가 (아래 STATUS.md 관리)
 9. merge candidate 보고
 
 Human owner가 merge를 승인하고 실제 merge가 완료된 것이 확인된 후
@@ -137,7 +139,13 @@ merge되지 않고 폐기되는 task는 worktree·branch를 삭제하지 말고 
   (`Planned` → `In Progress` → `Review` → `Completed`, 또는 `Blocked`).
 - agent의 Completion Report와 QA 결과를 Tests, Known Issues, Next Action에 요약한다.
 - 측정값에는 측정일과 로컬/운영 범위를 함께 적는다.
-- STATUS.md 갱신은 primary checkout에서 한다. task worktree 안의 STATUS.md를 수정하게 하지 않는다.
+- primary checkout은 `main`이므로 STATUS.md를 거기서 직접 commit하지 않는다. 대신:
+  - **task 진행 기록**: Orchestrator가 REVIEW를 마친 뒤 해당 task branch에 STATUS.md 갱신을
+    마지막 커밋으로 추가한다(`Review` 상태로 기록). 구현 agent에게는 STATUS.md를 수정하게 하지 않는다.
+  - **`Completed` 전환·task와 무관한 갱신**: merge 이후의 사실이므로 다음 task PR에 함께 넣거나,
+    별도 `docs/status-<slug>` branch/worktree로 PR을 연다.
+  - 병렬 task가 같은 STATUS.md 영역을 고치면 충돌할 수 있다. task PR에서는 자기 Task Board 행만
+    수정하고, 공통 섹션(Current Priorities, Known Issues 등) 갱신은 별도 docs PR로 모은다.
 
 ## Integration
 
