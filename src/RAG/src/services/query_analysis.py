@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Literal, Optional
 
@@ -188,13 +189,15 @@ intent 기준(가장 중심이 되는 단일 측면):
 )
 
 # API 키가 없는 테스트·readiness 프로세스도 이 모듈을 import할 수 있어야 한다.
-# 체인은 실제 질의분석이 처음 요청될 때만 만든다. 공개 변수는 기존 테스트의
-# monkeypatch 지점을 보존하기 위해 유지한다.
-analysis_chain = None
+# 체인은 실제 질의분석이 처음 요청될 때만 만들고, 이후 프로세스 안에서 재사용한다.
+# 교체 지점은 `_build_analysis_chain` 하나다. 테스트는 이 factory를 가짜로 바꾸고,
+# conftest의 autouse fixture가 `reset_analysis_chain()`으로 캐시를 비운다.
+_ANALYSIS_CHAIN_LOCK = threading.Lock()
+_analysis_chain = None
 
 
-def _get_analysis_chain():
-    """프롬프트 + Structured Outputs(strict json_schema) 체인.
+def _build_analysis_chain():
+    """프롬프트 + Structured Outputs(strict json_schema) 체인을 새로 만든다.
 
     include_raw=True로 원본 AIMessage를 함께 받는다. 파싱 결과만 받으면 토큰
     사용량이 사라진다 — 실제로 그래서 `rag_query_logs.llm_usage_json`에
@@ -204,24 +207,42 @@ def _get_analysis_chain():
     프롬프트는 고정 지침을 앞에, 대화·기준 시점·질문을 뒤에 둔다. 자동 프롬프트
     캐싱은 앞부분이 같은 요청끼리만 적중하기 때문이다.
     """
-    global analysis_chain
-    if analysis_chain is None:
-        from src.services.langchain_chat import openai_prompt_cache_kwargs
+    from src.services.langchain_chat import openai_prompt_cache_kwargs
 
-        llm = ChatOpenAI(
-            model=OPENAI_QUERY_ANALYSIS_MODEL,
-            temperature=0,
-            timeout=20,
-            max_retries=1,  # 실패 시 raw 질문으로 폴백되므로 TTFB 누적 방지
-            model_kwargs=openai_prompt_cache_kwargs("query_analysis"),
-        )
-        analysis_chain = prompt | llm.with_structured_output(
-            _QueryAnalysisOutput,
-            method="json_schema",
-            strict=True,
-            include_raw=True,
-        )
-    return analysis_chain
+    llm = ChatOpenAI(
+        model=OPENAI_QUERY_ANALYSIS_MODEL,
+        temperature=0,
+        timeout=20,
+        max_retries=1,  # 실패 시 raw 질문으로 폴백되므로 TTFB 누적 방지
+        model_kwargs=openai_prompt_cache_kwargs("query_analysis"),
+    )
+    return prompt | llm.with_structured_output(
+        _QueryAnalysisOutput,
+        method="json_schema",
+        strict=True,
+        include_raw=True,
+    )
+
+
+def _get_analysis_chain():
+    """프로세스 전역 질의분석 체인. 처음 호출될 때 한 번만 `_build_analysis_chain`으로 만든다.
+
+    chroma_client.get_client와 같은 double-checked lock이다. 동시 첫 요청이
+    ChatOpenAI 클라이언트를 여러 개 만들고 하나만 남기는 일을 막는다.
+    """
+    global _analysis_chain
+    if _analysis_chain is None:
+        with _ANALYSIS_CHAIN_LOCK:
+            if _analysis_chain is None:
+                _analysis_chain = _build_analysis_chain()
+    return _analysis_chain
+
+
+def reset_analysis_chain() -> None:
+    """캐시된 체인을 버린다. 다음 `_get_analysis_chain()` 호출이 factory로 다시 만든다."""
+    global _analysis_chain
+    with _ANALYSIS_CHAIN_LOCK:
+        _analysis_chain = None
 
 
 def enforce_explicit_year_boundary(
