@@ -96,6 +96,24 @@ agent에게 넘기는 지시에는 다음을 포함한다.
 Claude Code에서 위임할 때는 Agent tool에 위 지시를 넣고, agent가 첫 단계에서 해당
 worktree로 이동하도록 한다. 한 worktree에는 한 번에 한 agent만 배정한다.
 
+### Codex 우선 위임
+
+구현·QA 위임은 Codex CLI를 우선 사용한다. 계정(요금제)별로 역할을 나눈다.
+
+| 실행기 | 계정 | 용도 |
+|---|---|---|
+| `codex` | Pro Lite | 구현, QA 지적 반영 등 긴 작업 |
+| `codex2` | Plus (`CODEX_HOME=~/.codex2`) | 읽기 전용 독립 QA 리뷰, 짧은 확인 |
+
+- 위 지시를 파일로 작성해 해당 worktree에서 실행한다.
+  - 구현: `codex exec --cd <worktree> --sandbox workspace-write -c 'approval_policy="never"' -o <report> - < <지시>`
+  - QA: `CODEX_HOME="$HOME/.codex2" codex exec --cd <worktree> --sandbox read-only -c 'approval_policy="never"' -o <report> - < <지시>`
+  - `codex2`는 셸 alias이므로 스크립트에서는 `CODEX_HOME`을 직접 지정한다.
+- network는 `npm ci`·`dotnet restore`처럼 의존성 설치가 필요할 때만 `-c 'sandbox_workspace_write.network_access=true'`로 연다.
+- 구현과 QA는 서로 다른 실행 세션이 맡는다. Codex 종료 코드 0은 완료나 품질 통과가 아니며,
+  Orchestrator가 보고·diff·scope를 확인하고 핵심 테스트를 직접 재실행한 뒤 commit한다.
+- Codex를 쓸 수 없을 때(한도 소진, 인증 오류 등)만 Claude subagent로 대체하고 보고에 명시한다.
+
 ## Worktree Lifecycle
 
 새로운 구현 task가 생성되면:
