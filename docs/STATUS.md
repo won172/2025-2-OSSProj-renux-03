@@ -59,8 +59,8 @@ Last Updated: 2026-09-27
 
 ## Task Board
 
-멀티 agent 작업의 handoff 표. **Orchestrator만 갱신한다.** 구현·QA agent는 Completion Report로
-결과를 전달하고 이 표를 직접 수정하지 않는다. 절차는 [AGENTS.md](../AGENTS.md),
+멀티 agent 작업의 handoff 표. **Orchestrator가 일괄 갱신 PR(`docs/status-*`)로만 갱신한다.**
+task PR과 구현·QA agent는 이 문서를 수정하지 않고, 결과는 Completion Report로 전달한다. 절차는 [AGENTS.md](../AGENTS.md),
 [CLAUDE.md](../CLAUDE.md)를 따른다.
 
 Status 값:
@@ -77,8 +77,8 @@ Status 값:
 |---|---|---|---|---|---|---|---|---|
 | CI에서 프런트 `npm test`·백엔드 계약 테스트 실행 (pipeline-audit P0) | P0 | RAG/Backend (CI) | `chore/ci-contract-tests` | `ci-contract-tests` (제거됨) | Completed | 로컬 `npm test` 50/50, 계약 테스트 통과; PR #8 CI 4개 job 통과 | 계약 테스트는 product telemetry 계약만 다룸 | Recently Completed로 이동 |
 | RAG pytest 순서 독립성 검증·테스트 격리 (pipeline-audit P0) | P0 | QA + RAG/Backend | `test/rag-order-independence` | `rag-order-independence` (제거됨) | Completed | 순서 고정·역순·시드 8개·파일별·테스트별 실행 모두 977 passed (일반 DB·빈 DB). Orchestrator 재검증: 실제 Chroma 해시 불변, 시드 424242 통과 | 순서 의존 실패는 재현되지 않음. 테스트가 실제 `artifacts/db_chroma`·유지보수 잠금을 열던 문제를 conftest로 격리. `test_deadline_recall_baseline`은 `real_chroma`로 실제 인덱스 사용 유지. `vectorizers/manifest.lock`은 실제 경로 사용. `query_analysis.analysis_chain` 전역 싱글턴은 제품 코드에 남음 | PR #10 merge(`cffe3e3`). 후속: `chore/ci-random-order`, `refactor/query-analysis-chain` |
-| CI에 RAG 무작위 순서 pytest 단계 추가 | P0 후속 | RAG/Backend (CI) | `chore/ci-random-order` | `ci-random-order` | Review | 로컬: 순서 고정 2단계·무작위(seed 12345) 976 passed/1 skipped. Orchestrator 재검증: seed 987654 동일 | `pytest-randomly==5.0.0`은 `requirements-dev.txt`에만. 설치 시 로컬 기본 실행도 무작위가 되므로 `-p no:randomly` 필요. 재실행은 같은 seed 사용 | merge 승인 대기 |
-| 질의분석 체인 주입 지점 통일·싱글턴 초기화 (pipeline-audit 03 P0) | P0 | RAG/Backend | `refactor/query-analysis-chain` | `query-analysis-chain` | Review | 978 passed/1 skipped (일반·빈 DB, seed 1/2/3). 프롬프트·모델 설정·structured output kwargs가 origin/main과 동일함을 해시로 확인. Orchestrator 재검증: seed 555111·순서 고정 동일 | 공개 `analysis_chain` 제거, 주입 지점은 `_build_analysis_chain` 하나. `reset_analysis_chain()`은 공개 함수(현재 conftest만 호출) | merge 승인 대기. 다음: audit 03 공통 `QueryPlan` |
+| CI에 RAG 무작위 순서 pytest 단계 추가 | P0 후속 | RAG/Backend (CI) | `chore/ci-random-order` | `ci-random-order` (제거됨) | Completed | 로컬: 순서 고정 2단계·무작위(seed 12345) 976 passed/1 skipped. Orchestrator 재검증: seed 987654 동일 | `pytest-randomly==5.0.0`은 `requirements-dev.txt`에만. 설치 시 로컬 기본 실행도 무작위가 되므로 `-p no:randomly` 필요. 재실행은 같은 seed 사용 | PR #11 merge(`8c432dd`). CI 로그 seed 출력 확인 |
+| 질의분석 체인 주입 지점 통일·싱글턴 초기화 (pipeline-audit 03 P0) | P0 | RAG/Backend | `refactor/query-analysis-chain` | `query-analysis-chain` (제거됨) | Completed | 978 passed/1 skipped (일반·빈 DB, seed 1/2/3). 프롬프트·모델 설정·structured output kwargs가 origin/main과 동일함을 해시로 확인. Orchestrator 재검증: seed 555111·순서 고정 동일 | 공개 `analysis_chain` 제거, 주입 지점은 `_build_analysis_chain` 하나. `reset_analysis_chain()`은 공개 함수(현재 conftest만 호출) | PR #12 merge(`6b7ef92`), 무작위 순서 CI 통과. 다음 후보: audit 03 공통 `QueryPlan` |
 
 Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 완료된 행은 다음 갱신 때 Recently Completed로 옮긴다.
@@ -186,6 +186,9 @@ Next Action:
   로컬 HTTP 테스트를 위한 소켓 권한을 허용한 재실행 결과다.
 - 9월 27일 CI가 프런트 `npm test`와 백엔드 계약 테스트를 실제 실행 (PR #8, pipeline-audit P0).
 - 9월 27일 멀티 agent 개발 규칙(AGENTS.md, CLAUDE.md, Task Board) 도입 (PR #7).
+- 9월 27일 RAG 테스트 순서 독립성 검증 및 실제 Chroma·유지보수 잠금 격리 (PR #10).
+- 9월 27일 CI에 RAG 무작위 순서 pytest 단계 추가, `requirements-dev.txt` 도입 (PR #11).
+- 9월 27일 질의분석 체인 주입 지점 통일·싱글턴 초기화·동시 첫 생성 잠금 (PR #12).
 
 ## Agent Tasks
 
