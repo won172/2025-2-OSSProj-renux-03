@@ -78,7 +78,7 @@ src/RAG/tests/evaluation_results_*.csv
 /LAUNCH_READINESS.md
 /FEATURE_ROADMAP.md
 /SECURITY_LAUNCH_RUNBOOK.md
-/CLAUDE.md
+# CLAUDE.md는 Orchestrator 규칙이므로 추적한다(worktree에도 전달돼야 함).
 /docker-compose.yml
 /동똑이_수정_방향.md
 /동똑이_경쟁력_분석_보고서.docx
@@ -86,10 +86,19 @@ src/RAG/tests/evaluation_results_*.csv
 # 런칭 플랜 .docx 생성용 스크립트(서비스 소스 아님)
 /build_launch_plan.py
 # 감사·기획 문서(소스 아님 — 위 *_REVIEW.md 와 같은 성격)
-/docs/
+/docs/*
+# 서비스 아키텍처 문서는 저장소에서 버전 관리한다.
+!/docs/ARCHITECTURE.md
+!/docs/STATUS.md
 
-# 어시스턴트/로컬 작업 디렉터리
+# 어시스턴트/로컬 작업 디렉터리 (Claude Code의 .claude/worktrees/ 포함)
 /.claude/
+
+# 로컬 서명 요청·인증서·키 (iOS 배포 등). 커밋 금지.
+*.csr
+*.p12
+*.p8
+*.mobileprovision
 
 # 인스타 홍보용 이미지 + 이미지 생성 코드/폰트 (소스 아님)
 /insta/
