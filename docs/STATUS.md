@@ -59,8 +59,8 @@ Last Updated: 2026-09-27
 
 ## Task Board
 
-멀티 agent 작업의 handoff 표. **Orchestrator만 갱신한다.** 구현·QA agent는 Completion Report로
-결과를 전달하고 이 표를 직접 수정하지 않는다. 절차는 [AGENTS.md](../AGENTS.md),
+멀티 agent 작업의 handoff 표. **Orchestrator가 일괄 갱신 PR(`docs/status-*`)로만 갱신한다.**
+task PR과 구현·QA agent는 이 문서를 수정하지 않고, 결과는 Completion Report로 전달한다. 절차는 [AGENTS.md](../AGENTS.md),
 [CLAUDE.md](../CLAUDE.md)를 따른다.
 
 Status 값:
