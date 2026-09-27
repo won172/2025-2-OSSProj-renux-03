@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from check_golden_release_gate import release_manifest_problems
 from golden_matrix import DOMAINS, GoldenCase, file_sha256, load_matrix, load_taxonomy, validate_matrix
 
 
@@ -583,6 +584,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-answer-relevancy", type=float, default=RAG_METRIC_THRESHOLDS["answer_relevancy"])
     parser.add_argument("--min-context-precision", type=float, default=RAG_METRIC_THRESHOLDS["context_precision"])
     parser.add_argument("--min-context-recall", type=float, default=RAG_METRIC_THRESHOLDS["context_recall"])
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Release gate: refuse manifests that are subset, incomplete, or not release_eligible",
+    )
     args = parser.parse_args(argv)
     try:
         taxonomy = load_taxonomy(args.taxonomy)
@@ -592,6 +598,10 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("invalid matrix: " + "; ".join(structural))
         results = load_results(args.results, args.schema)
         manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        if args.release:
+            problems = release_manifest_problems(manifest, (case.id for case in cases))
+            if problems:
+                raise ValueError("NOT release evidence: " + "; ".join(problems))
         if manifest.get("as_of"):
             run_at = datetime.combine(
                 date.fromisoformat(manifest["as_of"]),

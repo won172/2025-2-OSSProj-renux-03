@@ -34,6 +34,37 @@ HF_HUB_OFFLINE=1 .venv311/bin/python scripts/report_canonical_lineage.py --mode 
 
 정상일 때 종료 코드는 `0`, 하나라도 불일치하거나 검사할 수 없으면 `1`이다.
 
+## 빌드 시점 게이트 (필수)
+
+색인 build/rebuild 스크립트는 작업한 데이터셋에 대해 위 strict 검사를 자동 실행하고,
+실패하면 종료 코드 `1`로 끝난다. 출력은 데이터셋·지표 이름·건수·오류 유형만 담는다.
+
+| 스크립트 | 검사 시점 | 실패 시 상태 |
+|---|---|---|
+| `build_indices.py` | 게시 **후** (운영 Chroma/Parquet 제자리 갱신, 스테이징 없음). 실제 재색인된 데이터셋만(중간 실패한 데이터셋 포함) | "published but lineage failed" — 아래 롤백 절차 수행 |
+| `rebuild_lexical_indices.py` | 재구축 **전** (희소 재구축은 SourceDocument·Parquet·Chroma를 바꾸지 않으므로 사전 검사와 사후 검사가 같다). `--state`/`--restore`는 검사하지 않음 | 아무것도 덮어쓰지 않음 |
+| `rebuild_dense_indices_isolated.py build/verify` | 격리 경로 검증(`verified`) 직후, 격리 Chroma 컬렉션 기준 | 활성화 기능이 없으므로 게시 없음. 해당 스테이징 경로를 승격하지 않는다 |
+| `rebuild_notices_dense.py build` | 스테이징 컬렉션 검증 직후, 체크포인트의 원본 artifact·물리 컬렉션 기준 | 포인터 변경 없음 |
+| `rebuild_notices_dense.py activate` | 포인터 전환 **전** | 전환 거부(`activation_refused`), 포인터 그대로 |
+
+비상 시에만 `--skip-lineage-gate`로 건너뛸 수 있다(`build_indices.py`,
+`rebuild_lexical_indices.py`, isolated 스크립트의 `build`/`verify`, notices 스크립트의
+`build`/`activate`). 건너뛰면 경고 배너가 stderr에 출력되고, JSON을 내는 스크립트는
+`"lineage_gate": {"status": "skipped"}`를 기록한다. 이 경우 배포 전에 반드시 수동 strict
+검사를 실행한다.
+
+주의: notices `activate` 게이트는 `maintenance_lock` 밖에서 실행되며, 운영 설정 artifact가
+아니라 체크포인트의 `source_artifact`와 비교한다. `--artifact`로 별도 파일을 지정해 빌드했다면
+활성화 후 `scripts/report_canonical_lineage.py --mode strict`로 운영 기준 검사를 반드시 다시 실행한다.
+
+### 게시 후 실패 시 롤백
+
+- `build_indices.py`: 원인(정본 누락·중복, 청크 불일치)을 고친 뒤 같은 데이터셋을 다시
+  재구축하거나, 사전에 떠둔 artifacts/Chroma 백업으로 복원한다. 복원 후 수동 strict 검사를
+  다시 실행해 `0`을 확인한다.
+- 희소 인덱스: `rebuild_lexical_indices.py --restore <backup-dir>`.
+- notices dense 포인터: `rebuild_notices_dense.py rollback --confirm-active-collection <active>`.
+
 ## 서버·배포 동작
 
 - 서버 시작과 런타임 재색인 후 동일 검사가 자동 실행된다.

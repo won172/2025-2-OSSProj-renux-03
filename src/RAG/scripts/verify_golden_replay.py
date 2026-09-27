@@ -11,6 +11,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from check_golden_release_gate import release_manifest_problems
 from evaluate_golden_matrix import load_results
 from golden_matrix import TAXONOMY_VERSION, file_sha256, load_matrix, load_taxonomy, validate_matrix
 
@@ -56,14 +57,12 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("invalid matrix: " + "; ".join(errors))
         manifest = _validate_json(manifest_path, args.manifest_schema)
         results = load_results(results_path, args.result_schema)
-        if (
-            not manifest["complete"]
-            or not manifest["release_eligible"]
-            or not manifest["candidate_fingerprint_stable"]
-            or manifest["failed_case_ids"]
-            or manifest["selected_case_ids"]
-        ):
-            raise ValueError("manifest is not a complete full-matrix real run")
+        problems = release_manifest_problems(manifest, (case.id for case in cases))
+        if problems:
+            raise ValueError(
+                "manifest is not a complete full-matrix real run (NOT release evidence): "
+                + "; ".join(problems)
+            )
         if manifest["matrix_sha256"] != file_sha256(args.matrix):
             raise ValueError("matrix hash differs from real-run provenance")
         if manifest["taxonomy_version"] != TAXONOMY_VERSION:
