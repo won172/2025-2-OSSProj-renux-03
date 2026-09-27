@@ -1,0 +1,3 @@
+# CI·로컬 개발용: 런타임 의존성 + 테스트 순서 무작위화(테스트 격리 회귀 검출)
+-r requirements.txt
+pytest-randomly==5.0.0
