@@ -59,8 +59,8 @@ Last Updated: 2026-09-27
 
 ## Task Board
 
-멀티 agent 작업의 handoff 표. **Orchestrator만 갱신한다.** 구현·QA agent는 Completion Report로
-결과를 전달하고 이 표를 직접 수정하지 않는다. 절차는 [AGENTS.md](../AGENTS.md),
+멀티 agent 작업의 handoff 표. **Orchestrator가 일괄 갱신 PR(`docs/status-*`)로만 갱신한다.**
+task PR과 구현·QA agent는 이 문서를 수정하지 않고, 결과는 Completion Report로 전달한다. 절차는 [AGENTS.md](../AGENTS.md),
 [CLAUDE.md](../CLAUDE.md)를 따른다.
 
 Status 값:
@@ -187,6 +187,9 @@ Next Action:
   로컬 HTTP 테스트를 위한 소켓 권한을 허용한 재실행 결과다.
 - 9월 27일 CI가 프런트 `npm test`와 백엔드 계약 테스트를 실제 실행 (PR #8, pipeline-audit P0).
 - 9월 27일 멀티 agent 개발 규칙(AGENTS.md, CLAUDE.md, Task Board) 도입 (PR #7).
+- 9월 27일 RAG 테스트 순서 독립성 검증 및 실제 Chroma·유지보수 잠금 격리 (PR #10).
+- 9월 27일 CI에 RAG 무작위 순서 pytest 단계 추가, `requirements-dev.txt` 도입 (PR #11).
+- 9월 27일 질의분석 체인 주입 지점 통일·싱글턴 초기화·동시 첫 생성 잠금 (PR #12).
 
 ## Agent Tasks
 
