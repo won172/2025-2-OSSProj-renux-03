@@ -281,6 +281,7 @@ def _print_report(df: pd.DataFrame, ground_truth: dict) -> None:
 # pytest 진입점
 # --------------------------------------------------------------------------- #
 
+@pytest.mark.real_chroma
 def test_deadline_recall_baseline():
     """실제 로컬 인덱스가 있을 때 deadline Recall@40을 smoke-check한다.
 
