@@ -14,6 +14,7 @@ from src.services import query_analysis  # noqa: E402
 from src.services.query_analysis import (  # noqa: E402
     QueryAnalysisResult,
     SubQuery,
+    _QueryAnalysisOutput,
     enforce_original_query_boundary,
 )
 
@@ -72,19 +73,25 @@ async def test_analysis_hides_history_when_previous_topic_does_not_overlap(monke
     captured: dict[str, str] = {}
 
     class FakeChain:
-        # 체인은 이제 파서를 포함하지 않고 원본 메시지를 돌려준다. 토큰 사용량이
-        # AIMessage에만 실려 있어, 파서를 체인에 붙이면 비용 집계에서 사라지기 때문이다.
+        # 체인은 structured output(include_raw=True) 형태로 원본 메시지와 파싱 결과를
+        # 함께 돌려준다. 토큰 사용량이 원본 AIMessage에만 실려 있기 때문이다.
         async def ainvoke(self, payload):
             captured.update(payload)
-            return SimpleNamespace(
-                content=QueryAnalysisResult(
+            return {
+                "raw": SimpleNamespace(usage_metadata=None, response_metadata={}),
+                "parsed": _QueryAnalysisOutput(
                     normalized_question="현재 모집 중인 공모전",
                     intent="notices",
+                    entities=[],
+                    time_focus="none",
                     search_queries=["현재 진행 중인 공모전"],
-                ).model_dump_json(),
-                usage_metadata=None,
-                response_metadata={},
-            )
+                    needs_clarification=False,
+                    clarification_reason=None,
+                    is_compound=False,
+                    sub_queries=[],
+                ),
+                "parsing_error": None,
+            }
 
     monkeypatch.setattr(query_analysis, "analysis_chain", FakeChain())
     result = await query_analysis.analyze_query(

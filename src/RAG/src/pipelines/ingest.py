@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 import json
 import argparse
+import inspect
 import logging
 import os
 import tempfile
@@ -47,11 +48,13 @@ from src.services.ingest_runtime import (
     serialized_ingest,
     serialized_ingest_write,
 )
+from src.services.corpus_revision import stamp_corpus_revision
 from src.pipelines.canonical import (
     CANONICAL_PAYLOAD_SCHEMA_VERSION,
     canonical_hash,
     canonical_json,
     source_document_key,
+    validate_source_document_identity,
 )
 from src.vectorstore.chroma_client import (
     add_items,
@@ -144,7 +147,11 @@ def _chunk_parent_identity(
 
 
 def _train_lexical_indices(
-    key: str, texts: list[str], chunk_ids: list[str]
+    key: str,
+    texts: list[str],
+    chunk_ids: list[str],
+    *,
+    corpus_revision: str | None = None,
 ) -> Tuple[object, object]:
     """희소 검색 인덱스를 pkl과 FTS5 양쪽으로 만든다.
 
@@ -163,10 +170,20 @@ def _train_lexical_indices(
     from src.config import LEXICAL_BACKEND
     from src.search.fts_index import build_fts_index
 
-    vectorizer, matrix = train_bm25(key, texts, chunk_ids=chunk_ids)
+    bm25_parameters = inspect.signature(train_bm25).parameters
+    bm25_kwargs: dict[str, object] = {"chunk_ids": chunk_ids}
+    if corpus_revision is not None and (
+        "corpus_revision" in bm25_parameters
+        or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in bm25_parameters.values())
+    ):
+        bm25_kwargs["corpus_revision"] = corpus_revision
+    vectorizer, matrix = train_bm25(key, texts, **bm25_kwargs)
 
     try:
-        build_fts_index(key, texts, chunk_ids)
+        fts_kwargs: dict[str, object] = {}
+        if corpus_revision is not None:
+            fts_kwargs["corpus_revision"] = corpus_revision
+        build_fts_index(key, texts, chunk_ids, **fts_kwargs)
     except Exception as exc:
         if LEXICAL_BACKEND == "fts5":
             raise
@@ -220,6 +237,7 @@ def _persist_chunks_unlocked(key: str, collection: str, chunks_df: pd.DataFrame)
         return chunks_df, None, None
 
     chunks_df = enrich_retrieval_fields(chunks_df)
+    chunks_df, corpus_revision = stamp_corpus_revision(key, chunks_df)
     retrieval_text = chunks_df["retrieval_text"].fillna("").astype(str)
 
     # 메타데이터 준비
@@ -268,6 +286,7 @@ def _persist_chunks_unlocked(key: str, collection: str, chunks_df: pd.DataFrame)
         key,
         retrieval_text.tolist(),
         chunks_df["chunk_id"].astype(str).tolist(),
+        corpus_revision=corpus_revision,
     )
     logging.info(
         "ingest_stage_completed dataset=%s run_id=%s stage=lexical rows=%s",
@@ -286,6 +305,7 @@ def persist_dataset_artifacts_only(key: str, chunks_df: pd.DataFrame) -> Tuple[p
 
     with serialized_ingest_write(dataset=key, operation="persist_dataset_artifacts_only"):
         chunks_df = enrich_retrieval_fields(chunks_df)
+        chunks_df, corpus_revision = stamp_corpus_revision(key, chunks_df)
         retrieval_text = chunks_df["retrieval_text"].fillna("").astype(str)
         artifacts = DATASET_ARTIFACTS[key]
         write_path = _write_chunk_artifact_atomic(artifacts, chunks_df)
@@ -295,6 +315,7 @@ def persist_dataset_artifacts_only(key: str, chunks_df: pd.DataFrame) -> Tuple[p
             key,
             retrieval_text.tolist(),
             chunks_df["chunk_id"].astype(str).tolist(),
+            corpus_revision=corpus_revision,
         )
         return chunks_df, vectorizer, matrix
 
@@ -419,6 +440,7 @@ def _store_source_documents(
 
     for record in materialized:
         source_id = str(record["source_id"]).strip()
+        expected_document_key = source_document_key(dataset, source_id)
         payload = dict(record.get("payload") or {})
         document = existing.get(source_id)
         if document is None:
@@ -426,10 +448,16 @@ def _store_source_documents(
                 dataset=dataset,
                 source_type=str(record.get("source_type") or "legacy_snapshot"),
                 source_id=source_id,
-                document_key=source_document_key(dataset, source_id),
+                document_key=expected_document_key,
             )
             session.add(document)
             existing[source_id] = document
+        else:
+            validate_source_document_identity(
+                dataset,
+                source_id,
+                document.document_key,
+            )
 
         document.source_type = str(record.get("source_type") or document.source_type or "legacy_snapshot")
         document.source_url = str(record.get("source_url") or "")
@@ -618,7 +646,12 @@ def _store_staff_source_documents(session: Session, frame: pd.DataFrame) -> int:
         position = _first_nonempty(row, ["직위", "position"])
         phone = _first_nonempty(row, ["전화번호", "phone"])
         email = _first_nonempty(row, ["이메일", "email"])
-        base = ":".join(part for part in (department, name, position, phone, email) if part)
+        upstream_id = _first_nonempty(row, ["원천ID", "source_id", "staff_id", "staff_seq"])
+        base = (
+            f"upstream:{upstream_id}"
+            if upstream_id
+            else ":".join(part for part in (department, name, position, phone, email) if part)
+        )
         source_id = _unique_source_id(base, payload, seen)
         records.append({
             "source_id": source_id,
@@ -1829,6 +1862,7 @@ def ingest_courses(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, obj
 
             combined["이수대상"] = combined["이수대상"].apply(_normalize_grade)
 
+    canonical_course_frame = pd.DataFrame()
     session = SessionLocal()
     try:
         session.query(Chunk).filter(Chunk.course_id.isnot(None)).delete()
@@ -1861,10 +1895,19 @@ def ingest_courses(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, obj
         session.commit()
         combined["db_id"] = [obj.id for obj in course_objs]
         _store_course_source_documents(session, combined)
+        # The canonical rows now own identity. Building directly from ``combined``
+        # would fall back to a SHA1 doc_id because crawler CSV rows do not yet
+        # carry ``document_key``; that prevents graph evidence from joining the
+        # search projection until a later reindex. Reload the just-persisted
+        # canonical frame so every new course chunk starts with the exact
+        # SourceDocument identity.
+        canonical_course_frame = load_canonical_source_frame(session, "courses")
     finally:
         session.close()
         
-    chunks_df = build_course_chunks(combined)
+    chunks_df = build_course_chunks(
+        canonical_course_frame if not canonical_course_frame.empty else combined
+    )
     _save_chunks_to_sqlite(chunks_df, "courses")
     # 교과 doc_id는 내용 기반이라 텍스트가 바뀌면 새 ID가 생긴다 —
     # 컬렉션을 리셋하지 않으면 옛 청크가 고아로 남아 검색을 오염시킴(staff/schedule과 동일 패턴).
@@ -1949,6 +1992,76 @@ def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(chunks)
 
 
+def _replace_staff_from_frame(df: pd.DataFrame) -> Tuple[pd.DataFrame, object, object]:
+    """Replace staff projections from one approved complete snapshot."""
+    if df.empty:
+        raise ValueError("approved staff snapshot is empty")
+    df = df.fillna("").astype(str).copy()
+
+    session = SessionLocal()
+    try:
+        session.query(Chunk).filter(Chunk.staff_id.isnot(None)).delete()
+        session.query(Staff).delete()
+        session.commit()
+
+        staff_objs = []
+        for _, row in df.iterrows():
+            raw_json = json.dumps(row.to_dict(), ensure_ascii=False)
+            dept = row.get("조직(트리)", "")
+
+            def _named(*candidates: str) -> str:
+                for column in candidates:
+                    if column not in df.columns:
+                        continue
+                    value = str(row.get(column, "")).strip()
+                    if value and value.lower() != "nan":
+                        return value
+                return ""
+
+            name_val = _named("성명", "이름", "name")
+            if not name_val:
+                for col in df.columns:
+                    if col.startswith("Data_"):
+                        value = str(row.get(col, "")).strip()
+                        if value and value.lower() != "nan":
+                            name_val = value
+                            break
+
+            staff_objs.append(
+                Staff(
+                    department=dept,
+                    name=name_val,
+                    position=_named("직위", "position"),
+                    role=_named("담당업무", "role"),
+                    phone=_named("전화번호", "phone"),
+                    email=_named("이메일", "email"),
+                    raw_data=raw_json,
+                )
+            )
+
+        session.add_all(staff_objs)
+        session.commit()
+        df["db_id"] = [obj.id for obj in staff_objs]
+        _store_staff_source_documents(session, df)
+        canonical_staff_frame = load_canonical_source_frame(session, "staff")
+    finally:
+        session.close()
+
+    chunks_df = build_staff_chunks(
+        canonical_staff_frame if not canonical_staff_frame.empty else df
+    )
+    _save_chunks_to_sqlite(chunks_df, "staff")
+    return _persist_replacing_collection(
+        "staff", DATASET_ARTIFACTS["staff"].collection, chunks_df
+    )
+
+
+@serialized_ingest("staff")
+def ingest_staff_frame(df: pd.DataFrame) -> Tuple[pd.DataFrame, object, object]:
+    """Apply a reviewed crawler snapshot without a CSV handoff."""
+    return _replace_staff_from_frame(df)
+
+
 @serialized_ingest("staff")
 def ingest_staff(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, object, object]:
     """교직원 명부를 적재한다.
@@ -1974,65 +2087,7 @@ def ingest_staff(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, objec
         return pd.DataFrame(), None, None
 
     df = pd.read_csv(path).fillna("").astype(str)
-    
-    session = SessionLocal()
-    try:
-        session.query(Chunk).filter(Chunk.staff_id.isnot(None)).delete()
-        session.query(Staff).delete()
-        session.commit()
-        
-        staff_objs = []
-        for _, row in df.iterrows():
-            raw_json = json.dumps(row.to_dict(), ensure_ascii=False)
-            dept = row.get("조직(트리)", "")
-
-            # 명명 컬럼(성명·직위·담당업무·전화번호)을 그대로 옮긴다. 예전에는 `Data_`로
-            # 시작하는 컬럼에서 이름을 찾았는데 이 CSV의 컬럼은 한글이라 한 건도 걸리지
-            # 않았고, 직위·전화번호는 대입조차 없었다. 그 결과 4,303행 전부에서
-            # name/position/phone이 비어 raw_data JSON 말고는 쓸 수 있는 값이 없었다.
-            # 연락처 질의에서 "번호가 있는 행"이나 "행정 직위"로 추릴 수 없던 원인이다.
-            def _named(*candidates: str) -> str:
-                for column in candidates:
-                    if column not in df.columns:
-                        continue
-                    value = str(row.get(column, "")).strip()
-                    if value and value.lower() != "nan":
-                        return value
-                return ""
-
-            name_val = _named("성명", "이름", "name")
-            if not name_val:
-                # 구버전 CSV(Data_0, Data_1 …) 호환.
-                for col in df.columns:
-                    if col.startswith("Data_"):
-                        value = str(row.get(col, "")).strip()
-                        if value and value.lower() != "nan":
-                            name_val = value
-                            break
-
-            obj = Staff(
-                department=dept,
-                name=name_val,
-                position=_named("직위", "position"),
-                role=_named("담당업무", "role"),
-                phone=_named("전화번호", "phone"),
-                email=_named("이메일", "email"),
-                raw_data=raw_json,
-            )
-            staff_objs.append(obj)
-            
-        session.add_all(staff_objs)
-        session.commit()
-        df["db_id"] = [obj.id for obj in staff_objs]
-        _store_staff_source_documents(session, df)
-    finally:
-        session.close()
-        
-    chunks_df = build_staff_chunks(df)
-    _save_chunks_to_sqlite(chunks_df, "staff")
-    return _persist_replacing_collection(
-        "staff", DATASET_ARTIFACTS["staff"].collection, chunks_df
-    )
+    return _replace_staff_from_frame(df)
 
 
 # --- Meals (학식 식단) ---
@@ -2131,6 +2186,12 @@ def store_meals_in_db(df: pd.DataFrame) -> int:
                     document_key=document_key,
                 )
                 session.add(document)
+            else:
+                validate_source_document_identity(
+                    "meals",
+                    source_id,
+                    document.document_key,
+                )
             document.source_url = "https://dgucoop.dongguk.edu/store/store.php?w=4"
             document.title = f"{row.get('date', '').strip()} {row.get('restaurant', '').strip()} 학식"
             document.category = "meals"
@@ -2407,6 +2468,7 @@ __all__ = [
     "ingest_schedule",
     "ingest_courses",
     "ingest_staff",
+    "ingest_staff_frame",
     "ingest_meals",
     "load_canonical_source_frame",
     "backfill_static_source_documents",

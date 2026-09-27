@@ -7,6 +7,7 @@ from src.pipelines.canonical import (
     canonical_json,
     normalize_payload,
     source_document_key,
+    validate_source_document_identity,
 )
 
 
@@ -51,3 +52,22 @@ def test_source_document_key_requires_both_parts():
         pass
     else:
         raise AssertionError("missing source_id must be rejected")
+
+
+def test_persisted_document_identity_must_match_the_shared_contract():
+    assert validate_source_document_identity(
+        "courses",
+        "컴퓨터학과:CSE1001",
+        "courses:컴퓨터학과:CSE1001",
+    ) == "courses:컴퓨터학과:CSE1001"
+
+    try:
+        validate_source_document_identity(
+            "courses",
+            "컴퓨터학과:CSE1001",
+            "legacy-sha1-id",
+        )
+    except ValueError as exc:
+        assert "identity mismatch" in str(exc)
+    else:
+        raise AssertionError("mismatched persisted document_key must be rejected")

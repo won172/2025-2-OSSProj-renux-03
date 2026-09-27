@@ -34,12 +34,14 @@ from src.config import (
     OLLAMA_CHAT_MODEL,
     OLLAMA_CHAT_TEMPERATURE,
     OLLAMA_TIMEOUT_SECONDS,
+    OPENAI_CHAT_CACHED_INPUT_COST_PER_1M,
     OPENAI_CHAT_MAX_RETRIES,
     OPENAI_CHAT_INPUT_COST_PER_1M,
     OPENAI_CHAT_MODEL,
     OPENAI_CHAT_OUTPUT_COST_PER_1M,
     OPENAI_CHAT_TEMPERATURE,
     OPENAI_CHAT_TIMEOUT_SECONDS,
+    OPENAI_PROMPT_CACHE_KEY_PREFIX,
     REDIS_HISTORY_TTL_SECONDS,
     REDIS_URL,
 )
@@ -51,6 +53,17 @@ _REDIS_CLIENT = redis.from_url(REDIS_URL)
 logger = logging.getLogger(__name__)
 
 
+def openai_prompt_cache_kwargs(stage: str) -> dict[str, str]:
+    """단계별 prompt_cache_key를 ChatOpenAI(model_kwargs=...)용으로 돌려준다.
+
+    자동 캐싱은 prefix가 같아도 다른 서버로 분산되면 적중하지 않는다. 단계마다
+    시스템 프롬프트가 고정이므로 단계 이름을 키로 쓰면 같은 prefix끼리 모인다.
+    """
+    if not OPENAI_PROMPT_CACHE_KEY_PREFIX:
+        return {}
+    return {"prompt_cache_key": f"{OPENAI_PROMPT_CACHE_KEY_PREFIX}-{stage}"}
+
+
 def _build_openai_llm() -> BaseChatModel:
     return ChatOpenAI(
         model=OPENAI_CHAT_MODEL,
@@ -58,6 +71,7 @@ def _build_openai_llm() -> BaseChatModel:
         timeout=OPENAI_CHAT_TIMEOUT_SECONDS,
         max_retries=OPENAI_CHAT_MAX_RETRIES,
         stream_usage=True,
+        model_kwargs=openai_prompt_cache_kwargs("generation"),
     )
 
 
@@ -265,18 +279,48 @@ def _extract_usage_metadata(message: BaseMessage) -> dict[str, int] | None:
     if input_tokens is None and output_tokens is None and total_tokens is None:
         return None
 
-    return {
+    extracted = {
         "input_tokens": input_tokens or 0,
         "output_tokens": output_tokens or 0,
         "total_tokens": total_tokens or 0,
     }
+    cached_input_tokens = _cached_input_tokens(usage)
+    if cached_input_tokens is not None:
+        extracted["cached_input_tokens"] = cached_input_tokens
+    return extracted
 
 
-def _estimate_openai_cost_usd(input_tokens: int, output_tokens: int) -> float | None:
+def _cached_input_tokens(usage: dict[str, Any]) -> int | None:
+    """프롬프트 캐시 히트 토큰 수. 프로바이더가 보고하지 않으면 None.
+
+    LangChain usage_metadata는 input_token_details.cache_read에, OpenAI 원본
+    usage는 prompt_tokens_details.cached_tokens에 싣는다. input_tokens에 이미
+    포함된 값이므로 합산하지 않고 비율만 본다.
+    """
+    for details_key, value_key in (
+        ("input_token_details", "cache_read"),
+        ("prompt_tokens_details", "cached_tokens"),
+    ):
+        details = usage.get(details_key)
+        if isinstance(details, dict):
+            value = _usage_value(details, value_key)
+            if value is not None:
+                return value
+    return None
+
+
+def _estimate_openai_cost_usd(
+    input_tokens: int,
+    output_tokens: int,
+    cached_input_tokens: int = 0,
+) -> float | None:
     if OPENAI_CHAT_INPUT_COST_PER_1M <= 0 and OPENAI_CHAT_OUTPUT_COST_PER_1M <= 0:
         return None
+    cached = min(max(cached_input_tokens, 0), input_tokens)
+    cached_rate = OPENAI_CHAT_CACHED_INPUT_COST_PER_1M or OPENAI_CHAT_INPUT_COST_PER_1M
     return round(
-        (input_tokens / 1_000_000) * OPENAI_CHAT_INPUT_COST_PER_1M
+        ((input_tokens - cached) / 1_000_000) * OPENAI_CHAT_INPUT_COST_PER_1M
+        + (cached / 1_000_000) * cached_rate
         + (output_tokens / 1_000_000) * OPENAI_CHAT_OUTPUT_COST_PER_1M,
         8,
     )
@@ -305,6 +349,7 @@ def _append_usage_record(
             estimated = _estimate_openai_cost_usd(
                 usage.get("input_tokens", 0),
                 usage.get("output_tokens", 0),
+                usage.get("cached_input_tokens", 0),
             )
             if estimated is not None:
                 record["estimated_cost_usd"] = estimated

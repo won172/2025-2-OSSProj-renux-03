@@ -1,4 +1,4 @@
-"""질의분석 호출이 비용 집계에 잡히는지."""
+"""질의분석 호출이 비용 집계에 잡히고, structured output이 기존 계약으로 변환되는지."""
 from __future__ import annotations
 
 import sys
@@ -13,28 +13,41 @@ from src.services import query_analysis as qa
 
 
 class _FakeChain:
-    def __init__(self, message): self._message = message
-    async def ainvoke(self, _payload): return self._message
+    def __init__(self, response): self._response = response
+    async def ainvoke(self, _payload): return self._response
 
 
-def _message(content: str):
+def _raw():
     return SimpleNamespace(
-        content=content,
+        content="",
         usage_metadata={"input_tokens": 620, "output_tokens": 48, "total_tokens": 668},
         response_metadata={},
     )
 
 
-VALID = (
-    '{"normalized_question":"수강신청 기간","intent":"schedule","entities":{},'
-    '"time_focus":"none","search_queries":["수강신청 기간"],"needs_clarification":false,'
-    '"clarification_reason":null,"is_compound":false,"sub_queries":[]}'
-)
+def _output(**overrides) -> qa._QueryAnalysisOutput:
+    fields = {
+        "normalized_question": "수강신청 기간",
+        "intent": "schedule",
+        "entities": [],
+        "time_focus": "none",
+        "search_queries": ["수강신청 기간"],
+        "needs_clarification": False,
+        "clarification_reason": None,
+        "is_compound": False,
+        "sub_queries": [],
+    }
+    fields.update(overrides)
+    return qa._QueryAnalysisOutput(**fields)
+
+
+def _response(parsed, parsing_error=None):
+    return {"raw": _raw(), "parsed": parsed, "parsing_error": parsing_error}
 
 
 @pytest.mark.asyncio
 async def test_successful_analysis_is_recorded(monkeypatch):
-    monkeypatch.setattr(qa, "_get_analysis_chain", lambda: _FakeChain(_message(VALID)))
+    monkeypatch.setattr(qa, "_get_analysis_chain", lambda: _FakeChain(_response(_output())))
     usage: list[dict] = []
     result = await qa.analyze_query("수강신청 기간", usage_collector=usage)
     assert result is not None
@@ -48,7 +61,11 @@ async def test_successful_analysis_is_recorded(monkeypatch):
 @pytest.mark.asyncio
 async def test_failed_parse_still_records_the_spend(monkeypatch):
     """파싱이 실패해도 호출은 이미 나갔다. 빼면 비용 설명이 맞지 않는다."""
-    monkeypatch.setattr(qa, "_get_analysis_chain", lambda: _FakeChain(_message("not json")))
+    monkeypatch.setattr(
+        qa,
+        "_get_analysis_chain",
+        lambda: _FakeChain(_response(None, ValueError("not json"))),
+    )
     usage: list[dict] = []
     assert await qa.analyze_query("수강신청 기간", usage_collector=usage) is None
     assert len(usage) == 1
@@ -58,5 +75,44 @@ async def test_failed_parse_still_records_the_spend(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_collector_is_optional(monkeypatch):
-    monkeypatch.setattr(qa, "_get_analysis_chain", lambda: _FakeChain(_message(VALID)))
+    monkeypatch.setattr(qa, "_get_analysis_chain", lambda: _FakeChain(_response(_output())))
     assert await qa.analyze_query("수강신청 기간") is not None
+
+
+@pytest.mark.asyncio
+async def test_entity_groups_become_the_dict_contract(monkeypatch):
+    """strict 스키마는 Dict를 못 받으므로 [{key, values}]를 받아 기존 dict로 되돌린다."""
+    parsed = _output(
+        intent="notices",
+        normalized_question="통계학과 장학금",
+        search_queries=["통계학과 장학금"],
+        entities=[
+            {"key": "department", "values": ["통계학과"]},
+            {"key": "department", "values": ["통계학과", "경영학과"]},
+            {"key": "scholarship", "values": []},
+            {"key": " ", "values": ["무시"]},
+        ],
+    )
+    monkeypatch.setattr(qa, "_get_analysis_chain", lambda: _FakeChain(_response(parsed)))
+    result = await qa.analyze_query("통계학과 장학금")
+    assert result is not None
+    assert result.entities == {"department": ["통계학과", "경영학과"]}
+
+
+def test_analysis_schema_is_strict_compatible():
+    """strict 모드: 모든 객체가 닫혀 있고 모든 필드가 required여야 한다."""
+    from openai.lib._parsing._completions import type_to_response_format_param
+
+    schema = type_to_response_format_param(qa._QueryAnalysisOutput)["json_schema"]["schema"]
+    objects = [schema, *schema.get("$defs", {}).values()]
+    for obj in objects:
+        assert obj["additionalProperties"] is False
+        assert set(obj["required"]) == set(obj["properties"])
+
+
+def test_analysis_prompt_puts_dynamic_inputs_last():
+    """고정 지침이 앞, 요청마다 바뀌는 값이 뒤에 있어야 prefix 캐시가 적중한다."""
+    template = qa.prompt.template
+    last_static = template.index("학식/식단 질문에서")
+    for variable in ("{history}", "{temporal_context}", "{query}"):
+        assert template.index(variable) > last_static

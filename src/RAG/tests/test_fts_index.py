@@ -123,6 +123,24 @@ def test_점수_배열_길이가_문서_수와_같다(db):
     assert index.score("전혀없는단어").shape == (7,)
 
 
+def test_subset_score_matches_full_index_raw_bm25(db):
+    documents = {
+        "target": "졸업 기준 교양 학점 안내",
+        "other": "졸업 기준 규정",
+        **{f"noise-{i}": f"장학금 신청 일정 {i}" for i in range(30)},
+    }
+    index = _build(db, "rules", documents)
+    full = index.score("2024학번 졸업 기준 교양 학점은?")
+    positions = [index.chunk_ids.index("target"), index.chunk_ids.index("other")]
+
+    subset = index.score_subset("2024학번 졸업 기준 교양 학점은?", positions)
+
+    assert set(subset) == set(positions)
+    assert all(subset[pos] == pytest.approx(full[pos]) for pos in positions)
+    assert index.score_subset("!!!", positions) == {}
+    assert index.score_subset("졸업", []) == {}
+
+
 # --- 질의 이스케이프 ----------------------------------------------------------
 
 

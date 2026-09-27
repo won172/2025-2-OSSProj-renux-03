@@ -28,7 +28,13 @@ def _job_body(name: str) -> str:
 
 
 # notices는 파이프라인(notices_sync)이 직접 IngestionRun을 남기므로 잡 본문에는 없다.
-_JOBS_RECORDING_IN_JOB = ["refresh_rules_job", "refresh_schedule_job", "refresh_courses_job", "refresh_meals_job"]
+_JOBS_RECORDING_IN_JOB = [
+    "refresh_rules_job",
+    "refresh_schedule_job",
+    "refresh_courses_job",
+    "refresh_meals_job",
+    "refresh_staff_job",
+]
 
 
 @pytest.mark.parametrize("잡", _JOBS_RECORDING_IN_JOB)

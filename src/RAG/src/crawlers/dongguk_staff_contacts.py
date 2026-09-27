@@ -71,8 +71,12 @@ def _build_dept_paths(tree: List[Dict[str, Any]]) -> Dict[str, str]:
     return paths
 
 
-def crawl_staff_contacts(delay: float = REQUEST_DELAY) -> pd.DataFrame:
-    tree = fetch_dept_tree()
+def crawl_staff_contacts(
+    delay: float = REQUEST_DELAY,
+    *,
+    request_timeout: float = 30.0,
+) -> pd.DataFrame:
+    tree = fetch_dept_tree(timeout=request_timeout)
     paths = _build_dept_paths(tree)
 
     dept_nodes = [
@@ -83,15 +87,19 @@ def crawl_staff_contacts(delay: float = REQUEST_DELAY) -> pd.DataFrame:
 
     records: List[Dict[str, str]] = []
     failed = 0
+    failed_departments: List[str] = []
+    fetched_departments = 0
     for node in dept_nodes:
         dept_seq = str(node["id"])
         dept_name = (node.get("text") or "").strip()
         try:
-            rows = fetch_staff_for_dept(dept_seq)
+            rows = fetch_staff_for_dept(dept_seq, timeout=request_timeout)
         except Exception as exc:  # noqa: BLE001 — 한 부서 실패가 전체 수집을 막지 않도록
             failed += 1
+            failed_departments.append(dept_seq)
             print(f"⚠️ 부서 '{dept_name}'({dept_seq}) 수집 실패: {exc}")
             continue
+        fetched_departments += 1
 
         for row in rows:
             name = (row.get("staff_name") or "").strip()
@@ -102,6 +110,16 @@ def crawl_staff_contacts(delay: float = REQUEST_DELAY) -> pd.DataFrame:
                 continue
             records.append(
                 {
+                    # 공개 API가 안정 식별자를 제공하는 환경에서는 연락처가 바뀌어도
+                    # 동일 인물로 연결한다. 키가 없는 구버전 응답은 빈 값으로 유지한다.
+                    "원천ID": str(
+                        row.get("staff_seq")
+                        or row.get("staff_id")
+                        or row.get("user_id")
+                        or row.get("emp_no")
+                        or row.get("seq")
+                        or ""
+                    ).strip(),
                     "조직(트리)": (row.get("dept_name") or dept_name).strip(),
                     "부서경로": paths.get(dept_seq, dept_name),
                     "성명": name,
@@ -120,6 +138,12 @@ def crawl_staff_contacts(delay: float = REQUEST_DELAY) -> pd.DataFrame:
     df = pd.DataFrame(records)
     if not df.empty:
         df.drop_duplicates(inplace=True)
+    df.attrs["crawl_diagnostics"] = {
+        "requested_departments": len(dept_nodes),
+        "fetched_departments": fetched_departments,
+        "failed_departments": failed,
+        "failed_department_ids": failed_departments,
+    }
     print(f"✅ 교직원 {len(df)}건 수집 완료.")
     return df
 

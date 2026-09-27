@@ -11,7 +11,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from src.config import OPENAI_CHAT_TIMEOUT_SECONDS, OPENAI_GROUNDING_MODEL
-from src.services.langchain_chat import _append_usage_record, _extract_usage_metadata
+from src.services.langchain_chat import (
+    _append_usage_record,
+    _extract_usage_metadata,
+    openai_prompt_cache_kwargs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +37,10 @@ def _get_grounding_llm() -> Any:
             temperature=0,
             timeout=OPENAI_CHAT_TIMEOUT_SECONDS,
             max_retries=1,
-            model_kwargs={"response_format": {"type": "json_object"}},
+            model_kwargs={
+                "response_format": {"type": "json_object"},
+                **openai_prompt_cache_kwargs("grounding"),
+            },
         )
     return _GROUNDING_LLM
 

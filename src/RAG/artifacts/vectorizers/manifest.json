@@ -1,14 +1,14 @@
 {
-  "courses_bm25.pkl": "31c88f027ebb8c408113c8855f029f41ce616ce0f32732c9b10b0cf02621bf9f",
+  "courses_bm25.pkl": "bfd52c18c06d9233dad834c1ac4464c1168d454191c0bc01c83c679c0692ed4a",
   "courses_tfidf.pkl": "eef9b19ae63341854071bd163b26eb384ed89c3dae5ab2c9ab730d2fffc24f5b",
-  "meals_bm25.pkl": "203730b13e8d378857b62bf0c990571f91f7160c242742d422cb6ff682a7b828",
+  "meals_bm25.pkl": "4e38ea3d6eb5b4bb8d2f74be4cae1386c68ef0cf2cb2a858e1684db71730ef7a",
   "meals_tfidf.pkl": "11f91aa4633c80156b4f94ccce38a48dfc64b3a5b43b93710f20b9bb7bb1468a",
-  "notices_bm25.pkl": "93fa85d40d706f5c6596f361038bf7699e35914c0ab2ac381f0a210340916a27",
+  "notices_bm25.pkl": "47a2944b45a153f946d75ec6ae41e373fec9b952339f9cafe3a620b47cf610d5",
   "notices_tfidf.pkl": "1e0bc8c1a4cfac133348ef26ae41991d99f7e650e86c29ddb5d2b67f836e7bad",
-  "rules_bm25.pkl": "c8fea7edef75a9bfaa935fd3841deaae7d930ea06105a330fd5bb8ce7d5aec3a",
+  "rules_bm25.pkl": "254a3a47e2f40c2cbcb99ed55f1dde4dbab4afdbcdcb128ddbf37b61d371f433",
   "rules_tfidf.pkl": "1b96978bfe191348386951f1efe5562be588bf5bce2d816259e2a9ff23d867be",
-  "schedule_bm25.pkl": "939233ab3822c9319a30aa1f0770b57c767284db079b30705243864c73a5e2da",
+  "schedule_bm25.pkl": "59b21e632d375cf64590c2859c2408acf0531ef0ad2e81925eaaba0af100c848",
   "schedule_tfidf.pkl": "4c24bc88fa82e594ab2f40d9162509ef78eb09e4fd29eebae4988e0bb00c2f59",
-  "staff_bm25.pkl": "e60b02e3acaaead799ce59c69b629b570c28478a0ef09e2aa2483f52fdd85542",
+  "staff_bm25.pkl": "d8dbb0cb72b73bd5174d20858be39139ac08e094db1361a377bafd7e16b38f3c",
   "staff_tfidf.pkl": "146b0068b02be45cd87eeb1cf8a1272e1721da4b2e36126570c975e4b3742faf"
 }

@@ -18,7 +18,12 @@ from src.services.data_quality import (  # noqa: E402
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", default="notices")
+    parser.add_argument(
+        "--dataset",
+        choices=("notices",),
+        default="notices",
+        help="Dataset with source-document linkage checks (currently notices only)",
+    )
     parser.add_argument("--mode", choices=("observe", "strict"), default="observe")
     parser.add_argument("--output", type=Path, help="Optional JSON report path")
     parser.add_argument("--retry-output", type=Path, help="Optional retry-manifest JSON path")

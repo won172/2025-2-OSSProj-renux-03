@@ -46,6 +46,8 @@ def test_course_refresh_recrawls_before_forced_csv_ingest(monkeypatch):
         "_refresh_runtime_dataset_state",
         lambda dataset: calls.append(("refresh", dataset)),
     )
+    monkeypatch.setattr(scheduler, "_start_ingestion_run", lambda _dataset: 1)
+    monkeypatch.setattr(scheduler, "_finish_ingestion_run", lambda *_args, **_kwargs: None)
 
     scheduler.refresh_courses_job()
 

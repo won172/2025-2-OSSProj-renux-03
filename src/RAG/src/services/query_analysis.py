@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
-from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, ValidationError
@@ -59,7 +58,51 @@ class QueryAnalysisResult(BaseModel):
         return seen
 
 
-parser = PydanticOutputParser(pydantic_object=QueryAnalysisResult)
+class _EntityGroup(BaseModel):
+    key: str = Field(description="엔터티 종류(예: department, scholarship, office, course)")
+    values: List[str] = Field(description="질문에 드러난 해당 종류의 값")
+
+
+# OpenAI Structured Outputs(strict) 응답 스키마. strict 모드는 모든 필드를 required로
+# 요구하고 임의 키 객체(Dict)를 허용하지 않는다. 그래서 entities는 [{key, values}]
+# 목록으로 받고, 호출부 계약인 QueryAnalysisResult로 변환해 넘긴다.
+# 클래스 docstring은 스키마 description으로 모델에 전달되므로 모델용 문장만 둔다.
+class _QueryAnalysisOutput(BaseModel):
+    """동국대학교 RAG 검색을 위한 질의분석 결과."""
+
+    normalized_question: str = Field(description="원문 의미를 크게 바꾸지 않은 정규화 질문")
+    intent: Literal["notices", "rules", "schedule", "staff", "courses", "meals", "unknown"]
+    entities: List[_EntityGroup] = Field(description="질문에 명시된 엔터티. 없으면 빈 목록")
+    time_focus: Literal["today", "recent", "this_week", "this_month", "none"]
+    search_queries: List[str] = Field(description="검색용 질의. 원문을 크게 벗어나지 않는 표현")
+    needs_clarification: bool
+    clarification_reason: Optional[str] = Field(
+        description="needs_clarification=true일 때만 이유, 아니면 null"
+    )
+    is_compound: bool
+    sub_queries: List[SubQuery] = Field(description="복합 질문일 때만 채운다. 단순 질문은 빈 목록")
+
+    def to_result(self) -> QueryAnalysisResult:
+        entities: Dict[str, List[str]] = {}
+        for group in self.entities:
+            key = group.key.strip()
+            if not key:
+                continue
+            bucket = entities.setdefault(key, [])
+            for value in group.values:
+                if value not in bucket:
+                    bucket.append(value)
+        return QueryAnalysisResult(
+            normalized_question=self.normalized_question,
+            intent=self.intent,
+            entities={key: values for key, values in entities.items() if values},
+            time_focus=self.time_focus,
+            search_queries=self.search_queries,
+            needs_clarification=self.needs_clarification,
+            clarification_reason=self.clarification_reason,
+            is_compound=self.is_compound,
+            sub_queries=self.sub_queries,
+        )
 
 
 def _record_usage(
@@ -119,12 +162,6 @@ prompt = PromptTemplate(
     - sub_queries에는 학과/전공 등 질문에 드러난 구체 정보를 반영하세요(예: "통계학과 전공필수 과목").
     - 최대 {max_subqueries}개. 단순 질문(단일 측면)이면 is_compound=false, sub_queries=[]로 두세요.
 
-[이전 대화]
-{history}
-
-[요청 기준 시점]
-{temporal_context}
-
 intent 기준(가장 중심이 되는 단일 측면):
 - notices: 장학, 모집, 발표, 일반 공지, 최신 공지
 - rules: 학칙, 규정, 휴학, 복학, 재수강, 수강취소, 졸업, 성적 규정
@@ -133,15 +170,18 @@ intent 기준(가장 중심이 되는 단일 측면):
 - courses: 교과과정, 전공필수, 선수과목, 이수구분, 개설 과목
 - meals: 학식, 학생식당, 상록원, 솥앤누들, 누리터, 경영관 D-Flex, 식단, 메뉴, 중식·석식
 학식/식단 질문에서 '오늘'은 time_focus=today, '이번 주'는 this_week 로 두세요.
+
+[이전 대화]
+{history}
+
+[요청 기준 시점]
+{temporal_context}
+
 사용자 질문:
 {query}
-
-JSON 형식:
-{format_instructions}
 """,
     input_variables=["query", "history", "temporal_context"],
     partial_variables={
-        "format_instructions": parser.get_format_instructions(),
         "max_queries": str(QUERY_ANALYSIS_MAX_QUERIES),
         "max_subqueries": str(RAG_MAX_SUBQUERIES),
     },
@@ -154,23 +194,33 @@ analysis_chain = None
 
 
 def _get_analysis_chain():
-    """프롬프트+LLM까지만 묶는다. 파싱은 호출부가 따로 한다.
+    """프롬프트 + Structured Outputs(strict json_schema) 체인.
 
-    파서를 체인에 붙이면 AIMessage가 사라지면서 토큰 사용량도 함께 사라진다.
-    실제로 그래서 `rag_query_logs.llm_usage_json`에 query_analysis 단계가
-    한 건도 없었다 — 실측 p50 1,792ms로 생성 다음으로 비싼 단계인데
-    비용 집계에서는 통째로 보이지 않았다.
+    include_raw=True로 원본 AIMessage를 함께 받는다. 파싱 결과만 받으면 토큰
+    사용량이 사라진다 — 실제로 그래서 `rag_query_logs.llm_usage_json`에
+    query_analysis 단계가 한 건도 없었다(실측 p50 1,792ms로 생성 다음으로 비싼
+    단계인데 비용 집계에서는 통째로 보이지 않았다).
+
+    프롬프트는 고정 지침을 앞에, 대화·기준 시점·질문을 뒤에 둔다. 자동 프롬프트
+    캐싱은 앞부분이 같은 요청끼리만 적중하기 때문이다.
     """
     global analysis_chain
     if analysis_chain is None:
+        from src.services.langchain_chat import openai_prompt_cache_kwargs
+
         llm = ChatOpenAI(
             model=OPENAI_QUERY_ANALYSIS_MODEL,
             temperature=0,
             timeout=20,
             max_retries=1,  # 실패 시 raw 질문으로 폴백되므로 TTFB 누적 방지
-            model_kwargs={"response_format": {"type": "json_object"}},
+            model_kwargs=openai_prompt_cache_kwargs("query_analysis"),
         )
-        analysis_chain = prompt | llm
+        analysis_chain = prompt | llm.with_structured_output(
+            _QueryAnalysisOutput,
+            method="json_schema",
+            strict=True,
+            include_raw=True,
+        )
     return analysis_chain
 
 
@@ -287,16 +337,22 @@ async def analyze_query(
             if history_allows_context_rewrite(query, history_text)
             else ""
         )
-        raw = await _get_analysis_chain().ainvoke({
+        response = await _get_analysis_chain().ainvoke({
             "query": query,
             "history": safe_history.strip() or "(없음)",
             "temporal_context": temporal.prompt_text,
         })
-        _record_usage(usage_collector, raw, started_at)
+        if not isinstance(response, dict):
+            raise TypeError(f"unexpected query analysis response: {type(response)!r}")
+        _record_usage(usage_collector, response.get("raw"), started_at)
         usage_recorded = True
-        result = parser.parse(
-            raw.content if isinstance(raw.content, str) else str(raw.content)
-        )
+        parsed = response.get("parsed")
+        if not isinstance(parsed, _QueryAnalysisOutput):
+            # 스키마 위반이 아니라면 거절(refusal) 등으로 parsed가 비는 경우다.
+            raise ValueError(
+                f"invalid structured query analysis: {response.get('parsing_error')}"
+            )
+        result = parsed.to_result()
     except ValidationError as exc:
         if not usage_recorded:
             _record_usage(usage_collector, None, started_at, failed=True)

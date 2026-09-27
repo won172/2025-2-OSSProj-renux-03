@@ -80,3 +80,11 @@ def test_evaluation_fingerprint_changes_with_artifact_and_build_revision(monkeyp
 
     assert artifact_changed != original
     assert revision_changed != artifact_changed
+
+    monkeypatch.setattr(
+        rag_service.rag_config,
+        "RAG_STRUCTURED_RETRIEVAL_ENABLED",
+        not rag_service.rag_config.RAG_STRUCTURED_RETRIEVAL_ENABLED,
+    )
+    strategy_changed = rag_service._build_evaluation_fingerprint()["fingerprint_sha256"]
+    assert strategy_changed != revision_changed

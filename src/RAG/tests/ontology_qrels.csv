@@ -1,0 +1,110 @@
+question_id,dataset,document_key,relevance,label_source,note
+OR-C01,courses,courses:가정교육과:HOM4057:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C02,courses,courses:건설환경공학과:CIV4079:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C02,courses,courses:건설환경공학과:CIV4008:전공과목 개설 총괄표:curriculum_page,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C03,courses,courses:건축공학부 건축공학전공:ARC4043:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C04,courses,courses:건축공학부 건축학전공:ARD2022:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C05,courses,courses:경영정보학과:MIS2017:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C06,courses,courses:경영학과:MGT2013:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C06,courses,courses:경영학과:MGT2013:경영학과 학사과정 전공교육과정 개설표:curriculum_table,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C07,courses,courses:경제학과:ECO2008:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C07,courses,courses:경제학과:ECO2008:전공과목 개설 총괄표:curriculum_page,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C08,courses,courses:경찰행정학부:POS2002:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C09,courses,courses:광고홍보학과:ADV2020:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C10,courses,courses:교육학과:EDU4003:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C10,courses,courses:교육학과:EDU4003:이수대상:curriculum_page,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C11,courses,courses:국어교육과:KLE4047:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C12,courses,courses:국어국문문예창작학부:KOR4108:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C12,courses,courses:국어국문문예창작학부:KOR4108:전공과목 개설 총괄표:curriculum_page,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C13,courses,courses:국제통상학과:INT4055:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C14,courses,courses:글로벌무역학과:TRA4028:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C14,courses,courses:글로벌무역학과:TRA4028:교과과정:curriculum_page,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C15,courses,courses:기계로봇에너지공학과:MEC4038:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C15,courses,courses:기계로봇에너지공학과:MEC4038:전공교과 개설표:curriculum_table,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C16,courses,courses:문화유산학과:CUH2007:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C17,courses,courses:물리학과:PHY4014:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C17,courses,courses:물리 · 반도체과학부:PHY4014:교육과정:curriculum_table,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C17,courses,courses:물리반도체과학부:PHY4014:교육과정:curriculum_table,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C17,courses,courses:물리학과:PHY4014:교육과정:curriculum_table,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C18,courses,courses:미디어커뮤니케이션학전공:COS4049:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C19,courses,courses:미술학부:ACS2001:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C20,courses,courses:범죄학과:PAS4044:2026.0:교과 교육과정:official_curriculum_pdf,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-C20,courses,courses:범죄학과:PAS4044:교과과정표:curriculum_page,2,canonical_structured_fixture,OFFERED_BY evidence
+OR-S01,staff,staff:공학교육혁신센터 행정팀:김**:팀장:02-2260-3857,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S01,staff,staff:공학교육혁신센터 행정팀:박**:팀원:02-2260-8835,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S01,staff,staff:공학교육혁신센터 행정팀:윤**:팀원:02-2260-8840,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S01,staff,staff:공학교육혁신센터 행정팀:이**:팀원:02-2260-8860,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S02,staff,staff:국제개발협력센터:남**:센터장:02-2260-3263,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S03,staff,staff:남산학사 행정팀:김**:과장:02-2260-4931,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S03,staff,staff:남산학사 행정팀:손**:팀원:02-2260-4930,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S03,staff,staff:남산학사 행정팀:신**:팀원:02-2260-4933,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S03,staff,staff:남산학사 행정팀:임**:팀장:02-2260-4929,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S04,staff,staff:데이터사이언스연구센터:이**:센터장:02-2260-3340,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S05,staff,staff:연구윤리센터:김**:센터장:02-2260-4916,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S05,staff,staff:연구윤리센터:김**:팀원:02-2260-4921,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S05,staff,staff:연구윤리센터:신**:과장:02-2260-4918,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S06,staff,staff:인권센터 행정팀:박*:팀장:02-2260-8850,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S06,staff,staff:인권센터 행정팀:오**:팀원:02-2260-3649,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S06,staff,staff:인권센터 행정팀:최**:팀원:02-2260-3648,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S07,staff,staff:학사지원팀:김**:과장:02-2260-3619,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S07,staff,staff:학사지원팀:김**:팀장:02-2260-3618,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S07,staff,staff:학사지원팀:송**:팀원:02-2260-3621,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S07,staff,staff:학사지원팀:이**:과장,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S07,staff,staff:학사지원팀:이**:팀원:02-2260-3620,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S08,staff,staff:장학팀:김**:과장:02-2260-3044,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S08,staff,staff:장학팀:김**:팀원:02-2260-3617,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S08,staff,staff:장학팀:유**:팀원:02-2260-3046,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S08,staff,staff:장학팀:유*:팀장:02-2260-3045,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S08,staff,staff:장학팀:이**:팀원:02-2260-3669,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S08,staff,staff:장학팀:최**:과장:02-2260-3046,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S09,staff,staff:카운슬링센터:김**:팀원:02-2260-3935,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S09,staff,staff:카운슬링센터:윤**:센터장:3427,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S09,staff,staff:카운슬링센터:윤**:팀원:02-2260-3931,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S09,staff,staff:카운슬링센터:이**:팀원:02-2260-3933,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S09,staff,staff:카운슬링센터:정**:팀원:02-2260-3928,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S10,staff,staff:창업교육센터:공**:팀원:02-2260-4991,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S10,staff,staff:창업교육센터:민**:팀원:02-2088-3737(내선1113),2,canonical_structured_fixture,WORKS_AT evidence
+OR-S10,staff,staff:창업교육센터:변**:팀원:02-2260-4995,2,canonical_structured_fixture,WORKS_AT evidence
+OR-S10,staff,staff:창업교육센터:이**:센터장:02-2260-8527,2,canonical_structured_fixture,WORKS_AT evidence
+OR-R01,rules,rules:entry_year_guides:2021_edu.pdf:2021:단과대학별 졸업기준#3,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R02,rules,rules:entry_year_guides:2022_edu.pdf:2022:단과대학별 졸업기준#3,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R03,rules,rules:entry_year_guides:2023_edu.pdf:2023:단과대학별 졸업기준#3,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R04,rules,rules:entry_year_guides:2024_edu.pdf:2024:단과대학별 졸업기준#3,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R05,rules,rules:entry_year_guides:2025_edu.pdf:2025:단과대학별 졸업기준#3,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R06,rules,rules:entry_year_guides:2026_edu.pdf:2026:단과대학별 졸업기준#3,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R07,rules,rules:entry_year_guides:2021_edu.pdf:2021:단과대학별 졸업기준#9,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R08,rules,rules:entry_year_guides:2022_edu.pdf:2022:단과대학별 졸업기준#9,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R09,rules,rules:entry_year_guides:2023_edu.pdf:2023:단과대학별 졸업기준#9,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R10,rules,rules:entry_year_guides:2024_edu.pdf:2024:단과대학별 졸업기준#2,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R11,rules,rules:entry_year_guides:2025_edu.pdf:2025:단과대학별 졸업기준#2,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R12,rules,rules:entry_year_guides:2026_edu.pdf:2026:단과대학별 졸업기준#2,2,canonical_structured_fixture,GOVERNS and VALID_FOR_ENTRY evidence
+OR-R13,rules,rules:entry_year_guides:2022_edu.pdf:2022:교양교육과정 이수 기준,2,canonical_structured_fixture,VALID_FOR_ENTRY evidence
+OR-R13,rules,rules:entry_year_guides:2022_edu.pdf:2022:교양교육과정 이수 기준#2,2,canonical_structured_fixture,VALID_FOR_ENTRY evidence
+OR-R14,rules,rules:entry_year_guides:2024_edu.pdf:2024:교양교육과정 이수 기준,2,canonical_structured_fixture,VALID_FOR_ENTRY evidence
+OR-R15,rules,rules:entry_year_guides:2026_edu.pdf:2026:교양교육과정 이수 기준,2,canonical_structured_fixture,VALID_FOR_ENTRY evidence
+OR-D01,schedule,schedule:2026-08-03:2026-08-07:학사일정:학사지원팀:2026학년도 2학기 학부 수강 신청,2,canonical_structured_fixture,OCCURS_DURING and MANAGED_BY evidence
+OR-D02,schedule,schedule:2027-02-01:2027-02-05:학사일정:학사지원팀:2027학년도 1학기 학부 수강 신청,2,canonical_structured_fixture,OCCURS_DURING and MANAGED_BY evidence
+OR-D03,schedule,schedule:2026-09-01:2026-09-01:학사일정:각 학과별:개강/학기개시일,2,canonical_structured_fixture,OCCURS_DURING evidence
+OR-D04,schedule,schedule:2026-12-14:2026-12-14:학사일정:종강,2,canonical_structured_fixture,OCCURS_DURING evidence
+OR-D05,schedule,schedule:2026-10-20:2026-10-27:학사일정:2학기 중간시험,2,canonical_structured_fixture,OCCURS_DURING evidence
+OR-D06,schedule,schedule:2026-06-09:2026-06-15:학사일정:1학기 기말시험,2,canonical_structured_fixture,OCCURS_DURING evidence
+OR-D07,schedule,"schedule:2026-12-23:2026-12-28:학사일정:담당교원:2학기 성적처리(공시,정정)",2,canonical_structured_fixture,OCCURS_DURING evidence
+OR-D08,schedule,"schedule:2026-06-24:2026-06-29:학사일정:담당교원:1학기 성적처리(공시,정정)",2,canonical_structured_fixture,OCCURS_DURING evidence
+OR-D09,schedule,schedule:2026-09-01:2026-09-07:학사일정:학사지원팀/대학원실:수강신청 확인 및 정정,2,canonical_structured_fixture,OCCURS_DURING and MANAGED_BY evidence
+OR-D10,schedule,schedule:2026-11-11:2026-11-13:학사일정:학사지원팀:겨울 계절학기 수강신청,2,canonical_structured_fixture,OCCURS_DURING and MANAGED_BY evidence
+OR-D11,schedule,schedule:2026-08-20:2026-08-20:학사일정:학사지원팀:2026년 가을 학위수여식(서울캠퍼스),2,canonical_structured_fixture,OCCURS_DURING and MANAGED_BY evidence
+OR-D12,schedule,schedule:2026-07-13:2026-07-17:학사일정:학사지원팀/대학원실:2026학년도 2학기 복학 신청(2차),2,canonical_structured_fixture,OCCURS_DURING and MANAGED_BY evidence
+OR-D13,schedule,schedule:2026-09-02:2026-09-04:학사일정:학사지원팀/대학원실:2026학년도 2학기 휴학 신청(2차),2,canonical_structured_fixture,OCCURS_DURING and MANAGED_BY evidence
+OR-D14,schedule,schedule:2026-05-08:2026-05-08:학사일정:개교기념일,2,canonical_structured_fixture,OCCURS_DURING evidence
+OR-D15,schedule,schedule:2026-06-23:2026-08-31:학사일정:여름 방학,2,canonical_structured_fixture,OCCURS_DURING evidence
+OR-N01,notices,notices:GENERALNOTICES:26765785,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date
+OR-N02,notices,notices:GENERALNOTICES:26764919,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date
+OR-N03,notices,notices:GENERALNOTICES:26763955,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date
+OR-N04,notices,notices:GENERALNOTICES:26759773,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date
+OR-N05,notices,notices:JANGHAKNOTICE:26763039,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date tie
+OR-N05,notices,notices:JANGHAKNOTICE:26763040,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date tie
+OR-N06,notices,notices:GENERALNOTICES:26764722,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date
+OR-N07,notices,notices:GENERALNOTICES:26765844,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date
+OR-N08,notices,notices:GENERALNOTICES:26765644,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date
+OR-N09,notices,notices:GENERALNOTICES:26765359,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date
+OR-N10,notices,notices:GENERALNOTICES:26764573,2,canonical_explicit_fixture,MENTIONS_ORGANIZATION evidence and latest publication date

@@ -61,6 +61,7 @@ src/RAG/artifacts/fts/
 # Obsidian Vault는 SQLite에서 재생성 가능한 파생물이다(마크다운 5천여 개, 24MB).
 src/RAG/artifacts/obsidian_vault/
 src/RAG/artifacts/.obsidian/
+src/RAG/artifacts/ontology_evaluations/
 src/RAG/tmp/
 src/RAG/scripts/.codex_*
 /tmp/

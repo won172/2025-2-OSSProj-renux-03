@@ -436,6 +436,8 @@ def train_bm25(
     identifier: str,
     corpus: Iterable[str],
     chunk_ids: Iterable[str] | None = None,
+    *,
+    corpus_revision: str | None = None,
 ) -> Tuple[BM25LexicalIndex, np.ndarray]:
     """한국어 토큰을 재사용해 BM25 인덱스를 학습하고 저장한다.
 
@@ -490,6 +492,7 @@ def train_bm25(
                     "bm25_k1": vectorizer.k1,
                     "bm25_b": vectorizer.b,
                     "tokenizer": tokenizer_name,
+                    "corpus_revision": corpus_revision,
                     "tokenizer_backend": (
                         "kiwi"
                         if tokenizer_name == "korean" and _load_kiwi() is not None
@@ -555,6 +558,7 @@ def _load_fts_artifact(identifier: str) -> Optional[dict]:
             "document_count": index.document_count,
             "retriever_type": "fts5",
             "tokenizer": index.tokenizer_name,
+            "corpus_revision": index.corpus_revision,
             "source": str(index.db_path),
         },
     }

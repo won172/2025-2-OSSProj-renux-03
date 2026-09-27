@@ -1,0 +1,76 @@
+id,question,route,case_type,expected_entity_type,expected_entity_name,expected_predicates,note
+OR-C01,가정교육과 HOM4057 AI를활용한가정과논리및논술은 어느 학과 과목이야?,courses,course_to_department,Course,AI를활용한가정과논리및논술,OFFERED_BY,canonical structured course fixture
+OR-C02,건설환경공학과 CIV4079 강구조공학 과목 정보를 알려줘,courses,course_to_department,Course,강구조공학,OFFERED_BY,canonical structured course fixture
+OR-C03,건축공학부 건축공학전공 ARC4043 건물공기조화설비는 어느 학과 과목이야?,courses,course_to_department,Course,건물공기조화설비,OFFERED_BY,canonical structured course fixture
+OR-C04,건축공학부 건축학전공 ARD2022 건축CAD 과목 정보를 알려줘,courses,course_to_department,Course,건축CAD,OFFERED_BY,canonical structured course fixture
+OR-C05,경영정보학과 MIS2017 4차산업과빅데이터는 어느 학과 과목이야?,courses,course_to_department,Course,4차산업과빅데이터,OFFERED_BY,canonical structured course fixture
+OR-C06,경영학과 MGT2013 Career Plan 과목 정보를 알려줘,courses,course_to_department,Course,Career Plan,OFFERED_BY,canonical structured course fixture
+OR-C07,경제학과 ECO2008 거시경제원론은 어느 학과 과목이야?,courses,course_to_department,Course,거시경제원론,OFFERED_BY,canonical structured course fixture
+OR-C08,경찰행정학부 POS2002 경찰과사회 과목 정보를 알려줘,courses,course_to_department,Course,경찰과사회,OFFERED_BY,canonical structured course fixture
+OR-C09,광고홍보학과 ADV2020 PR 문장론은 어느 학과 과목이야?,courses,course_to_department,Course,PR 문장론,OFFERED_BY,canonical structured course fixture
+OR-C10,교육학과 EDU4003 교육공학 과목 정보를 알려줘,courses,course_to_department,Course,교육공학,OFFERED_BY,canonical structured course fixture
+OR-C11,국어교육과 KLE4047 고전문학교육자료강독은 어느 학과 과목이야?,courses,course_to_department,Course,고전문학교육자료강독,OFFERED_BY,canonical structured course fixture
+OR-C12,국어국문문예창작학부 KOR4108 고전기록문학읽기 과목 정보를 알려줘,courses,course_to_department,Course,고전기록문학읽기,OFFERED_BY,canonical structured course fixture
+OR-C13,국제통상학과 INT4055 AI와통상론은 어느 학과 과목이야?,courses,course_to_department,Course,AI와통상론,OFFERED_BY,canonical structured course fixture
+OR-C14,글로벌무역학과 TRA4028 4차산업과e-비즈니스 캡스톤디자인 과목 정보를 알려줘,courses,course_to_department,Course,4차산업과e-비즈니스(캡스톤디자인),OFFERED_BY,canonical structured course fixture
+OR-C15,기계로봇에너지공학과 MEC4038 CAD/CAM은 어느 학과 과목이야?,courses,course_to_department,Course,CAD/CAM,OFFERED_BY,canonical structured course fixture
+OR-C16,문화유산학과 CUH2007 동양미술사 과목 정보를 알려줘,courses,course_to_department,Course,동양미술사,OFFERED_BY,canonical structured course fixture
+OR-C17,물리학과 PHY4014 고체물리학1은 어느 학과 과목이야?,courses,course_to_department,Course,고체물리학1,OFFERED_BY,canonical structured course fixture
+OR-C18,미디어커뮤니케이션학전공 COS4049 AI와빅데이터의이해와활용 과목 정보를 알려줘,courses,course_to_department,Course,AI와빅데이터의이해와활용,OFFERED_BY,canonical structured course fixture
+OR-C19,미술학부 ACS2001 공간과디자인은 어느 학과 과목이야?,courses,course_to_department,Course,공간과디자인,OFFERED_BY,canonical structured course fixture
+OR-C20,범죄학과 PAS4044 경찰학세미나 과목 정보를 알려줘,courses,course_to_department,Course,경찰학세미나,OFFERED_BY,canonical structured course fixture
+OR-S01,서울캠퍼스 공학교육혁신센터 행정팀 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,공학교육혁신센터 행정팀,WORKS_AT,canonical public staff directory fixture
+OR-S02,서울캠퍼스 국제개발협력센터 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,국제개발협력센터,WORKS_AT,canonical public staff directory fixture
+OR-S03,서울캠퍼스 남산학사 행정팀 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,남산학사 행정팀,WORKS_AT,canonical public staff directory fixture
+OR-S04,서울캠퍼스 데이터사이언스연구센터 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,데이터사이언스연구센터,WORKS_AT,canonical public staff directory fixture
+OR-S05,서울캠퍼스 연구윤리센터 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,연구윤리센터,WORKS_AT,canonical public staff directory fixture
+OR-S06,서울캠퍼스 인권센터 행정팀 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,인권센터 행정팀,WORKS_AT,canonical public staff directory fixture
+OR-S07,서울캠퍼스 학사지원팀 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,학사지원팀,WORKS_AT,canonical public staff directory fixture
+OR-S08,서울캠퍼스 장학팀 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,장학팀,WORKS_AT,canonical public staff directory fixture
+OR-S09,서울캠퍼스 카운슬링센터 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,카운슬링센터,WORKS_AT,canonical public staff directory fixture
+OR-S10,서울캠퍼스 창업교육센터 담당자 연락처를 알려줘,staff,organization_to_staff,OrganizationUnit,창업교육센터,WORKS_AT,canonical public staff directory fixture
+OR-A01,컴퓨터공학과 전공과목을 찾아줘,courses,alias_to_department,Department,컴퓨터·AI학부,OFFERED_BY,reviewed department alias fixture
+OR-A02,AI소프트웨어융합학부 전공과목을 찾아줘,courses,alias_to_department,Department,컴퓨터·AI학부,OFFERED_BY,reviewed department alias fixture
+OR-A03,인공지능전공 전공과목을 찾아줘,courses,alias_to_department,Department,컴퓨터·AI학부,OFFERED_BY,reviewed department alias fixture
+OR-A04,건축학전공 과목을 찾아줘,courses,alias_to_department,Department,건축공학부 건축학전공,OFFERED_BY,reviewed department alias fixture
+OR-A05,정보통신공학전공 과목을 찾아줘,courses,alias_to_department,Department,정보통신공학과,OFFERED_BY,reviewed department alias fixture
+OR-R01,2021학번 통계학과 졸업 최저학점 기준을 찾아줘,rules,cohort_department_to_requirement,EntryCohort,2021학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R02,2022학번 통계학과 졸업요건 문서를 찾아줘,rules,cohort_department_to_requirement,EntryCohort,2022학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R03,2023학번 화학과 졸업 기준은 어디에 있어?,rules,cohort_department_to_requirement,EntryCohort,2023학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R04,2024학번 수학과 졸업학점 기준 문서를 알려줘,rules,cohort_department_to_requirement,EntryCohort,2024학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R05,2025학번 물리학과 졸업요건을 찾아줘,rules,cohort_department_to_requirement,EntryCohort,2025학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R06,2026학번 통계학과 졸업 기준 문서를 알려줘,rules,cohort_department_to_requirement,EntryCohort,2026학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R07,2021학번 공과대학 졸업기준을 찾아줘,rules,cohort_college_to_requirement,EntryCohort,2021학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R08,2022학번 건설환경공학과 졸업요건을 알려줘,rules,cohort_department_to_requirement,EntryCohort,2022학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R09,2023학번 전자전기공학부 졸업학점 기준 문서를 찾아줘,rules,cohort_department_to_requirement,EntryCohort,2023학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R10,2024학번 문과대학 졸업기준을 알려줘,rules,cohort_college_to_requirement,EntryCohort,2024학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R11,2025학번 사학과 졸업요건 문서를 찾아줘,rules,cohort_department_to_requirement,EntryCohort,2025학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R12,2026학번 영어영문학부 졸업 기준을 알려줘,rules,cohort_department_to_requirement,EntryCohort,2026학번,GOVERNS;VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R13,22학번 교양교육과정 이수 기준을 찾아줘,rules,cohort_to_general_education,EntryCohort,2022학번,VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R14,2024학번 교양 이수 기준 문서를 알려줘,rules,cohort_to_general_education,EntryCohort,2024학번,VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-R15,2026학번 교양교육과정 기준은 어디에 있어?,rules,cohort_to_general_education,EntryCohort,2026학번,VALID_FOR_ENTRY,canonical entry-year guide metadata fixture
+OR-D01,2026학년도 2학기 수강신청 기간은 언제야?,schedule,event_to_date,AcademicEvent,2026학년도 2학기 학부 수강 신청,MANAGED_BY;OCCURS_DURING,canonical academic schedule fixture
+OR-D02,2027학년도 1학기 수강신청 기간을 알려줘,schedule,event_to_date,AcademicEvent,2027학년도 1학기 학부 수강 신청,MANAGED_BY;OCCURS_DURING,canonical academic schedule fixture
+OR-D03,2026학년도 2학기 개강일이 언제야?,schedule,event_to_date,AcademicEvent,개강/학기개시일,OCCURS_DURING,canonical academic schedule fixture
+OR-D04,2학기 종강은 언제야?,schedule,event_to_date,AcademicEvent,종강,OCCURS_DURING,canonical academic schedule fixture
+OR-D05,2학기 중간고사 기간은 언제야?,schedule,event_to_date,AcademicEvent,2학기 중간시험,OCCURS_DURING,canonical academic schedule fixture
+OR-D06,1학기 기말고사 기간을 알려줘,schedule,event_to_date,AcademicEvent,1학기 기말시험,OCCURS_DURING,canonical academic schedule fixture
+OR-D07,2학기 성적공시 기간은 언제야?,schedule,event_to_date,AcademicEvent,"2학기 성적처리(공시,정정)",OCCURS_DURING,canonical academic schedule fixture
+OR-D08,1학기 성적정정 기간을 알려줘,schedule,event_to_date,AcademicEvent,"1학기 성적처리(공시,정정)",OCCURS_DURING,canonical academic schedule fixture
+OR-D09,2학기 수강정정 기간은 언제야?,schedule,event_to_date,AcademicEvent,수강신청 확인 및 정정,MANAGED_BY;OCCURS_DURING,canonical academic schedule fixture
+OR-D10,겨울 계절학기 수강신청은 언제야?,schedule,event_to_date,AcademicEvent,겨울 계절학기 수강신청,MANAGED_BY;OCCURS_DURING,canonical academic schedule fixture
+OR-D11,2026년 가을 서울캠퍼스 학위수여식은 언제야?,schedule,event_to_date,AcademicEvent,"2026년 가을 학위수여식(서울캠퍼스)",MANAGED_BY;OCCURS_DURING,canonical academic schedule fixture
+OR-D12,2026학년도 2학기 복학 신청 2차 기간은 언제야?,schedule,event_to_date,AcademicEvent,"2026학년도 2학기 복학 신청(2차)",MANAGED_BY;OCCURS_DURING,canonical academic schedule fixture
+OR-D13,2026학년도 2학기 휴학 신청 2차 기간을 알려줘,schedule,event_to_date,AcademicEvent,"2026학년도 2학기 휴학 신청(2차)",MANAGED_BY;OCCURS_DURING,canonical academic schedule fixture
+OR-D14,개교기념일이 언제야?,schedule,event_to_date,AcademicEvent,개교기념일,OCCURS_DURING,canonical academic schedule fixture
+OR-D15,여름 방학은 언제부터 언제까지야?,schedule,event_to_date,AcademicEvent,여름 방학,OCCURS_DURING,canonical academic schedule fixture
+OR-N01,디지털정보처 최근 공지 알려줘,notices,organization_to_notice,OrganizationUnit,디지털정보처,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture
+OR-N02,교수학습혁신센터 최신 공지 보여줘,notices,organization_to_notice,OrganizationUnit,교수학습혁신센터,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture
+OR-N03,학생역량개발팀 공지사항 찾아줘,notices,organization_to_notice,OrganizationUnit,학생역량개발팀,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture
+OR-N04,경영학과 최근 공지 알려줘,notices,department_to_notice,Department,경영학과,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture
+OR-N05,장학팀 최신 공지 보여줘,notices,organization_to_notice,OrganizationUnit,장학팀,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture
+OR-N06,창업진흥센터 최근 공지를 찾아줘,notices,organization_to_notice,OrganizationUnit,창업진흥센터,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture
+OR-N07,DUICA 최신 공지 알려줘,notices,organization_to_notice,OrganizationUnit,DUICA,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture
+OR-N08,미래융합교육원 최근 공지 보여줘,notices,organization_to_notice,OrganizationUnit,미래융합교육원,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture
+OR-N09,관리처 최신 공지사항 찾아줘,notices,organization_to_notice,OrganizationUnit,관리처,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture
+OR-N10,카운슬링센터 최근 공지 알려줘,notices,organization_to_notice,OrganizationUnit,카운슬링센터,MENTIONS_ORGANIZATION,canonical explicit notice title prefix fixture

@@ -200,7 +200,39 @@ class IngestionRun(Base):
     documents_updated = Column(Integer, default=0)
     documents_deleted = Column(Integer, default=0)
     documents_failed = Column(Integer, default=0)
+    # Machine-readable outcome. ``status`` remains the broad lifecycle state;
+    # this field distinguishes empty upstream data, schema drift, partial fetch,
+    # and indexing failures without parsing a Korean error message.
+    outcome_code = Column(String, nullable=True, index=True)
+    diagnostics_json = Column(Text, nullable=True)
+    corpus_revision = Column(String, nullable=True, index=True)
     error_summary = Column(Text, nullable=True)
+
+
+class SourceSchemaFingerprint(Base):
+    """Versioned structural signature observed at an upstream boundary."""
+
+    __tablename__ = "source_schema_fingerprints"
+    __table_args__ = (
+        UniqueConstraint(
+            "dataset",
+            "source_name",
+            "fingerprint",
+            name="uq_source_schema_dataset_name_fingerprint",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    dataset = Column(String, nullable=False, index=True)
+    source_name = Column(String, nullable=False, index=True)
+    source_format = Column(String, nullable=False)
+    fingerprint = Column(String, nullable=False, index=True)
+    structure_json = Column(Text, nullable=False)
+    first_seen_at = Column(DateTime, default=kst_now, nullable=False, index=True)
+    last_seen_at = Column(DateTime, default=kst_now, nullable=False, index=True)
+    observation_count = Column(Integer, nullable=False, default=1)
+    is_current = Column(Boolean, nullable=False, default=True, index=True)
+    last_ingestion_run_id = Column(Integer, nullable=True, index=True)
 
 
 class DocumentQualityCheck(Base):
@@ -214,7 +246,178 @@ class DocumentQualityCheck(Base):
     created_at = Column(DateTime, default=kst_now, index=True)
 
 
-# 9. 통합 청크 (Chunks)
+# 9. 온톨로지/지식 그래프 파생 투영
+class OntologyEntity(Base):
+    """정본 문서에서 결정적으로 투영한 대학 도메인 엔터티.
+
+    이 테이블은 정본이 아니다. ``SourceDocument`` 또는 검수된 별칭 목록에서
+    언제든 다시 만들 수 있는 검색용 투영이며, 실제 주장 근거는
+    ``OntologyEvidence``가 보존한다.
+    """
+
+    __tablename__ = "ontology_entities"
+    __table_args__ = (
+        UniqueConstraint("entity_key", name="uq_ontology_entities_entity_key"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_key = Column(String, nullable=False, index=True)
+    entity_type = Column(String, nullable=False, index=True)
+    canonical_name = Column(String, nullable=False, index=True)
+    properties_json = Column(Text, nullable=False, default="{}")
+    extraction_method = Column(String, nullable=False, default="deterministic", index=True)
+    status = Column(String, nullable=False, default="active", index=True)
+    schema_version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=kst_now, index=True)
+    updated_at = Column(DateTime, default=kst_now, onupdate=kst_now, index=True)
+
+
+class OntologyAlias(Base):
+    """학생 표현이나 과거 학과명을 canonical entity에 연결한다."""
+
+    __tablename__ = "ontology_aliases"
+    __table_args__ = (
+        UniqueConstraint(
+            "alias_key",
+            "entity_key",
+            "source_dataset",
+            name="uq_ontology_aliases_alias_entity_source",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    alias_key = Column(String, nullable=False, index=True)
+    alias = Column(String, nullable=False)
+    entity_key = Column(String, nullable=False, index=True)
+    source_dataset = Column(String, nullable=False, index=True)
+    source_document_key = Column(String, nullable=True, index=True)
+    status = Column(String, nullable=False, default="active", index=True)
+    created_at = Column(DateTime, default=kst_now, index=True)
+
+
+class OntologyRelation(Base):
+    """엔터티 사이의 의미 관계. 원문 근거는 별도 evidence 행에 둔다."""
+
+    __tablename__ = "ontology_relations"
+    __table_args__ = (
+        UniqueConstraint("relation_key", name="uq_ontology_relations_relation_key"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    relation_key = Column(String, nullable=False, index=True)
+    subject_key = Column(String, nullable=False, index=True)
+    predicate = Column(String, nullable=False, index=True)
+    object_key = Column(String, nullable=False, index=True)
+    qualifiers_json = Column(Text, nullable=False, default="{}")
+    confidence = Column(Float, nullable=False, default=1.0)
+    extraction_method = Column(String, nullable=False, default="deterministic", index=True)
+    review_status = Column(String, nullable=False, default="approved", index=True)
+    status = Column(String, nullable=False, default="active", index=True)
+    schema_version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=kst_now, index=True)
+    updated_at = Column(DateTime, default=kst_now, onupdate=kst_now, index=True)
+
+    evidence = relationship(
+        "OntologyEvidence",
+        back_populates="relation",
+        cascade="all, delete-orphan",
+    )
+
+
+class OntologyEvidence(Base):
+    """관계 주장을 정본 문서와 retrieval-affecting 필드에 연결한다."""
+
+    __tablename__ = "ontology_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "relation_id",
+            "document_key",
+            "evidence_locator",
+            name="uq_ontology_evidence_relation_document_locator",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    relation_id = Column(
+        Integer,
+        ForeignKey("ontology_relations.id"),
+        nullable=False,
+        index=True,
+    )
+    source_dataset = Column(String, nullable=False, index=True)
+    document_key = Column(String, nullable=False, index=True)
+    extraction_method = Column(String, nullable=False, default="deterministic", index=True)
+    evidence_locator = Column(String, nullable=False)
+    evidence_text = Column(Text, nullable=False)
+    source_url = Column(Text, nullable=True)
+    published_at = Column(String, nullable=True, index=True)
+    observed_at = Column(DateTime, default=kst_now, index=True)
+
+    relation = relationship("OntologyRelation", back_populates="evidence")
+
+
+class OntologyBuildRun(Base):
+    """온톨로지 파생 투영 실행과 품질 집계를 기록한다."""
+
+    __tablename__ = "ontology_build_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schema_version = Column(Integer, nullable=False, default=1)
+    datasets_json = Column(Text, nullable=False, default="[]")
+    started_at = Column(DateTime, default=kst_now, index=True)
+    finished_at = Column(DateTime, nullable=True)
+    status = Column(String, nullable=False, default="running", index=True)
+    documents_seen = Column(Integer, nullable=False, default=0)
+    entities_emitted = Column(Integer, nullable=False, default=0)
+    aliases_emitted = Column(Integer, nullable=False, default=0)
+    relations_emitted = Column(Integer, nullable=False, default=0)
+    evidence_emitted = Column(Integer, nullable=False, default=0)
+    validation_errors_json = Column(Text, nullable=False, default="[]")
+    build_revision = Column(String, nullable=True, index=True)
+    corpus_revisions_json = Column(Text, nullable=False, default="{}")
+    trigger_dataset = Column(String, nullable=True, index=True)
+    trigger_ingestion_run_id = Column(Integer, nullable=True, index=True)
+    error_summary = Column(Text, nullable=True)
+
+
+class OntologyShadowLog(Base):
+    """관계 검색을 실제 검색 결과에 섞기 전 관찰한 shadow 실행 기록.
+
+    질문 원문은 기존 ``RagQueryLog``에만 남기고 여기에는 해시와 제한된 그래프
+    식별자만 저장한다. 따라서 shadow 경로는 답변·검색 순위와 독립적으로 성능과
+    도달 범위를 비교할 수 있다.
+    """
+
+    __tablename__ = "ontology_shadow_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String, nullable=False, index=True)
+    session_id = Column(String, nullable=True, index=True)
+    query_hash = Column(String, nullable=False, index=True)
+    route_json = Column(Text, nullable=False, default="[]")
+    linked_entities_json = Column(Text, nullable=False, default="[]")
+    traversed_relations_json = Column(Text, nullable=False, default="[]")
+    document_keys_json = Column(Text, nullable=False, default="[]")
+    retrieved_document_keys_json = Column(Text, nullable=False, default="[]")
+    overlap_document_keys_json = Column(Text, nullable=False, default="[]")
+    linked_entity_count = Column(Integer, nullable=False, default=0)
+    relation_count = Column(Integer, nullable=False, default=0)
+    document_count = Column(Integer, nullable=False, default=0)
+    retrieved_document_count = Column(Integer, nullable=False, default=0)
+    overlap_document_count = Column(Integer, nullable=False, default=0)
+    max_hops = Column(Integer, nullable=False, default=0)
+    max_entities = Column(Integer, nullable=False, default=0)
+    max_relations = Column(Integer, nullable=False, default=0)
+    max_documents = Column(Integer, nullable=False, default=0)
+    relation_limit_reached = Column(Boolean, nullable=False, default=False)
+    document_limit_reached = Column(Boolean, nullable=False, default=False)
+    latency_ms = Column(Float, nullable=False, default=0.0)
+    status = Column(String, nullable=False, default="success", index=True)
+    error_summary = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=kst_now, index=True)
+
+
+# 10. 통합 청크 (Chunks)
 class Chunk(Base):
     __tablename__ = "chunks"
 
@@ -245,7 +448,7 @@ class Chunk(Base):
     custom_knowledge = relationship("CustomKnowledge", back_populates="chunks")
 
 
-# 10. RAG 질문/답변 평가 로그
+# 11. RAG 질문/답변 평가 로그
 class RagQueryLog(Base):
     __tablename__ = "rag_query_logs"
 
@@ -283,7 +486,7 @@ class RagQueryLog(Base):
     retrievals = relationship("RagRetrievalLog", back_populates="query_log")
 
 
-# 11. RAG 검색 문서/점수 평가 로그
+# 12. RAG 검색 문서/점수 평가 로그
 class RagRetrievalLog(Base):
     __tablename__ = "rag_retrieval_logs"
 
@@ -292,6 +495,7 @@ class RagRetrievalLog(Base):
     rank = Column(Integer)
     dataset = Column(String, index=True)
     chunk_id = Column(String, index=True)
+    document_key = Column(String, nullable=True, index=True)
     title = Column(Text)
     url = Column(Text)
     published_at = Column(String)
@@ -311,7 +515,7 @@ class RagRetrievalLog(Base):
     query_log = relationship("RagQueryLog", back_populates="retrievals")
 
 
-# 12. RAG 답변 사용자 피드백
+# 13. RAG 답변 사용자 피드백
 class RagFeedback(Base):
     __tablename__ = "rag_feedback"
 
@@ -404,6 +608,7 @@ def ensure_runtime_schema() -> None:
         {
             "sort_date": "VARCHAR",
             "source_ref": "VARCHAR",
+            "document_key": "VARCHAR",
         },
     )
     _ensure_sqlite_columns(
@@ -419,6 +624,37 @@ def ensure_runtime_schema() -> None:
             "reviewed_by": "VARCHAR",
             "reviewed_at": "DATETIME",
             "disabled": "BOOLEAN DEFAULT 0",
+        },
+    )
+    _ensure_sqlite_columns(
+        "ingestion_runs",
+        {
+            "outcome_code": "VARCHAR",
+            "diagnostics_json": "TEXT",
+            "corpus_revision": "VARCHAR",
+        },
+    )
+    _ensure_sqlite_columns(
+        "ontology_build_runs",
+        {
+            "build_revision": "VARCHAR",
+            "corpus_revisions_json": "TEXT DEFAULT '{}'",
+            "trigger_dataset": "VARCHAR",
+            "trigger_ingestion_run_id": "INTEGER",
+        },
+    )
+    _ensure_sqlite_columns(
+        "ontology_shadow_logs",
+        {
+            "retrieved_document_keys_json": "TEXT DEFAULT '[]'",
+            "overlap_document_keys_json": "TEXT DEFAULT '[]'",
+            "retrieved_document_count": "INTEGER DEFAULT 0",
+            "overlap_document_count": "INTEGER DEFAULT 0",
+            "max_entities": "INTEGER DEFAULT 0",
+            "max_relations": "INTEGER DEFAULT 0",
+            "max_documents": "INTEGER DEFAULT 0",
+            "relation_limit_reached": "BOOLEAN DEFAULT 0",
+            "document_limit_reached": "BOOLEAN DEFAULT 0",
         },
     )
 

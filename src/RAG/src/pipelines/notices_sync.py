@@ -60,6 +60,7 @@ BOARD_NAMES_BY_CODE = {code: name for name, code in BOARD_CODES.items()}
 
 @dataclass
 class NoticeCollectResult:
+    run_id: int
     changed_keys: list[str]
     hidden_keys: list[str]
     documents_seen: int
@@ -150,7 +151,7 @@ def _normalize_notice_record(row: pd.Series) -> tuple[dict[str, Any], bool]:
     board_code = str(row.get("게시판코드") or row.get("board_code") or "").strip()
     article_id = row.get("원문글ID") or row.get("article_id") or _extract_article_id(detail_url)
     source_id = f"{board_code}:{article_id}" if board_code and article_id is not None else ""
-    document_key = f"notices:{source_id}" if source_id else ""
+    document_key = source_document_key("notices", source_id) if source_id else ""
     attachments, attachments_parse_failed = _normalize_attachments(row.get("첨부파일") or row.get("attachments"))
 
     published_at = standardize_date(row.get("게시일") or row.get("posted_at"))
@@ -495,6 +496,10 @@ def record_notice_ingestion_failure(error: object, *, stage: str = "crawl") -> i
             dataset="notices",
             status="failed",
             finished_at=kst_now(),
+            outcome_code="upstream_unreachable",
+            diagnostics_json=canonical_json(
+                {"stage": stage, "error_type": type(error).__name__}
+            ),
             error_summary=f"{stage}: {error}",
         )
         session.add(run)
@@ -639,6 +644,21 @@ def collect_notice_documents(
         for board in incoming_df.attrs.get("crawl_incomplete_boards", [])
         if str(board).strip()
     })
+    board_diagnostics = []
+    for item in incoming_df.attrs.get("crawl_diagnostics", []):
+        if not isinstance(item, dict):
+            continue
+        board_diagnostics.append(
+            {
+                "board_name": str(item.get("board_name") or item.get("board_code") or "unknown"),
+                "status": str(item.get("status") or "unknown"),
+                "list_pages_succeeded": int(item.get("list_pages_succeeded") or 0),
+                "list_pages_failed": int(item.get("list_pages_failed") or 0),
+                "detail_failure_count": len(item.get("detail_failures") or []),
+                "records_collected": int(item.get("records_collected") or 0),
+            }
+        )
+    retry_diagnostics = incoming_df.attrs.get("crawl_retry")
     # Missing detection is only safe after a complete crawl.  If one board is
     # unavailable or truncated, treating its unseen rows as deletions would
     # hide valid notices because of a transient upstream outage.
@@ -648,6 +668,7 @@ def collect_notice_documents(
     session.add(run)
     session.commit()
     session.refresh(run)
+    run_id = int(run.id)
 
     documents_seen = 0
     documents_new = 0
@@ -763,6 +784,37 @@ def collect_notice_documents(
             run.status = "success"
         if crawl_incomplete_boards and run.status == "success":
             run.status = "partial_success"
+        if documents_failed > 0:
+            run.outcome_code = "parse_failure"
+        elif crawl_incomplete_boards:
+            run.outcome_code = "partial_boards"
+        else:
+            run.outcome_code = "success"
+        from src.services.source_schema import (
+            fingerprint_dataframe,
+            observe_source_structures,
+        )
+
+        source_schema = observe_source_structures(
+            session,
+            dataset="notices",
+            ingestion_run_id=run_id,
+            structures=[
+                fingerprint_dataframe(
+                    incoming_df,
+                    source_name="notice_boards",
+                    source_format="html_projection",
+                )
+            ],
+        )
+        run.diagnostics_json = canonical_json(
+            {
+                "boards": board_diagnostics,
+                "retry": retry_diagnostics if isinstance(retry_diagnostics, dict) else None,
+                "incomplete_boards": crawl_incomplete_boards,
+                "source_schema": source_schema,
+            }
+        )
         if crawl_incomplete_boards:
             run.error_summary = (
                 "incomplete notice boards; missing detection disabled: "
@@ -777,6 +829,7 @@ def collect_notice_documents(
         session.commit()
 
         return NoticeCollectResult(
+            run_id=run_id,
             changed_keys=changed_keys,
             hidden_keys=hidden_keys,
             documents_seen=documents_seen,
@@ -930,6 +983,7 @@ def rebuild_notices_from_source_documents() -> tuple[pd.DataFrame, object, objec
 
 def _notice_collect_summary(result: NoticeCollectResult) -> dict[str, int]:
     return {
+        "run_id": result.run_id,
         "seen": result.documents_seen,
         "new": result.documents_new,
         "updated": result.documents_updated,
@@ -937,6 +991,58 @@ def _notice_collect_summary(result: NoticeCollectResult) -> dict[str, int]:
         "failed": result.documents_failed,
         "incomplete_boards": len(result.crawl_incomplete_boards),
     }
+
+
+def _finalize_notice_derivatives(result: NoticeCollectResult) -> None:
+    """Close the notice run only after artifact lineage and ontology stages."""
+    from src.services.corpus_revision import frame_corpus_revision
+    from src.services.derivative_dag import run_post_ingestion_dag
+
+    artifact = DATASET_ARTIFACTS["notices"]
+    frame = pd.read_parquet(artifact.chunk_path, columns=["corpus_revision"])
+    revision = frame_corpus_revision(frame)
+    dag = run_post_ingestion_dag("notices", ingestion_run_id=result.run_id)
+    session = SessionLocal()
+    try:
+        run = session.get(IngestionRun, result.run_id)
+        if run is None:
+            return
+        diagnostics: dict[str, Any] = {}
+        try:
+            decoded = json.loads(run.diagnostics_json or "{}")
+            if isinstance(decoded, dict):
+                diagnostics.update(decoded)
+        except (TypeError, json.JSONDecodeError):
+            pass
+        diagnostics["derivative_dag"] = dag
+        run.diagnostics_json = canonical_json(diagnostics)
+        run.corpus_revision = revision
+        run.finished_at = kst_now()
+        if dag.get("status") == "failed":
+            if run.status == "success":
+                run.status = "partial_success"
+            run.outcome_code = "derivative_failure"
+            run.error_summary = (
+                (run.error_summary + "; ") if run.error_summary else ""
+            ) + f"derivative DAG failed at {dag.get('failed_stage') or 'unknown'}"
+        session.commit()
+    finally:
+        session.close()
+
+
+def _mark_notice_pipeline_failure(run_id: int, exc: Exception) -> None:
+    session = SessionLocal()
+    try:
+        run = session.get(IngestionRun, run_id)
+        if run is None:
+            return
+        run.status = "failed"
+        run.outcome_code = "pipeline_failure"
+        run.error_summary = f"{type(exc).__name__}: {exc}"
+        run.finished_at = kst_now()
+        session.commit()
+    finally:
+        session.close()
 
 
 @serialized_ingest("notices")
@@ -952,23 +1058,29 @@ def sync_notices(
         allow_missing_detection=allow_missing_detection,
     )
 
-    if mode == "collect-only":
+    try:
+        if mode == "collect-only":
+            return _notice_collect_summary(collect_result)
+
+        target_keys = list(dict.fromkeys(collect_result.changed_keys + collect_result.hidden_keys))
+        if mode == "normalize-only":
+            apply_notice_normalized_documents(document_keys=target_keys, apply_index=False)
+
+        if mode == "index-only":
+            apply_notice_normalized_documents(document_keys=target_keys, apply_index=True)
+            refresh_notice_artifacts()
+            _finalize_notice_derivatives(collect_result)
+            return _notice_collect_summary(collect_result)
+
+        if mode == "full-sync":
+            apply_notice_normalized_documents(document_keys=target_keys, apply_index=True)
+            refresh_notice_artifacts()
+            _finalize_notice_derivatives(collect_result)
+
         return _notice_collect_summary(collect_result)
-
-    target_keys = list(dict.fromkeys(collect_result.changed_keys + collect_result.hidden_keys))
-    if mode == "normalize-only":
-        apply_notice_normalized_documents(document_keys=target_keys, apply_index=False)
-
-    if mode == "index-only":
-        apply_notice_normalized_documents(document_keys=target_keys, apply_index=True)
-        refresh_notice_artifacts()
-        return _notice_collect_summary(collect_result)
-
-    if mode == "full-sync":
-        apply_notice_normalized_documents(document_keys=target_keys, apply_index=True)
-        refresh_notice_artifacts()
-
-    return _notice_collect_summary(collect_result)
+    except Exception as exc:
+        _mark_notice_pipeline_failure(collect_result.run_id, exc)
+        raise
 
 
 def normalize_existing_notice_documents() -> None:
