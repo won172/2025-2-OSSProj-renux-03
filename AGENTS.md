@@ -69,6 +69,9 @@ Agent는 할당받은 역할과 task 범위 밖의 파일을 수정하지 않는
 # Git Workflow
 
 - main 직접 commit 금지. main에서 기능 개발을 하지 않는다.
+- **Base branch는 `main`이다.** 모든 feature/fix/refactor/test/docs/chore branch와 worktree는
+  작업 시작 직전 `git fetch origin`으로 확인한 최신 `origin/main`에서 만든다.
+  PR 대상도 `main`이다.
 - task마다 별도 branch 사용: **One task = One branch = One worktree**.
 - task마다 별도 worktree 사용.
 - 다른 agent의 worktree 수정 금지. 자신에게 할당된 worktree 밖의 파일을 쓰지 않는다.
@@ -76,7 +79,7 @@ Agent는 할당받은 역할과 task 범위 밖의 파일을 수정하지 않는
 - force push main 금지.
 - shared history rewrite 금지: push된 branch에 대한 rebase/amend 후 force push,
   `git reset --hard`로 남의 커밋 제거, `git push --delete` 등을 하지 않는다.
-- main merge는 사람만 승인한다. Agent는 PR 또는 merge candidate 상태까지만 만든다.
+- main merge는 human owner가 승인할 때만 수행한다. Agent는 PR 또는 merge candidate 상태까지만 만든다.
 
 ## Branch Naming
 

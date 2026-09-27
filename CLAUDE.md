@@ -70,7 +70,7 @@ PLAN
 5. **IMPLEMENTATION / TEST**: agent가 자신의 worktree에서 수행하고 Completion Report를 제출한다.
 6. **REVIEW**: 구현 agent와 다른 QA/Review agent가 diff·테스트·RAG 검증 항목을 독립 확인한다.
    Orchestrator는 보고를 그대로 믿지 않고 핵심 테스트를 직접 재실행한다.
-7. **MERGE CANDIDATE**: 필요하면 branch를 push하고 PR을 연다(대상 branch는 human이 정한 base).
+7. **MERGE CANDIDATE**: 필요하면 branch를 push하고 `main` 대상 PR을 연다.
 8. **HUMAN APPROVAL**: merge 여부를 human owner에게 요청한다. 직접 merge하지 않는다.
 
 작업이 서로 독립적이면(수정 경로가 겹치지 않고 서로의 결과를 입력으로 쓰지 않으면)
@@ -106,10 +106,10 @@ worktree로 이동하도록 한다. 한 worktree에는 한 번에 한 agent만 �
    `git branch --list <branch>`, `git worktree list`.
 3. branch 생성 + 4. 전용 worktree 생성을 한 번에 한다:
    ```bash
-   git worktree add -b <prefix>/<slug> ../dongttok-worktrees/<slug> <base-ref>
+   git worktree add -b <prefix>/<slug> ../dongttok-worktrees/<slug> origin/main
    ```
-   `<base-ref>` 기본값은 `origin/main`. human이 지정한 integration branch가 있으면 그것을 쓴다
-   (docs/STATUS.md의 Git State 참고).
+   base는 항상 방금 fetch한 `origin/main`이다. 다른 branch를 base로 쓰지 않는다.
+   작업 도중 main이 앞서 나가도 임의로 rebase하지 않고, 필요하면 human에게 보고한다.
 5. Agent에게 해당 worktree 할당 (docs/STATUS.md Task Board에 `In Progress`로 기록)
 6. 구현
 7. test
