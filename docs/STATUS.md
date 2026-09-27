@@ -59,8 +59,8 @@ Last Updated: 2026-09-27
 
 ## Task Board
 
-멀티 agent 작업의 handoff 표. **Orchestrator만 갱신한다.** 구현·QA agent는 Completion Report로
-결과를 전달하고 이 표를 직접 수정하지 않는다. 절차는 [AGENTS.md](../AGENTS.md),
+멀티 agent 작업의 handoff 표. **Orchestrator가 일괄 갱신 PR(`docs/status-*`)로만 갱신한다.**
+task PR과 구현·QA agent는 이 문서를 수정하지 않고, 결과는 Completion Report로 전달한다. 절차는 [AGENTS.md](../AGENTS.md),
 [CLAUDE.md](../CLAUDE.md)를 따른다.
 
 Status 값:
@@ -80,6 +80,8 @@ Status 값:
 | CI에 RAG 무작위 순서 pytest 단계 추가 | P0 후속 | RAG/Backend (CI) | `chore/ci-random-order` | `ci-random-order` | Review | 로컬: 순서 고정 2단계·무작위(seed 12345) 976 passed/1 skipped. Orchestrator 재검증: seed 987654 동일 | `pytest-randomly==5.0.0`은 `requirements-dev.txt`에만. 설치 시 로컬 기본 실행도 무작위가 되므로 `-p no:randomly` 필요. 재실행은 같은 seed 사용 | merge 승인 대기 |
 | 질의분석 체인 주입 지점 통일·싱글턴 초기화 (pipeline-audit 03 P0) | P0 | RAG/Backend | `refactor/query-analysis-chain` | `query-analysis-chain` | Review | 978 passed/1 skipped (일반·빈 DB, seed 1/2/3). 프롬프트·모델 설정·structured output kwargs가 origin/main과 동일함을 해시로 확인. Orchestrator 재검증: seed 555111·순서 고정 동일 | 공개 `analysis_chain` 제거, 주입 지점은 `_build_analysis_chain` 하나. `reset_analysis_chain()`은 공개 함수(현재 conftest만 호출) | merge 승인 대기. 다음: audit 03 공통 `QueryPlan` |
 | 공식 규정관리시스템 전체 분류 수집 (pipeline-audit 10 P0) | P0 | RAG/Backend (crawling) | `feat/official-rules-coverage` | `official-rules-coverage` | Review | 로컬(2026-09-27): 신규 29개 포함 전체 RAG 1005 passed/1 skipped(순서 고정·빈 DB·무작위 seed 13579). Orchestrator 재검증: 순서 고정 동일, 무작위 seed 57721(빈 DB) 동일. 독립 QA 3회: CHANGES REQUESTED(pagination silent truncation, report 미노출, 동일 규정 현행 2개) → CHANGES REQUESTED(같은 번호 다른 규정 누락) → APPROVE. 추적 CSV 520행에서 `is_latest` 변화 0건 | 실제 전체 수집·sync·재색인 미실행(공개 목록 페이지 read-only GET 8회만). 첫 전체 실행 약 600+ 요청 후 rules 전체 재색인 필요. 폐지 후보 24건·이름 변경 22건은 보고만 하고 숨기지 않음(human 판정 필요). 번호만 같고 캠퍼스가 다른 규정이 한쪽에만 있을 때 번호 기준 대체 가능(`superseded_by_code`로 보고). `shared_codes`는 요약 로그에 미출력 | merge 승인 대기 → human 승인 `--dry-run`으로 목록 검토 → 실제 sync·재색인·골든/qrels 회귀 |
+| 청크 표현 P0: courses 내부 필드 제거, rules 조문 단위 분할 (pipeline-audit 09 P0-2/P0-3) | P0 | RAG/Backend | `fix/chunk-representation` | `chunk-representation` | Review | 로컬(2026-09-27): 계약 테스트 25개 포함 전체 RAG 1003 passed/1 skipped(순서 고정·빈 DB·무작위 seed 97531). Orchestrator 재검증: 순서 고정 동일, 무작위 seed 31415(빈 DB) 동일. 독립 QA: 1차 CHANGES REQUESTED(raw_text 내용 손실, 청크 없는 행의 lineage 위험) → 수정 후 APPROVE. QA가 추적 CSV 4,395행·학칙 520건에서 in-memory 확인: bookkeeping 누출 0, 모든 행 1개 이상 청크, rules 세그먼트 96%가 조/장/절 경계 시작 | 재색인 전에는 효과 없음. 실제 qrels·골든 전후 비교 미확인(데이터 사본 필요). rules 청크 수 증가로 top-k·BM25 통계 변화 가능. `트랙명`/`구 분` 16건은 라벨만 소실(값은 제목에 남음). 조문 판별 휴리스틱 edge case 잔존. 기존 문제(범위 밖): `제1조(목적) 이` 뒤 공백 제거, `_academic_period`가 학수번호를 연도로 읽음 | merge 승인 대기 → 데이터 사본 재색인 후 audit 09 지표·qrels 전후 비교 |
+| index build·rebuild 스크립트에 strict lineage gate 적용 (pipeline-audit 07 P0) | P0 | RAG/Backend | `chore/build-lineage-gate` | `build-lineage-gate` | Review | 로컬(2026-09-27): gate 테스트 28개 포함 전체 RAG 1006 passed/1 skipped(순서 고정·빈 DB·무작위 seed 86420). Orchestrator 재검증: 순서 고정 동일, 무작위 seed 99001(빈 DB) 동일, 4개 스크립트 직접 실행 `--help` import 정상. 독립 QA APPROVE(wiring·paused 75 테스트 보강 반영) | 실제 데이터로 스크립트 미실행. `build_indices.py`는 staging이 없어 게시 후 검사(실패 시 exit 1 + rollback 안내). lexical은 FTS/BM25 파일 자체는 검사하지 않음. notices activate 검사는 maintenance_lock 밖. 현재 lineage 실패 데이터셋은 build가 exit 1이 됨(`--skip-lineage-gate`로 우회 가능, 경고 기록) | merge 승인 대기 |
 
 Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 완료된 행은 다음 갱신 때 Recently Completed로 옮긴다.
@@ -187,6 +189,9 @@ Next Action:
   로컬 HTTP 테스트를 위한 소켓 권한을 허용한 재실행 결과다.
 - 9월 27일 CI가 프런트 `npm test`와 백엔드 계약 테스트를 실제 실행 (PR #8, pipeline-audit P0).
 - 9월 27일 멀티 agent 개발 규칙(AGENTS.md, CLAUDE.md, Task Board) 도입 (PR #7).
+- 9월 27일 RAG 테스트 순서 독립성 검증 및 실제 Chroma·유지보수 잠금 격리 (PR #10).
+- 9월 27일 CI에 RAG 무작위 순서 pytest 단계 추가, `requirements-dev.txt` 도입 (PR #11).
+- 9월 27일 질의분석 체인 주입 지점 통일·싱글턴 초기화·동시 첫 생성 잠금 (PR #12).
 
 ## Agent Tasks
 

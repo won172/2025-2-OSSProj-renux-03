@@ -29,6 +29,8 @@ def test_completion_metadata_precedes_done_and_carries_persistence_fields():
             request_id="request-1",
             grounded=True,
             grounding_score=0.94,
+            relevance_score=0.97,
+            verification_status="passed",
             suggested_questions=["신청 서류는 무엇인가요?"],
             suggested_question_details=[{
                 "question": "신청 서류는 무엇인가요?", "source_refs": ["sha256:source-1"],
@@ -47,6 +49,8 @@ def test_completion_metadata_precedes_done_and_carries_persistence_fields():
         "request_id": "request-1",
         "grounded": True,
         "grounding_score": 0.94,
+        "relevance_score": 0.97,
+        "verification_status": "passed",
         "suggested_questions": ["신청 서류는 무엇인가요?"],
         "suggested_question_details": [{
             "question": "신청 서류는 무엇인가요?", "source_refs": ["sha256:source-1"],

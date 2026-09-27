@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Build, verify, activate, or roll back the notices dense index safely."""
+"""Build, verify, activate, or roll back the notices dense index safely.
+
+Canonical lineage gate (strict, notices only):
+- `build`: after the staged collection is verified, lineage is checked against
+  the staged *physical* collection and the checkpoint's source artifact.  The
+  pointer is not touched by `build`; failure exits 1.
+- `activate`: lineage is re-checked against the staged collection BEFORE the
+  pointer switch; failure exits 1 and the pointer is left unchanged.
+`--skip-lineage-gate` (build/activate) is an emergency-only opt-out; it prints a
+loud warning and is recorded in the JSON output.
+"""
 from __future__ import annotations
 
 import argparse
@@ -7,6 +17,7 @@ import json
 import logging
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -21,7 +32,38 @@ from src.services.notices_dense_rebuild import (  # noqa: E402
     rollback_notice_dense_pointer,
     verify_notice_dense_build,
 )
+from src.vectorstore.chroma_client import get_client  # noqa: E402
 from src.vectorstore.collection_pointer import read_pointer_state  # noqa: E402
+from scripts import _lineage_gate  # noqa: E402
+
+
+def _build_snapshot_loader():
+    """Read the staged physical collection directly (bypasses the logical pointer)."""
+    return _lineage_gate.client_snapshot_loader(get_client)
+
+
+def _staged_lineage_gate(
+    *, build_id: str, checkpoint_dir: Path | None, skip: bool, stage: str
+) -> dict:
+    if skip:
+        return _lineage_gate.run_lineage_gate(
+            ["notices"], skip=True, phase=_lineage_gate.PRE_PUBLISH, stage=stage
+        )
+    checkpoint = load_checkpoint(build_id, checkpoint_dir)
+    artifacts = {
+        "notices": SimpleNamespace(
+            chunk_path=Path(str(checkpoint["source_artifact"])),
+            collection=str(checkpoint["build_collection"]),
+        )
+    }
+    return _lineage_gate.run_lineage_gate(
+        ["notices"],
+        skip=False,
+        phase=_lineage_gate.PRE_PUBLISH,
+        stage=stage,
+        artifacts=artifacts,
+        collection_snapshot_loader=_build_snapshot_loader(),
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -39,6 +81,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=range(MIN_BATCH_SIZE, MAX_BATCH_SIZE + 1),
         metavar=f"{MIN_BATCH_SIZE}..{MAX_BATCH_SIZE}",
     )
+    _lineage_gate.add_skip_argument(build)
 
     verify = subparsers.add_parser("verify", help="Re-run ID/count/dimension/20-query verification")
     verify.add_argument("--build-id", required=True)
@@ -52,6 +95,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     activate.add_argument("--pointer-file", type=Path)
     activate.add_argument("--lock-file", type=Path)
+    _lineage_gate.add_skip_argument(activate)
 
     rollback = subparsers.add_parser("rollback", help="Atomically return to the previous collection")
     rollback.add_argument("--confirm-active-collection", required=True)
@@ -65,8 +109,8 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    args = _parser().parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     checkpoint_dir = args.checkpoint_dir
     try:
@@ -79,14 +123,33 @@ def main() -> int:
                     checkpoint_dir=checkpoint_dir,
                     should_stop=lambda: stop.requested,
                 )
+            if result["status"] == "paused":
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 75
+            gate = _staged_lineage_gate(
+                build_id=str(result["build_id"]),
+                checkpoint_dir=checkpoint_dir,
+                skip=args.skip_lineage_gate,
+                stage="rebuild_notices_dense build (staged, pointer unchanged)",
+            )
+            result = {**result, "lineage_gate": gate}
             print(json.dumps(result, ensure_ascii=False, indent=2))
-            return 75 if result["status"] == "paused" else 0
+            return int(gate["exit_code"])
         if args.command == "verify":
             result = verify_notice_dense_build(
                 build_id=args.build_id,
                 checkpoint_dir=checkpoint_dir,
             )
         elif args.command == "activate":
+            gate = _staged_lineage_gate(
+                build_id=args.build_id,
+                checkpoint_dir=checkpoint_dir,
+                skip=args.skip_lineage_gate,
+                stage="rebuild_notices_dense activate (before pointer switch)",
+            )
+            if gate["exit_code"]:
+                print(json.dumps({"status": "activation_refused", "lineage_gate": gate}, ensure_ascii=False, indent=2))
+                return int(gate["exit_code"])
             result = activate_notice_dense_build(
                 build_id=args.build_id,
                 confirm_build_id=args.confirm_build_id,
@@ -94,6 +157,7 @@ def main() -> int:
                 pointer_path=args.pointer_file,
                 lock_path=args.lock_file,
             )
+            result = {**result, "lineage_gate": gate}
         elif args.command == "rollback":
             result = rollback_notice_dense_pointer(
                 confirm_active_collection=args.confirm_active_collection,

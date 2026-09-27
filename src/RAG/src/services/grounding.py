@@ -45,22 +45,54 @@ def _get_grounding_llm() -> Any:
     return _GROUNDING_LLM
 
 
+# Explicit verification outcomes.  ``grounded=None`` alone cannot distinguish
+# "the checker could not run" from "nothing needed checking", so every answer
+# carries one of these four values.  Only ``passed`` means a completed,
+# positive grounding check.
+VERIFICATION_PASSED = "passed"
+VERIFICATION_FAILED = "failed"
+VERIFICATION_UNAVAILABLE = "unavailable"
+VERIFICATION_NOT_REQUIRED = "not_required"
+VERIFICATION_STATUSES = frozenset(
+    {
+        VERIFICATION_PASSED,
+        VERIFICATION_FAILED,
+        VERIFICATION_UNAVAILABLE,
+        VERIFICATION_NOT_REQUIRED,
+    }
+)
+
+
 @dataclass
 class GroundingResult:
     checked: bool
-    grounded: bool
-    score: float
+    grounded: bool | None
+    score: float | None
     reason: str | None
-    relevance_score: float = 1.0
+    relevance_score: float | None = None
+    status: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status is None:
+            if self.checked:
+                self.status = (
+                    VERIFICATION_PASSED if self.grounded else VERIFICATION_FAILED
+                )
+            else:
+                self.status = VERIFICATION_UNAVAILABLE
+        if self.status not in VERIFICATION_STATUSES:
+            raise ValueError(f"unknown verification status: {self.status!r}")
 
 
-def _unchecked_pass() -> GroundingResult:
+def _unverified(status: str) -> GroundingResult:
+    """A result that must never be read as a passing check."""
     return GroundingResult(
         checked=False,
-        grounded=True,
-        score=1.0,
+        grounded=None,
+        score=None,
         reason=None,
-        relevance_score=1.0,
+        relevance_score=None,
+        status=status,
     )
 
 
@@ -85,8 +117,12 @@ async def check_answer_grounding(
     usage_collector: list[dict[str, Any]] | None = None,
 ) -> GroundingResult:
     """Evaluate both source grounding and question-answer relevance."""
-    if not answer.strip() or not context.strip():
-        return _unchecked_pass()
+    if not answer.strip():
+        # Nothing was claimed, so there is nothing to verify.
+        return _unverified(VERIFICATION_NOT_REQUIRED)
+    if not context.strip():
+        # A non-empty answer without context cannot be verified.
+        return _unverified(VERIFICATION_UNAVAILABLE)
 
     try:
         messages = [
@@ -144,16 +180,26 @@ async def check_answer_grounding(
         )
         score = min(grounding_score, relevance_score)
         reason = parsed.get("reason")
+        grounded = score >= min_score
         return GroundingResult(
             checked=True,
-            grounded=score >= min_score,
+            grounded=grounded,
+            status=VERIFICATION_PASSED if grounded else VERIFICATION_FAILED,
             score=score,
             reason=reason.strip() if isinstance(reason, str) and reason.strip() else None,
             relevance_score=relevance_score,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Grounding check failed: %s", exc)
-        return _unchecked_pass()
+        return _unverified(VERIFICATION_UNAVAILABLE)
 
 
-__all__ = ["GroundingResult", "check_answer_grounding"]
+__all__ = [
+    "GroundingResult",
+    "VERIFICATION_FAILED",
+    "VERIFICATION_NOT_REQUIRED",
+    "VERIFICATION_PASSED",
+    "VERIFICATION_STATUSES",
+    "VERIFICATION_UNAVAILABLE",
+    "check_answer_grounding",
+]
