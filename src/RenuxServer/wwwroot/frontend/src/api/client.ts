@@ -1,6 +1,8 @@
 /**
  * Lightweight API client wrapper around fetch with JSON helpers.
  */
+import { Capacitor, CapacitorHttp } from '@capacitor/core'
+
 export interface ApiRequestOptions extends RequestInit {
   json?: Record<string, unknown> | unknown[] | null
 }
@@ -65,6 +67,26 @@ const parseJson = async (response: Response) => {
   }
 }
 
+/**
+ * WKWebView treats a remote API cookie as a third-party cookie when the app
+ * itself is loaded from capacitor://localhost.  Use Capacitor's native HTTP
+ * bridge for JSON requests so URLSession owns the cookie jar and synchronizes
+ * Set-Cookie back to the WebView.  Streaming endpoints intentionally keep
+ * using fetch because the native HTTP bridge buffers the full response.
+ */
+const canUseNativeHttp = (requestUrl: RequestInfo, body: BodyInit | null | undefined) =>
+  Capacitor.isNativePlatform()
+  && typeof requestUrl === 'string'
+  && /^https?:\/\//i.test(requestUrl)
+  && (body == null || typeof body === 'string')
+
+const throwApiError = (status: number, details: unknown): never => {
+  const error: ApiError = new Error(`요청이 실패했습니다. (Status: ${status})`)
+  error.status = status
+  error.details = details
+  throw error
+}
+
 export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options: ApiRequestOptions = {}) => {
   const { json, headers, ...rest } = options
   const requestUrl = buildRequestUrl(input)
@@ -91,6 +113,22 @@ export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options:
     init.body = JSON.stringify(json)
   }
 
+  if (canUseNativeHttp(requestUrl, init.body)) {
+    const nativeResponse = await CapacitorHttp.request({
+      url: requestUrl as string,
+      method: String(rest.method ?? 'GET').toUpperCase(),
+      headers: resolvedHeaders,
+      ...(init.body !== undefined ? { data: init.body } : {}),
+      responseType: 'json',
+    })
+
+    if (nativeResponse.status < 200 || nativeResponse.status >= 300) {
+      throwApiError(nativeResponse.status, nativeResponse.data)
+    }
+
+    return nativeResponse.data as TResponse
+  }
+
   const response = await fetch(requestUrl, init)
 
   let parsedBody: unknown
@@ -101,10 +139,7 @@ export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options:
   }
 
   if (!response.ok) {
-    const error: ApiError = new Error(`요청이 실패했습니다. (Status: ${response.status})`)
-    error.status = response.status
-    error.details = parsedBody
-    throw error
+    throwApiError(response.status, parsedBody)
   }
 
   return parsedBody as TResponse

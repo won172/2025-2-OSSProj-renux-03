@@ -6,6 +6,7 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   ios: {
     contentInset: 'automatic',
+    limitsNavigationsToAppBoundDomains: true,
     preferredContentMode: 'mobile',
   },
   plugins: {

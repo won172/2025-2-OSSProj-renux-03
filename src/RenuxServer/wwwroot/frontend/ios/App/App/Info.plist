@@ -28,6 +28,7 @@
 	<false/>
 	<key>WKAppBoundDomains</key>
 	<array>
+		<string>localhost</string>
 		<string>$(DONGTTOK_API_HOST)</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
