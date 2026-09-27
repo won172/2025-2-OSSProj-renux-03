@@ -76,6 +76,7 @@ Status 값:
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
 | CI에서 프런트 `npm test`·백엔드 계약 테스트 실행 (pipeline-audit P0) | P0 | RAG/Backend (CI) | `chore/ci-contract-tests` | `ci-contract-tests` (제거됨) | Completed | 로컬 `npm test` 50/50, 계약 테스트 통과; PR #8 CI 4개 job 통과 | 계약 테스트는 product telemetry 계약만 다룸 | Recently Completed로 이동 |
+| RAG pytest 순서 독립성 검증·테스트 격리 (pipeline-audit P0) | P0 | QA + RAG/Backend | `test/rag-order-independence` | `rag-order-independence` | Review | 순서 고정·역순·시드 8개·파일별·테스트별 실행 모두 977 passed (일반 DB·빈 DB). Orchestrator 재검증: 실제 Chroma 해시 불변, 시드 424242 통과 | 순서 의존 실패는 재현되지 않음. 테스트가 실제 `artifacts/db_chroma`·유지보수 잠금을 열던 문제를 conftest로 격리. `test_deadline_recall_baseline`은 `real_chroma`로 실제 인덱스 사용 유지. `vectorizers/manifest.lock`은 실제 경로 사용. `query_analysis.analysis_chain` 전역 싱글턴은 제품 코드에 남음 | merge 승인 후 CI 무작위 순서 실행 도입 여부 결정 |
 
 Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 완료된 행은 다음 갱신 때 Recently Completed로 옮긴다.
