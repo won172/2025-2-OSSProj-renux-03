@@ -358,6 +358,49 @@ RAG_SCHEDULER_ALERT_TIMEOUT_SECONDS = float(
 #  refresh 단계에서는 parquet/TF-IDF만 전체 재생성하면 된다. Chroma 카운트가 어긋나면
 #  안전하게 1회 전량 재임베딩으로 자가복구한다.)
 RAG_NOTICES_INCREMENTAL_EMBED = os.getenv("RAG_NOTICES_INCREMENTAL_EMBED", "1") == "1"
+# 정기 증분 수집의 공지 삭제 감지. 증분 목록에 보이지 않은 최근 활성 공지의 상세
+# URL을 리다이렉트 없이 확인하고, 두 번의 실행에서 연속으로 사라짐이 확인된 글만
+# deleted로 바꾼다. off(기본) | dry_run(확인·진단만, DB 상태 불변) | enforce.
+RAG_NOTICE_DELETION_CHECK_MODE = (
+    os.getenv("RAG_NOTICE_DELETION_CHECK_MODE", "off").strip().lower() or "off"
+)
+# 확인 대상: 게시일이 최근 N개월(30일 단위) 안인 활성 공지.
+RAG_NOTICE_DELETION_CHECK_WINDOW_MONTHS = int(
+    os.getenv("RAG_NOTICE_DELETION_CHECK_WINDOW_MONTHS", "6")
+)
+# 실행 한 번당 상세 URL 요청 상한과 요청 간 대기(초).
+RAG_NOTICE_DELETION_CHECK_BUDGET = int(os.getenv("RAG_NOTICE_DELETION_CHECK_BUDGET", "60"))
+RAG_NOTICE_DELETION_CHECK_DELAY_SECONDS = float(
+    os.getenv("RAG_NOTICE_DELETION_CHECK_DELAY_SECONDS", "0.5")
+)
+# 연속 unknown(네트워크 오류·5xx 등)이 이 횟수에 이르면 이번 확인을 중단한다.
+RAG_NOTICE_DELETION_CHECK_MAX_CONSECUTIVE_UNKNOWN = int(
+    os.getenv("RAG_NOTICE_DELETION_CHECK_MAX_CONSECUTIVE_UNKNOWN", "5")
+)
+# 누적 unknown이 이 횟수에 이르거나, 확인에 쓴 벽시계 시간(초)이 상한을 넘으면
+# 중단한다. 확인은 전역 수집 잠금 안에서 돌기 때문에 시간 상한이 필요하다.
+RAG_NOTICE_DELETION_CHECK_MAX_UNKNOWN = int(
+    os.getenv("RAG_NOTICE_DELETION_CHECK_MAX_UNKNOWN", "10")
+)
+RAG_NOTICE_DELETION_CHECK_MAX_SECONDS = float(
+    os.getenv("RAG_NOTICE_DELETION_CHECK_MAX_SECONDS", "120")
+)
+# 첫 상세 확인 missing 표식의 유효 기간(일). 이보다 오래된 표식은 확정에 쓰지 않는다.
+RAG_NOTICE_DELETION_CHECK_STRIKE_MAX_AGE_DAYS = float(
+    os.getenv("RAG_NOTICE_DELETION_CHECK_STRIKE_MAX_AGE_DAYS", "7")
+)
+# 안전 상한: 한 실행에서 확정 삭제가 절대 수 또는 확인 건수 대비 비율을 넘으면
+# 아무것도 삭제하지 않는다(사이트 구조 변경 의심). 비율은 확인 건수가 최소 표본
+# 이상일 때만 평가한다(최소 표본은 실행 예산 이하로 자동 제한).
+RAG_NOTICE_DELETION_CHECK_MAX_DELETIONS = int(
+    os.getenv("RAG_NOTICE_DELETION_CHECK_MAX_DELETIONS", "20")
+)
+RAG_NOTICE_DELETION_CHECK_MAX_FRACTION = float(
+    os.getenv("RAG_NOTICE_DELETION_CHECK_MAX_FRACTION", "0.2")
+)
+RAG_NOTICE_DELETION_CHECK_MIN_SAMPLE = int(
+    os.getenv("RAG_NOTICE_DELETION_CHECK_MIN_SAMPLE", "20")
+)
 
 # 대화 기록 관련 설정 (인메모리).
 MAX_HISTORY_STORE_SIZE = int(os.getenv("MAX_HISTORY_STORE_SIZE", "1000"))
@@ -490,6 +533,17 @@ __all__ = [
     "RAG_SCHEDULER_ALERT_WEBHOOK_URL",
     "RAG_SCHEDULER_ALERT_TIMEOUT_SECONDS",
     "RAG_NOTICES_INCREMENTAL_EMBED",
+    "RAG_NOTICE_DELETION_CHECK_MODE",
+    "RAG_NOTICE_DELETION_CHECK_WINDOW_MONTHS",
+    "RAG_NOTICE_DELETION_CHECK_BUDGET",
+    "RAG_NOTICE_DELETION_CHECK_DELAY_SECONDS",
+    "RAG_NOTICE_DELETION_CHECK_MAX_CONSECUTIVE_UNKNOWN",
+    "RAG_NOTICE_DELETION_CHECK_MAX_DELETIONS",
+    "RAG_NOTICE_DELETION_CHECK_MAX_FRACTION",
+    "RAG_NOTICE_DELETION_CHECK_MIN_SAMPLE",
+    "RAG_NOTICE_DELETION_CHECK_MAX_UNKNOWN",
+    "RAG_NOTICE_DELETION_CHECK_MAX_SECONDS",
+    "RAG_NOTICE_DELETION_CHECK_STRIKE_MAX_AGE_DAYS",
     "MAX_HISTORY_STORE_SIZE",
     "REDIS_URL",
     "REDIS_HISTORY_TTL_SECONDS",
