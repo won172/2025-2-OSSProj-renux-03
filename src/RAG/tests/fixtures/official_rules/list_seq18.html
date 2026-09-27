@@ -1,0 +1,69 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<title>동국대학교 통합규정관리시스템</title>
+<meta http-equiv="Content-type" content="text/html; charset=UTF-8"/>
+</head>
+<body>
+<!-- 공식 규정관리시스템(rule.dongguk.edu) lawListManager.srv 목록 구조를 줄인 테스트 fixture -->
+<form id="form" action="/lmxsrv/law/lawListManager.srv" method="post">
+	<input id="SEQ" name="SEQ" type="hidden" value="18"/>
+	<input id="PAGE" name="PAGE" type="hidden" value="1"/>
+	<input id="PAGE_SHOW" name="PAGE_SHOW" type="hidden" value="15"/>
+</form>
+<div id="content-area">
+  <div class="info">
+    <p class="infoLeft">총 <span class="font_fb5900 font_b">2</span>건</p>
+  </div>
+  <table width="100%" border="0" cellspacing="0" summary="규정정보목록">
+    <tbody class="tbody">
+      <tr>
+        <td></td>
+        <td class="tbody_c">1</td>
+        <td class="tbody_txt">
+          <!-- 일반 규정 이라면 -->
+          <!--
+          <a href="/lmxsrv/law/lawDetail.srv?SEQ=210&SEQ_HISTORY=3510&PAGE_MODE=">
+          -->
+          <a href="javascript:fullPopupPost(210, 3510,'3510');">
+            4-0-20&nbsp;
+            동물실험윤리위원회규정
+            <img src="/lmxsrv/images/inc/ic_link1.gif" align="absmiddle" alt="일반 규정" title="일반 규정"/>
+          </a>
+        </td>
+        <td class="tbody_c">
+          <script type="text/javascript">showDate('20251217', '2');</script>
+        </td>
+        <td align="center"><a href="javascript:fileDown('3510', 'ori');">전문다운로드</a></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td></td>
+        <td class="tbody_c">2</td>
+        <td class="tbody_txt">
+          <!-- 일반 규정 이라면 -->
+          <!--
+          <a href="/lmxsrv/law/lawDetail.srv?SEQ=101&SEQ_HISTORY=4001&PAGE_MODE=">
+          -->
+          <a href="javascript:fullPopupPost(101, 4001,'4001');">
+            2-2-2&nbsp;
+            대학원 장학금 지급내규
+            <img src="/lmxsrv/images/inc/ic_link1.gif" align="absmiddle" alt="일반 규정" title="일반 규정"/>
+          </a>
+        </td>
+        <td class="tbody_c">
+          <script type="text/javascript">showDate('20260615', '2');</script>
+        </td>
+        <td align="center"><a href="javascript:fileDown('4001', 'ori');">전문다운로드</a></td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="boardNavi"><div class="pagination" align="center">
+    <script type="text/javascript">
+      getPageListSet("2", "1", "movePage", "15");
+    </script>
+  </div></div>
+</div>
+</body>
+</html>

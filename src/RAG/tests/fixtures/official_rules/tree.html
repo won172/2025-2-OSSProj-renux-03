@@ -1,0 +1,40 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+<head>
+<title>동국대학교 통합규정관리시스템</title>
+<meta http-equiv="Content-type" content="text/html; charset=utf-8" />
+<script type="text/javascript" src="/lmxsrv/javascript/xtree.js"></script>
+</head>
+<body>
+<!-- 공식 규정관리시스템(rule.dongguk.edu) lawTree.srv?LAWGROUP=1&MODE=srvlist 분류 트리 구조를 줄인 테스트 fixture -->
+<script type="text/javascript">
+var tree1 = new WebFXTree(' 규정');
+tree1.action="javascript:gotoLawList('1', '1', ' 규정', '1', ' ', '1', '9')";
+var tree5 = new WebFXTreeItem('제2편 학칙', '', '', '/lmxsrv/images/tree/foldericon.gif', '/lmxsrv/images/tree/openfoldericon.gif');
+tree5.action="javascript:gotoLawList('5', '1', '제2편 학칙', '0', '제2편', '1', '9')";
+ try{tree1.add(tree5);} catch (error) {}
+var tree18 = new WebFXTreeItem('제4편 위원회', '', '', '/lmxsrv/images/tree/foldericon.gif', '/lmxsrv/images/tree/openfoldericon.gif');
+tree18.action="javascript:gotoLawList('18', '1', '제4편 위원회', '0', '제4편', '1', '9')";
+ try{tree1.add(tree18);} catch (error) {}
+var tree44 = new WebFXTreeItem('제7편 일반연구기관', '', '', '/lmxsrv/images/tree/foldericon.gif', '/lmxsrv/images/tree/openfoldericon.gif');
+tree44.action="javascript:gotoLawList('44', '1', '제7편 일반연구기관', '0', '제7편', '1', '9')";
+ try{tree1.add(tree44);} catch (error) {}
+var tree324 = new WebFXTreeItem('상위법', '', '', '/lmxsrv/images/tree/foldericon.gif', '/lmxsrv/images/tree/openfoldericon.gif');
+tree324.action="javascript:gotoLawList('324', '1', '상위법', '0', '', '1', '9')";
+ try{tree1.add(tree324);} catch (error) {}
+var tree314 = new WebFXTreeItem('폐지규정', '', '', '/lmxsrv/images/tree/foldericon.gif', '/lmxsrv/images/tree/openfoldericon.gif');
+tree314.action="javascript:gotoLawList('314', '1', '폐지규정', '0', '', '1', '9')";
+ try{tree1.add(tree314);} catch (error) {}
+var tree59 = new WebFXTreeItem('제15장 WISE캠퍼스 일반연구기관', '', '', '/lmxsrv/images/tree/foldericon.gif', '/lmxsrv/images/tree/openfoldericon.gif');
+tree59.action="javascript:gotoLawList('59', '1', '제15장 WISE캠퍼스 일반연구기관', '0', '제15장', '1', '9')";
+ try{tree44.add(tree59);} catch (error) {}
+var tree6 = new WebFXTreeItem('제1장 대학', '', '', '/lmxsrv/images/tree/foldericon.gif', '/lmxsrv/images/tree/openfoldericon.gif');
+tree6.action="javascript:gotoLawList('6', '1', '제1장 대학', '0', '제1장', '1', '9')";
+ try{tree5.add(tree6);} catch (error) {}
+var tree7 = new WebFXTreeItem('제2장 일반대학원', '', '', '/lmxsrv/images/tree/foldericon.gif', '/lmxsrv/images/tree/openfoldericon.gif');
+tree7.action="javascript:gotoLawList('7', '1', '제2장 일반대학원', '0', '제2장', '1', '9')";
+ try{tree5.add(tree7);} catch (error) {}
+document.write(tree1);
+</script>
+</body>
+</html>
