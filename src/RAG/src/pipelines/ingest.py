@@ -138,6 +138,29 @@ def _embedding_input_hash(text: str, *, field: str = "retrieval_text") -> str:
     ).hexdigest()
 
 
+EMBEDDING_INPUT_FIELD = "retrieval_text"
+
+
+def with_embedding_input(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return ``frame`` with ``retrieval_text`` set to the passage live ingest embeds.
+
+    Like :func:`_persist_chunks_unlocked`, the runtime loader and the lexical
+    rebuild, this always recomputes the retrieval fields with
+    :func:`enrich_retrieval_fields` (idempotent). A ``retrieval_text`` stored in
+    an older artifact is never trusted, so offline rebuilds cannot embed stale
+    text that differs from what live ingest would embed.
+    """
+    return enrich_retrieval_fields(frame.drop(
+        columns=[
+            EMBEDDING_INPUT_HASH_COLUMN,
+            EMBEDDING_INPUT_FIELD_COLUMN,
+            "retrieval_context",
+            EMBEDDING_INPUT_FIELD,
+        ],
+        errors="ignore",
+    ))
+
+
 def _reusable_vectors(
     collection: str,
     ids: list[str],

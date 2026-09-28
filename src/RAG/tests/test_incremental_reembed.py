@@ -279,7 +279,7 @@ def test_mixed_replacement_matches_full_rebuild_and_lineage(monkeypatch, tmp_pat
         chroma_client.get_collection.cache_clear()
 
 
-def test_staged_payload_hash_describes_chunk_text_without_reuse(monkeypatch, tmp_path: Path):
+def test_staged_payload_embeds_live_retrieval_text_and_is_reusable(monkeypatch, tmp_path: Path):
     client = chromadb.PersistentClient(path=str(tmp_path / "chroma"))
     monkeypatch.setenv("RAG_COLLECTION_POINTER_FILE", str(tmp_path / "pointers.json"))
     monkeypatch.setattr(chroma_client, "get_client", lambda: client)
@@ -306,20 +306,27 @@ def test_staged_payload_hash_describes_chunk_text_without_reuse(monkeypatch, tmp
         for payload in (staged_dense_rebuild._batch_payload, notices_dense_rebuild._batch_payload):
             ids, documents, metadatas = payload(frame)
             assert ids == ["one", "two"]
+            # Staged/notices rebuilds now embed the same retrieval_text as live
+            # ingest (previously chunk_text), certified with the same hash.
+            assert documents == frame["retrieval_text"].tolist()
             for document, metadata in zip(documents, metadatas):
-                assert metadata["embedding_input_field"] == "chunk_text"
-                assert metadata["embedding_input_hash"] == ingest._embedding_input_hash(
-                    document, field="chunk_text"
-                )
+                assert metadata["embedding_input_field"] == "retrieval_text"
+                assert metadata["embedding_input_hash"] == ingest._embedding_input_hash(document)
         live = _snapshot(client, "incremental_rules")
         assert live["one"][1]["embedding_input_field"] == "retrieval_text"
         assert live["one"][1]["embedding_input_hash"] == ingest._embedding_input_hash(live["one"][0])
+        assert [live[chunk_id][0] for chunk_id in ids] == documents
+        assert [live[chunk_id][1]["embedding_input_hash"] for chunk_id in ids] == [
+            metadata["embedding_input_hash"] for metadata in metadatas
+        ]
         client.get_collection("incremental_rules").upsert(
             ids=ids, documents=documents, metadatas=metadatas,
             embeddings=np.ones((len(ids), 4), dtype=np.float32),
         )
         ingest._persist_replacing_collection("rules", "incremental_rules", _frame())
-        assert [len(batch) for batch in calls] == [2, 2]
+        # Staged vectors are certified for the live input, so live ingest reuses
+        # them instead of re-embedding (previously asserted [2, 2]).
+        assert [len(batch) for batch in calls] == [2]
 
         ingest.persist_dataset_artifacts_only("rules", _frame())
         artifact_only = pd.read_parquet(tmp_path / "rules.parquet")
@@ -340,17 +347,16 @@ def test_staged_build_hash_uses_current_model_revision(monkeypatch, tmp_path: Pa
     artifact = tmp_path / "rules.parquet"
     frame = pd.read_parquet(artifact)
     assert not {"embedding_input_hash", "embedding_input_field"} & set(frame.columns)
-    old_hashes = [ingest._embedding_input_hash(text, field="chunk_text") for text in frame["chunk_text"]]
+    old_hashes = [ingest._embedding_input_hash(text) for text in frame["retrieval_text"]]
 
     monkeypatch.setattr(ingest.config, "EMBED_MODEL_REVISION", "revision-B")
     for payload in (staged_dense_rebuild._batch_payload, notices_dense_rebuild._batch_payload):
         ids, documents, metadatas = payload(frame)
         assert ids == ["one", "two"]
+        assert documents == frame["retrieval_text"].tolist()
         for old_hash, document, metadata in zip(old_hashes, documents, metadatas):
-            assert metadata["embedding_input_field"] == "chunk_text"
-            assert metadata["embedding_input_hash"] == ingest._embedding_input_hash(
-                document, field="chunk_text"
-            )
+            assert metadata["embedding_input_field"] == "retrieval_text"
+            assert metadata["embedding_input_hash"] == ingest._embedding_input_hash(document)
             assert metadata["embedding_input_hash"] != old_hash
 
     encoded: list[list[str]] = []
@@ -371,12 +377,10 @@ def test_staged_build_hash_uses_current_model_revision(monkeypatch, tmp_path: Pa
         enforce_batch_range=False,
     )
     assert result["status"] == "verified"
-    assert encoded == [frame["chunk_text"].tolist()]
+    assert encoded == [frame["retrieval_text"].tolist()]
     collection = chromadb.PersistentClient(path=str(tmp_path / "isolated-chroma")).get_collection("revision_rules")
     stored = collection.get(include=["documents", "metadatas"])
     assert len(stored["ids"]) == 2
     for document, metadata in zip(stored["documents"], stored["metadatas"]):
-        assert metadata["embedding_input_field"] == "chunk_text"
-        assert metadata["embedding_input_hash"] == ingest._embedding_input_hash(
-            document, field="chunk_text"
-        )
+        assert metadata["embedding_input_field"] == "retrieval_text"
+        assert metadata["embedding_input_hash"] == ingest._embedding_input_hash(document)

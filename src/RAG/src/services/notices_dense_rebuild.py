@@ -25,8 +25,10 @@ from src.models.embedding import encode_queries, encode_texts
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
     EMBEDDING_INPUT_FIELD_COLUMN,
+    EMBEDDING_INPUT_FIELD,
     EMBEDDING_INPUT_HASH_COLUMN,
     _embedding_input_hash,
+    with_embedding_input,
 )
 from src.services.maintenance_lock import maintenance_lock
 from src.vectorstore.chroma_client import get_client, get_collection
@@ -250,11 +252,21 @@ def load_notice_chunk_snapshot(path: Path | None = None) -> NoticeChunkSnapshot:
     if (frame["chunk_text"].str.strip() == "").any():
         failed = frame.loc[frame["chunk_text"].str.strip() == "", "chunk_id"].tolist()
         raise DenseBuildError(f"notice artifact contains blank chunk text: {failed[:20]}")
+    frame = with_embedding_input(frame)
+    if (frame[EMBEDDING_INPUT_FIELD].str.strip() == "").any():
+        failed = frame.loc[frame[EMBEDDING_INPUT_FIELD].str.strip() == "", "chunk_id"].tolist()
+        raise DenseBuildError(f"notice artifact contains blank embedding input: {failed[:20]}")
 
     sorted_ids = sorted(frame["chunk_id"].tolist())
+    # Covers the embedded text too, so an enrichment change between pause and
+    # resume (or build and activation) is refused.
     row_values = (
-        f"{chunk_id}\0{text}"
-        for chunk_id, text in zip(frame["chunk_id"].tolist(), frame["chunk_text"].tolist())
+        f"{chunk_id}\0{text}\0{embedding_input}"
+        for chunk_id, text, embedding_input in zip(
+            frame["chunk_id"].tolist(),
+            frame["chunk_text"].tolist(),
+            frame[EMBEDDING_INPUT_FIELD].tolist(),
+        )
     )
     return NoticeChunkSnapshot(
         path=artifact_path,
@@ -272,6 +284,10 @@ def _embedding_configuration() -> dict[str, Any]:
         "device": config.EMBED_DEVICE,
         "passage_prefix": config.EMBED_PASSAGE_PREFIX,
         "normalize": True,
+        # Checkpoints/build IDs from the former chunk_text representation must
+        # not be resumed, verified or activated as a retrieval_text build
+        # (_validate_resume and verify_notice_dense_build refuse them).
+        "input_field": EMBEDDING_INPUT_FIELD,
     }
 
 
@@ -401,10 +417,18 @@ def _metadata_value(value: Any) -> str | int | float | bool:
 
 
 def _batch_payload(frame: pd.DataFrame) -> tuple[list[str], list[str], list[dict[str, object]]]:
+    # Embed exactly what live ingest embeds (retrieval_text), and certify the
+    # reuse hash over that same text so live ingest can reuse these vectors.
+    frame = with_embedding_input(frame)
     ids = frame["chunk_id"].astype(str).tolist()
-    documents = frame["chunk_text"].astype(str).tolist()
+    documents = frame[EMBEDDING_INPUT_FIELD].astype(str).tolist()
     metadata_frame = frame.drop(
-        columns=["chunk_text", EMBEDDING_INPUT_HASH_COLUMN, EMBEDDING_INPUT_FIELD_COLUMN],
+        columns=[
+            "chunk_text",
+            EMBEDDING_INPUT_FIELD,
+            EMBEDDING_INPUT_HASH_COLUMN,
+            EMBEDDING_INPUT_FIELD_COLUMN,
+        ],
         errors="ignore",
     )
     metadatas = [
@@ -412,8 +436,8 @@ def _batch_payload(frame: pd.DataFrame) -> tuple[list[str], list[str], list[dict
         for row in metadata_frame.to_dict(orient="records")
     ]
     for document, metadata in zip(documents, metadatas):
-        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "chunk_text"
-        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(document, field="chunk_text")
+        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = EMBEDDING_INPUT_FIELD
+        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(document, field=EMBEDDING_INPUT_FIELD)
     return ids, documents, metadatas
 
 
@@ -584,6 +608,11 @@ def verify_notice_dense_build(
     representative_queries: Sequence[str] = NOTICE_REPRESENTATIVE_QUERIES,
 ) -> dict[str, Any]:
     checkpoint = load_checkpoint(build_id, checkpoint_dir)
+    if checkpoint.get("embedding") != _embedding_configuration():
+        raise BuildVerificationError(
+            "build embedding configuration does not match the current configuration "
+            f"(checkpoint={checkpoint.get('embedding')!r}); rebuild with a new build_id"
+        )
     store = store or ChromaDenseBuildStore()
     collection = str(checkpoint["build_collection"])
     if not store.collection_exists(collection):
@@ -603,6 +632,8 @@ def verify_notice_dense_build(
     errors: list[str] = []
     if source_snapshot.artifact_sha256 != checkpoint["source_artifact_sha256"]:
         errors.append("source_artifact_sha256_mismatch")
+    if source_snapshot.expected_rows_sha256 != checkpoint.get("expected_rows_sha256"):
+        errors.append("expected_rows_sha256_mismatch")
     if actual_count != int(checkpoint["expected_count"]):
         errors.append("collection_count_mismatch")
     if duplicate_ids:
