@@ -1,5 +1,5 @@
-import { apiFetch } from '../api/client'
-import { withGuestTokenHeader } from './guestToken'
+import { apiFetch } from '../api/client.ts'
+import { withGuestTokenHeader } from './guestToken.ts'
 import type { ChatViewMessage } from './chatState'
 import type { HomeBriefing } from '../types/briefing'
 import type { ActiveChat } from '../types/chat'
@@ -30,11 +30,12 @@ export const loadChatMessages = (chatId: string, lastTime: string) =>
     json: { chatId, lastTime },
   })
 
-export const fetchFollowups = (requestId: string, guestToken?: string) =>
+export const fetchFollowups = (requestId: string, guestToken?: string, signal?: AbortSignal) =>
   apiFetch<{ questions: string[] }>('/chat/followups', {
     method: 'POST',
     headers: withGuestTokenHeader({}, guestToken),
     json: { requestId },
+    signal,
   })
 
 export const deleteChat = (chatId: string) =>
