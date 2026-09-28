@@ -162,8 +162,8 @@ static public class AuthenticationApis
 
             if (await db.Users.AnyAsync(p => p.UserId == signup.UserId)) return Results.Conflict("중복된 id");
 
-            // 클라이언트가 보낸 전공이 실제로 존재하는지 검증한다.
-            if (!await db.Majors.AnyAsync(m => m.Id == signup.MajorId))
+            // 공개 가입에서는 실제 전공만 허용하고 관리자용 전공은 제외한다.
+            if (!await db.Majors.AnyAsync(m => m.Id == signup.MajorId && m.Majorname != "관리자"))
             {
                 return Results.BadRequest("유효하지 않은 전공입니다.");
             }
@@ -213,7 +213,7 @@ static public class AuthenticationApis
                 return Results.Conflict(new { message = "이미 대기 중인 학생회 가입 요청이 있습니다." });
             }
 
-            if (!await db.Majors.AnyAsync(m => m.Id == signup.MajorId))
+            if (!await db.Majors.AnyAsync(m => m.Id == signup.MajorId && m.Majorname != "관리자"))
             {
                 return Results.BadRequest(new { message = "유효하지 않은 전공입니다." });
             }
