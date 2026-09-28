@@ -7,8 +7,11 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from api import rag_service as service
+from src.database import Base, RagQueryLog, RagRetrievalLog
 from src.services.direct_answer import DirectAnswer
 from src.services.grounding import GroundingResult
 
@@ -30,7 +33,8 @@ def response_from_events(events, response, *, expected_grounding_reason=None):
         "grounding": {"type", "grounded", "score", "reason"},
         "completion": {"type", "request_id", "grounded", "grounding_score", "relevance_score",
                        "verification_status", "suggested_questions", "suggested_question_details",
-                       "resolved_intents", "fallback_reason", "sources"},
+                       "resolved_intents", "fallback_reason", "sources",
+                       "retrieval_mode", "degraded_datasets"},
         "done": {"type", "request_id"},
     }
     for event in events:
@@ -76,6 +80,8 @@ def response_from_events(events, response, *, expected_grounding_reason=None):
         "verification_status": completion["verification_status"],
         "fallback_triggered": metadata["fallback_triggered"],
         "fallback_reason": completion["fallback_reason"],
+        "retrieval_mode": completion["retrieval_mode"],
+        "degraded_datasets": completion["degraded_datasets"],
     }
 
 
@@ -323,7 +329,8 @@ async def test_source_bearing_direct_answers_have_full_transport_parity(monkeypa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("grounded", [True, False], ids=["grounded", "grounding_failed"])
-async def test_source_bearing_retrieval_has_full_transport_parity(monkeypatch, grounded):
+@pytest.mark.parametrize("retrieval_mode", ["hybrid", "sparse_degraded"])
+async def test_source_bearing_retrieval_has_full_transport_parity(monkeypatch, grounded, retrieval_mode):
     configure(monkeypatch, None)
     frame = pd.DataFrame([{
         "dataset": "rules", "source": "rules", "chunk_id": "rules:bmc-1",
@@ -334,10 +341,17 @@ async def test_source_bearing_retrieval_has_full_transport_parity(monkeypatch, g
         "hybrid_score": 0.95, "structured_match": 1,
         "evidence_group": 1, "citation_number": 1,
         "matched_query": "바이오메디캠퍼스 학사 규정 알려줘",
+        "dense_rank": 1, "sparse_rank": 2, "fusion_rank": 1,
+        "corpus_revision": "rules:revision",
+        "dense_similarity_raw": 0.9,
     }])
 
     async def retrieve(**kwargs):
         assert kwargs["allow_wise"] is False
+        service._retrieval_observations.get().append({
+            "dataset": "rules", "retrieval_mode": retrieval_mode,
+            "dense_error_type": "InternalError" if retrieval_mode == "sparse_degraded" else None,
+        })
         return [frame.copy()], False, []
 
     async def enrich(**kwargs):
@@ -376,6 +390,13 @@ async def test_source_bearing_retrieval_has_full_transport_parity(monkeypatch, g
     assert plan.direct_handler is None
     assert plan.filters["campus"] == "seoul_bmc"
     assert answer.sources and answer.sources[0].metadata["campus_scope"] == "bmc"
+    assert answer.retrieval_mode == retrieval_mode
+    assert answer.degraded_datasets == (["rules"] if retrieval_mode == "sparse_degraded" else [])
+    completion = next(event for event in events if event["type"] == "completion")
+    assert completion["retrieval_mode"] == answer.retrieval_mode
+    assert completion["degraded_datasets"] == answer.degraded_datasets
+    assert not set(service._SOURCE_TRACE_FIELDS).intersection(answer.sources[0].metadata)
+    assert not set(service._SOURCE_TRACE_FIELDS).intersection(events[0]["sources"][0]["metadata"])
     assert answer.citations.startswith("- 바이오메디캠퍼스 학사 규정")
     assert answer.verification_status == (
         service.VERIFICATION_PASSED if grounded else service.VERIFICATION_FAILED
@@ -385,6 +406,106 @@ async def test_source_bearing_retrieval_has_full_transport_parity(monkeypatch, g
         assert [event["type"] for event in events] == [
             "metadata", "grounding", "text", "completion", "done",
         ]
+
+
+@pytest.mark.asyncio
+async def test_one_degraded_dataset_reaches_both_endpoints_and_query_logs(monkeypatch, tmp_path):
+    configure(monkeypatch, None)
+    async def two_dataset_plan(**_kwargs):
+        return service._RetrievalPlan(
+            ["rules", "courses"], service.RetrievalStrategy("hybrid"), {}, {},
+        )
+    monkeypatch.setattr(service, "_plan_retrieval", two_dataset_plan)
+    monkeypatch.setattr(service, "_request_temporal_context", lambda _req: service.TemporalContext(
+        as_of=AS_OF, academic_year=2026, semester=2, phase="학기중",
+    ))
+    monkeypatch.setattr(service, "_ensure_dataset", lambda _dataset: (pd.DataFrame(), None, None, None))
+    monkeypatch.setattr(service, "RAG_GROUNDING_CHECK_ENABLED", False)
+    monkeypatch.setattr(service, "append_manual_history", lambda *_args: None)
+
+    row = {
+        "dataset": "rules", "source": "rules", "chunk_id": "rules:1",
+        "chunk_text": "공식 규정 내용", "title": "공식 규정",
+        "url": "https://www.dongguk.edu/rules/1",
+        "published_at": "2026-09-01", "campus_scope": "seoul",
+        "hybrid_score": 0.95, "structured_match": 1,
+        "evidence_group": 1, "citation_number": 1,
+        "dense_rank": 1, "sparse_rank": 2, "fusion_rank": 1,
+        "corpus_revision": "rules:revision",
+    }
+    searches = []
+    def search(**kwargs):
+        dataset = next(
+            key for key, artifacts in service.DATASET_ARTIFACTS.items()
+            if artifacts.collection == kwargs["collection_name"]
+        )
+        searches.append(dataset)
+        hits = pd.DataFrame([row]) if dataset == "rules" else pd.DataFrame(columns=row)
+        hits.attrs.update(
+            retrieval_mode="hybrid" if dataset == "rules" else "sparse_degraded",
+            dense_error_type=None if dataset == "rules" else "InternalError",
+        )
+        return hits
+
+    async def enrich(**kwargs):
+        return kwargs["frames"], []
+
+    async def select(_question, shortlist, _usage, **_kwargs):
+        return shortlist, False
+
+    async def generate(**_kwargs):
+        return "공식 규정 내용입니다. [문서1]"
+
+    async def generate_stream(**_kwargs):
+        yield "공식 규정 내용입니다. [문서1]"
+
+    def shortlist(frames, **_kwargs):
+        assert len(frames) == 1 and frames[0]["dataset"].tolist() == ["rules"]
+        return frames[0].copy()
+
+    monkeypatch.setattr(service, "hybrid_search_with_meta", search)
+    monkeypatch.setattr(service, "_enrich_staff_lookup_frames", enrich)
+    monkeypatch.setattr(service, "_build_balanced_shortlist", shortlist)
+    monkeypatch.setattr(service, "_apply_cross_encoder_rerank", lambda frame, _q: frame)
+    monkeypatch.setattr(service, "_select_answer_evidence", select)
+    monkeypatch.setattr(service, "generate_langchain_answer", generate)
+    monkeypatch.setattr(service, "generate_langchain_answer_stream", generate_stream)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'queries.db'}")
+    Base.metadata.create_all(engine, tables=[RagQueryLog.__table__, RagRetrievalLog.__table__])
+    sessions = sessionmaker(bind=engine)
+    monkeypatch.setattr(service, "SessionLocal", sessions)
+    try:
+        req = service.AskRequest(question=QUESTION, session_id="mixed-dataset-session")
+        json_request = SimpleNamespace(state=SimpleNamespace(request_id="mixed-json"))
+        answer = await service.ask(req, json_request)
+        stream_request = SimpleNamespace(state=SimpleNamespace(request_id="mixed-stream"))
+        stream = await service.ask_stream(req, stream_request)
+        body = "".join([
+            item.decode() if isinstance(item, bytes) else item
+            async for item in stream.body_iterator
+        ])
+        events = [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")]
+        completion = next(event for event in events if event["type"] == "completion")
+        expected = {"retrieval_mode": "sparse_degraded", "degraded_datasets": ["courses"]}
+        assert {key: getattr(answer, key) for key in expected} == expected
+        assert {key: completion[key] for key in expected} == expected
+        assert searches == ["rules", "courses", "rules", "courses"]
+        assert [event["type"] for event in events] == ["metadata", "text", "completion", "done"]
+        assert answer.sources and completion["sources"] == [source.model_dump() for source in answer.sources]
+        assert not set(service._SOURCE_TRACE_FIELDS).intersection(answer.sources[0].metadata)
+        with sessions() as session:
+            logs = session.query(RagQueryLog).order_by(RagQueryLog.request_id).all()
+            assert [log.request_id for log in logs] == ["mixed-json", "mixed-stream"]
+            for log in logs:
+                retrieval = json.loads(log.stage_timings_json)["retrieval"]
+                assert {key: retrieval[key] for key in expected} == expected
+                assert [(entry["dataset"], entry["retrieval_mode"]) for entry in retrieval["searches"]] == [
+                    ("rules", "hybrid"), ("courses", "sparse_degraded"),
+                ]
+                assert retrieval["sources"][0]["corpus_revision"] == "rules:revision"
+    finally:
+        engine.dispose()
 
 @pytest.mark.asyncio
 async def test_execute_query_emits_typed_events_then_one_direct_outcome(monkeypatch):
@@ -674,11 +795,13 @@ async def test_head_execution_snapshots_and_single_writes(monkeypatch, case):
                 events, json_response | {"answer": expected_answer},
                 expected_grounding_reason="source conflicts with answer" if case in failed_cases else None,
             )
-            assert [{key: value for key, value in event.items() if key != "request_id"} for event in events] == head_events
+            assert [{key: value for key, value in event.items() if key not in {"request_id", "retrieval_mode", "degraded_datasets"}} for event in events] == head_events
             assert [event["type"] for event in events] == expected[5]
         assert (response["route"], response["fallback_triggered"], response["fallback_reason"],
                 response["verification_status"], response["grounded"]) == expected[:5]
-        assert response == {"answer": expected_answer, **head_response_fields}
+        assert {key: value for key, value in response.items() if key not in {"retrieval_mode", "degraded_datasets"}} == {"answer": expected_answer, **head_response_fields}
+        assert response["retrieval_mode"] is None
+        assert response["degraded_datasets"] == []
         assert response["answer"] == expected_answer
         assert response["sources"] == head_sources
         assert response["citations"] == head_citations
@@ -698,7 +821,9 @@ async def test_head_execution_snapshots_and_single_writes(monkeypatch, case):
                 None if mode == "stream" and case == "fallback"
                 else json.dumps([], ensure_ascii=False)
             )
-            assert kwargs == {}
+            if kwargs:
+                assert set(kwargs) == {"source_traces"}
+                assert [(trace["rank"], trace["chunk_id"]) for trace in kwargs["source_traces"]] == [(1, "rules:1")]
         if case == "cache_store":
             args, kwargs = cache_calls[-1]
             assert args[0] == question
