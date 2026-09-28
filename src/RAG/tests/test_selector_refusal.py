@@ -77,6 +77,7 @@ async def test_weakly_related_evidence_is_dropped_when_the_selector_refuses(
     )
     assert selected.empty
     assert fell_back is True
+    assert selected.attrs["selector_refused"] is True
 
 
 @pytest.mark.asyncio
@@ -97,6 +98,7 @@ async def test_strongly_matching_evidence_survives_a_selector_refusal(
     )
     assert not selected.empty
     assert fell_back is True
+    assert not selected.attrs.get("selector_refused", False)
     # 문턱을 넘었으면 근거 묶음은 종전(느슨한 폴백)과 같아야 한다. 여기서 엄격한
     # 부분집합만 넘기면 근거가 얇아져 grounding이 무너진다(실측 7건).
     loose = rag_service._deterministic_evidence_fallback(
@@ -139,6 +141,21 @@ async def test_a_selector_exception_still_uses_the_permissive_fallback(monkeypat
     )
     assert not selected.empty
     assert fell_back is True
+    assert not selected.attrs.get("selector_refused", False)
+
+
+@pytest.mark.asyncio
+async def test_empty_selector_error_is_not_a_refusal(monkeypatch):
+    async def _fail(_question, _candidates, usage_collector=None):
+        return None
+
+    monkeypatch.setattr(rag_service, "select_evidence_groups", _fail)
+    selected, fell_back = await rag_service._select_evidence_for_answer(
+        "무관한 질문", _shortlist(), []
+    )
+    assert selected.empty
+    assert fell_back is True
+    assert not selected.attrs.get("selector_refused", False)
 
 
 def test_coverage_bar_counts_shared_query_terms():

@@ -236,7 +236,7 @@ def _patch_common(monkeypatch):
     monkeypatch.setattr(
         rag_service,
         "_save_rag_evaluation_log",
-        lambda *args, **kwargs: saved_logs.append(kwargs),
+        lambda *args, **kwargs: saved_logs.append((args, kwargs)),
     )
     monkeypatch.setattr(rag_service, "append_manual_history", lambda *_args: None)
     monkeypatch.setattr(rag_service, "get_recent_history_text", lambda *_args, **_kw: "")
@@ -257,24 +257,73 @@ async def test_fallback_terminal_path_parity_is_not_required(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stale_direct_answer_parity_is_not_grounded(monkeypatch):
+@pytest.mark.parametrize("kind", ["meal_stale", "schedule_stale"])
+async def test_stale_direct_answer_parity_is_not_grounded(monkeypatch, kind):
     saved_logs = _patch_common(monkeypatch)
     stale = DirectAnswer(
         answer="최신 학식 데이터를 확인하지 못해 현재 식단을 안내할 수 없습니다.",
-        kind="meal_stale",
+        kind=kind,
     )
     monkeypatch.setattr(rag_service, "_try_direct_answer", lambda *_args: stale)
 
-    nonstream, completion, _ = await _run_both("오늘 학식 뭐야?", as_of="2026-07-30")
+    nonstream, completion, payloads = await _run_both("오늘 학식 뭐야?", as_of="2026-07-30")
 
     assert nonstream.grounded is None and completion["grounded"] is None
     assert nonstream.grounding_score is None and completion["grounding_score"] is None
     assert nonstream.verification_status == VERIFICATION_NOT_REQUIRED
     assert completion["verification_status"] == VERIFICATION_NOT_REQUIRED
-    assert saved_logs == [
+    _assert_terminal_fallback(nonstream, completion, payloads, saved_logs, "stale_data")
+    assert [kwargs for _, kwargs in saved_logs] == [
         {"deterministically_grounded": False},
         {"deterministically_grounded": False},
     ]
+
+
+def _assert_terminal_fallback(nonstream, completion, payloads, saved_logs, reason):
+    assert nonstream.fallback_triggered is True
+    assert nonstream.fallback_reason == completion["fallback_reason"] == reason
+    metadata = next(item for item in payloads if item["type"] == "metadata")
+    assert metadata["fallback_triggered"] is True
+    assert metadata["fallback_reason"] == reason
+    assert nonstream.verification_status == completion["verification_status"] == VERIFICATION_NOT_REQUIRED
+    assert len(saved_logs) == 2
+    assert all(args[6:8] == (True, reason) for args, _ in saved_logs)
+
+
+@pytest.mark.asyncio
+async def test_future_unannounced_fallback_parity(monkeypatch):
+    saved_logs = _patch_common(monkeypatch)
+    monkeypatch.setattr(
+        rag_service, "_try_future_unannounced_answer",
+        lambda *_args: DirectAnswer(answer="아직 공지되지 않았습니다.", kind="future_unannounced"),
+    )
+    nonstream, completion, payloads = await _run_both("2028학년도 신입생 모집요강 알려줘")
+    _assert_terminal_fallback(nonstream, completion, payloads, saved_logs, "future_unannounced")
+
+
+@pytest.mark.asyncio
+async def test_clarification_fallback_parity(monkeypatch):
+    saved_logs = _patch_common(monkeypatch)
+    monkeypatch.setattr(rag_service, "_try_future_unannounced_answer", lambda *_args: None)
+    monkeypatch.setattr(rag_service, "_try_direct_answer", lambda *_args: None)
+    nonstream, completion, payloads = await _run_both("그 강의 신청해도 돼?")
+    _assert_terminal_fallback(nonstream, completion, payloads, saved_logs, "clarification_needed")
+
+
+@pytest.mark.asyncio
+async def test_out_of_domain_fallback_parity_with_mock_analysis(monkeypatch):
+    saved_logs = _patch_common(monkeypatch)
+    monkeypatch.setattr(rag_service, "USE_QUERY_ANALYSIS", True)
+    monkeypatch.setattr(rag_service, "_can_skip_query_analysis", lambda *_args: False)
+    monkeypatch.setattr(rag_service, "_try_future_unannounced_answer", lambda *_args: None)
+    monkeypatch.setattr(rag_service, "_try_direct_answer", lambda *_args: None)
+
+    async def analyze(*_args, **_kwargs):
+        return rag_service.QueryAnalysisResult(normalized_question="샤갈은 누구야?", intent="unknown")
+
+    monkeypatch.setattr(rag_service, "analyze_query", analyze)
+    nonstream, completion, payloads = await _run_both("샤갈은 누구야?")
+    _assert_terminal_fallback(nonstream, completion, payloads, saved_logs, "out_of_domain")
 
 
 def _patch_generated_path(monkeypatch, grounding_result: GroundingResult | None):
@@ -350,6 +399,79 @@ def _patch_generated_path(monkeypatch, grounding_result: GroundingResult | None)
     monkeypatch.setattr(rag_service, "generate_langchain_answer", generate)
     monkeypatch.setattr(rag_service, "generate_langchain_answer_stream", generate_stream)
     monkeypatch.setattr(rag_service, "check_answer_grounding", fake_check)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("selector_refused", "expected_reason"),
+    [(True, "selector_refused"), (False, "no_results")],
+)
+async def test_selector_terminal_reason_parity_and_existing_no_results(
+    monkeypatch, selector_refused, expected_reason
+):
+    _patch_generated_path(monkeypatch, None)
+    saved_logs = []
+    monkeypatch.setattr(
+        rag_service,
+        "_save_rag_evaluation_log",
+        lambda *args, **kwargs: saved_logs.append((args, kwargs)),
+    )
+
+    async def select(_query, merged, *_args, **_kwargs):
+        selected = merged.iloc[:0].copy()
+        if selector_refused:
+            selected.attrs["selector_refused"] = True
+        return selected, selector_refused
+
+    monkeypatch.setattr(rag_service, "_select_answer_evidence", select)
+    nonstream, completion, payloads = await _run_both("휴학 신청 방법 알려줘")
+    _assert_terminal_fallback(nonstream, completion, payloads, saved_logs, expected_reason)
+
+
+@pytest.mark.asyncio
+async def test_stale_direct_answer_rescued_after_retrieval_fallback_parity(monkeypatch):
+    _patch_generated_path(monkeypatch, None)
+    saved_logs = []
+    monkeypatch.setattr(
+        rag_service,
+        "_save_rag_evaluation_log",
+        lambda *args, **kwargs: saved_logs.append((args, kwargs)),
+    )
+    calls = 0
+
+    def direct(*_args):
+        nonlocal calls
+        calls += 1
+        if calls % 2 == 1:
+            return None
+        return DirectAnswer(answer="최신 일정을 확인하지 못했습니다.", kind="schedule_stale")
+
+    async def select(_query, merged, *_args, **_kwargs):
+        return merged.iloc[:0].copy(), False
+
+    monkeypatch.setattr(rag_service, "_try_direct_answer", direct)
+    monkeypatch.setattr(rag_service, "_select_answer_evidence", select)
+    nonstream, completion, payloads = await _run_both("오늘 학사일정 알려줘")
+    assert calls == 4
+    _assert_terminal_fallback(nonstream, completion, payloads, saved_logs, "stale_data")
+
+
+def test_existing_fallback_reason_values_are_unchanged():
+    assert {
+        rag_service.FALLBACK_REASON_NO_RESULTS,
+        rag_service.FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL,
+        rag_service.FALLBACK_REASON_ACTIVE_DEADLINE_ELIMINATED_ALL,
+        rag_service.FALLBACK_REASON_DATASET_UNAVAILABLE,
+        rag_service.FALLBACK_REASON_SCORE_BELOW_THRESHOLD,
+        rag_service.FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
+    } == {
+        "no_results",
+        "date_filter_eliminated_all",
+        "active_deadline_filter_eliminated_all",
+        "dataset_unavailable",
+        "score_below_threshold",
+        "campus_out_of_scope",
+    }
 
 
 @pytest.mark.asyncio
