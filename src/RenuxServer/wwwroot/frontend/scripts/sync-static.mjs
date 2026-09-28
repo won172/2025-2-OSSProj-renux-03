@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checkBundleBudget } from './check-bundle-budget.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -20,6 +21,8 @@ if (entries.length === 0) {
   console.error('[sync-static] dist directory is empty. Abort to avoid wiping wwwroot.')
   process.exit(1)
 }
+
+checkBundleBudget(distDir)
 
 for (const entry of entries) {
   const sourcePath = resolve(distDir, entry.name)
