@@ -209,6 +209,23 @@ class IngestionRun(Base):
     error_summary = Column(Text, nullable=True)
 
 
+class SchedulerJobLease(Base):
+    """One shared lease per scheduled job; timestamps are naive UTC."""
+
+    __tablename__ = "scheduler_job_leases"
+
+    job_name = Column(String, primary_key=True)
+    generation = Column(Integer, nullable=False)
+    released_generation = Column(Integer, nullable=False)
+    # One outcome per completed generation, in generation order: R=release, E=expiry.
+    generation_outcomes = Column(Text, nullable=False)
+    owner_id = Column(String, nullable=False)
+    acquired_at = Column(DateTime, nullable=False)
+    scheduled_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    heartbeat_at = Column(DateTime, nullable=False)
+
+
 class SourceSchemaFingerprint(Base):
     """Versioned structural signature observed at an upstream boundary."""
 
