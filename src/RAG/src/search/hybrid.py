@@ -613,13 +613,10 @@ def load_lexical_with_ids(identifier: str) -> Tuple[Any, np.ndarray, Optional[Li
     return data["vectorizer"], data["matrix"], data.get("chunk_ids")
 
 
-def score_lexical_query(vectorizer: Any, matrix: np.ndarray, query: str) -> np.ndarray:
-    """Return normalized per-row scores for BM25, FTS5, or legacy TF-IDF.
-
-    BM25(pkl)와 FTS5는 둘 다 정규화되지 않은 원점수를 돌려주고, 0..1 정규화는
-    여기 한 곳에서만 한다. 백엔드를 바꿔도 정규화 의미가 달라지지 않아야
-    두 백엔드의 검색 결과를 비교할 수 있다.
-    """
+def _score_lexical_query_with_raw(
+    vectorizer: Any, matrix: np.ndarray, query: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ranking scores and their pre-normalization lexical scores."""
     if isinstance(vectorizer, (BM25LexicalIndex, Fts5LexicalIndex)):
         raw_scores = np.asarray(vectorizer.score(query), dtype=np.float64)
         positive_max = float(np.max(raw_scores)) if raw_scores.size else 0.0
@@ -634,12 +631,24 @@ def score_lexical_query(vectorizer: Any, matrix: np.ndarray, query: str) -> np.n
             cosine_similarity(query_vector, matrix).ravel(),
             dtype=np.float64,
         )
+        raw_scores = scores
 
     matrix_rows = int(getattr(matrix, "shape", (0,))[0])
     if scores.shape[0] != matrix_rows:
         raise ValueError(
             f"lexical score rows ({scores.shape[0]}) do not match matrix rows ({matrix_rows})"
         )
+    return scores, raw_scores
+
+
+def score_lexical_query(vectorizer: Any, matrix: np.ndarray, query: str) -> np.ndarray:
+    """Return normalized per-row scores for BM25, FTS5, or legacy TF-IDF.
+
+    BM25(pkl)와 FTS5는 둘 다 정규화되지 않은 원점수를 돌려주고, 0..1 정규화는
+    여기 한 곳에서만 한다. 백엔드를 바꿔도 정규화 의미가 달라지지 않아야
+    두 백엔드의 검색 결과를 비교할 수 있다.
+    """
+    scores, _ = _score_lexical_query_with_raw(vectorizer, matrix, query)
     return scores
 
 
@@ -700,6 +709,8 @@ def hybrid_search(
     where_filter: Dict | None = None,
     tfidf_chunk_ids: List[str] | None = None,
     academic_period_query: str | None = None,
+    *,
+    dense_enabled: bool = True,
 ) -> pd.DataFrame:
     """
     최적화된 하이브리드 검색:
@@ -709,9 +720,21 @@ def hybrid_search(
 
     tfidf_chunk_ids: TF-IDF 행렬의 행→chunk_id 매핑(아티팩트에 저장된 것).
     주어지면 chunks_df 행 순서에 의존하지 않고 sparse 점수를 매핑합니다.
+    dense_enabled=False는 의도적으로 dense 검색을 생략합니다. 호출 단위 상태는
+    반환 DataFrame의 attrs["retrieval_mode"]와 attrs["dense_error_type"]에 남깁니다.
     """
+    retrieval_mode = "hybrid" if dense_enabled else "sparse_only"
+    dense_error_type: str | None = None
     if chunks_df.empty:
-        return chunks_df.copy()
+        empty = chunks_df.copy()
+        for column in (
+            "document_key", "corpus_revision", "dense_rank", "sparse_rank",
+            "fusion_rank", "dense_distance_raw", "dense_similarity_raw", "sparse_score_raw",
+        ):
+            if column not in empty.columns:
+                empty[column] = pd.Series(dtype=object)
+        empty.attrs.update(retrieval_mode=retrieval_mode, dense_error_type=None)
+        return empty
 
     # 검색 후보 수 (Top-K보다 넉넉하게 가져와서 랭킹)
     limit = top_k * 5
@@ -720,36 +743,43 @@ def hybrid_search(
     # the valid TF-IDF path down with it; readiness still exposes the degraded
     # state while the request continues with sparse retrieval.
     vec_scores: Dict[str, float] = {}
-    try:
-        collection = get_collection(collection_name)
-        query_embedding = encode_queries([query])
-        vec_results = query_items(
-            collection_name,
-            collection=collection,
-            query_embeddings=query_embedding,
-            n_results=limit,
-            where=where_filter,
-        )
+    dense_distances: Dict[str, float] = {}
+    dense_similarities: Dict[str, float] = {}
+    if dense_enabled:
+        try:
+            collection = get_collection(collection_name)
+            query_embedding = encode_queries([query])
+            vec_results = query_items(
+                collection_name,
+                collection=collection,
+                query_embeddings=query_embedding,
+                n_results=limit,
+                where=where_filter,
+            )
 
-        vec_ids = (vec_results.get("ids") or [[]])[0]
-        vec_dists = (vec_results.get("distances") or [[]])[0]
+            vec_ids = (vec_results.get("ids") or [[]])[0]
+            vec_dists = (vec_results.get("distances") or [[]])[0]
 
-        # 거리(Distance)를 유사도(Similarity)로 변환 — 컬렉션의 실제 메트릭에 맞게 처리.
-        # cosine/ip: dist = 1 - sim → sim = 1 - dist
-        # l2(Chroma는 squared L2 반환): 정규화 임베딩이면 dist = 2 - 2cos → sim = 1 - dist/2
-        space = (getattr(collection, "metadata", None) or {}).get("hnsw:space", "l2")
-        if space in ("cosine", "ip"):
-            _to_sim = lambda d: 1.0 - d
-        else:
-            _to_sim = lambda d: 1.0 - d / 2.0
-        vec_scores = {cid: max(0.0, _to_sim(dist)) for cid, dist in zip(vec_ids, vec_dists)}
-    except chromadb.errors.ChromaError as exc:
-        logger.warning(
-            "Dense retrieval unavailable for collection '%s'; continuing sparse-only (%s: %s).",
-            collection_name,
-            type(exc).__name__,
-            exc,
-        )
+            # 거리(Distance)를 유사도(Similarity)로 변환 — 컬렉션의 실제 메트릭에 맞게 처리.
+            # cosine/ip: dist = 1 - sim → sim = 1 - dist
+            # l2(Chroma는 squared L2 반환): 정규화 임베딩이면 dist = 2 - 2cos → sim = 1 - dist/2
+            space = (getattr(collection, "metadata", None) or {}).get("hnsw:space", "l2")
+            if space in ("cosine", "ip"):
+                _to_sim = lambda d: 1.0 - d
+            else:
+                _to_sim = lambda d: 1.0 - d / 2.0
+            vec_scores = {cid: max(0.0, _to_sim(dist)) for cid, dist in zip(vec_ids, vec_dists)}
+            dense_distances = dict(zip(vec_ids, vec_dists))
+            dense_similarities = {cid: _to_sim(dist) for cid, dist in zip(vec_ids, vec_dists)}
+        except chromadb.errors.ChromaError as exc:
+            retrieval_mode = "sparse_degraded"
+            dense_error_type = type(exc).__name__
+            logger.warning(
+                "Dense retrieval unavailable for collection '%s'; continuing sparse-only (%s: %s).",
+                collection_name,
+                dense_error_type,
+                exc,
+            )
 
     # 2. Sparse Search (BM25; 재색인 전에는 레거시 TF-IDF 호환)
     # 행→chunk_id 매핑: 아티팩트의 chunk_ids가 있으면 그것을 사용(행 순서 결합 제거),
@@ -771,12 +801,24 @@ def hybrid_search(
         )
 
     sparse_scores: Dict[str, float] = {}
+    sparse_raw_scores: Dict[str, float] = {}
     if row_ids is not None:
-        sparse_sims = score_lexical_query(tfidf_vectorizer, tfidf_matrix, query)
+        if isinstance(tfidf_vectorizer, (BM25LexicalIndex, Fts5LexicalIndex)):
+            sparse_sims, raw_sims = _score_lexical_query_with_raw(
+                tfidf_vectorizer, tfidf_matrix, query,
+            )
+        else:
+            sparse_sims = score_lexical_query(tfidf_vectorizer, tfidf_matrix, query)
+            raw_sims = sparse_sims
+        sparse_raw_scores = {
+            str(cid): raw_score for cid, raw_score in zip(row_ids, raw_sims)
+        }
         sparse_indices = np.argsort(sparse_sims)[::-1][:limit]
         for idx in sparse_indices:
             if sparse_sims[idx] > 0:
-                sparse_scores[str(row_ids[idx])] = sparse_sims[idx]
+                cid = str(row_ids[idx])
+                sparse_scores[cid] = sparse_sims[idx]
+                sparse_raw_scores[cid] = raw_sims[idx]
         if not sparse_scores:
             # OOV 쿼리 등으로 sparse 기여가 0이면 무음으로 vector-only가 되므로 흔적을 남긴다
             logging.info(
@@ -910,13 +952,28 @@ def hybrid_search(
     
     if not valid_ids:
         # 원본 DataFrame의 구조를 유지한 빈 DataFrame 반환
-        return chunks_df.iloc[:0].copy()
-        
-    result_df = df_indexed.loc[valid_ids].copy()
-    result_df["hybrid_score"] = [score_by_id[cid]["hybrid_score"] for cid in valid_ids]
-    result_df["vector_score"] = [score_by_id[cid]["vector_score"] for cid in valid_ids]
-    result_df["sparse_score"] = [score_by_id[cid]["sparse_score"] for cid in valid_ids]
-    result_df = result_df.reset_index() # chunk_id를 다시 컬럼으로
+        result_df = chunks_df.iloc[:0].copy()
+    else:
+        result_df = df_indexed.loc[valid_ids].copy()
+        result_df["hybrid_score"] = [score_by_id[cid]["hybrid_score"] for cid in valid_ids]
+        result_df["vector_score"] = [score_by_id[cid]["vector_score"] for cid in valid_ids]
+        result_df["sparse_score"] = [score_by_id[cid]["sparse_score"] for cid in valid_ids]
+        result_df = result_df.reset_index() # chunk_id를 다시 컬럼으로
+
+    if "document_key" not in result_df.columns:
+        result_df["document_key"] = pd.Series([None] * len(result_df), dtype=object)
+    if "corpus_revision" not in result_df.columns:
+        result_df["corpus_revision"] = pd.Series([None] * len(result_df), dtype=object)
+    for column, values in (
+        ("dense_rank", [dense_ranks.get(cid) for cid in valid_ids]),
+        ("sparse_rank", [sparse_ranks.get(cid) for cid in valid_ids]),
+        ("fusion_rank", list(range(1, len(valid_ids) + 1))),
+        ("dense_distance_raw", [dense_distances.get(cid) for cid in valid_ids]),
+        ("dense_similarity_raw", [dense_similarities.get(cid) for cid in valid_ids]),
+        ("sparse_score_raw", [sparse_raw_scores.get(cid) for cid in valid_ids]),
+    ):
+        result_df[column] = pd.Series(values, index=result_df.index, dtype=object)
+    result_df.attrs.update(retrieval_mode=retrieval_mode, dense_error_type=dense_error_type)
     
     return result_df
 
@@ -932,8 +989,14 @@ def hybrid_search_with_meta(
     where_filter: Dict | None = None, # where_filter 추가
     tfidf_chunk_ids: List[str] | None = None,
     academic_period_query: str | None = None,
+    *,
+    dense_enabled: bool = True,
 ) -> pd.DataFrame:
-    """노트북과 같은 형식으로 메타데이터 열을 청크 텍스트와 함께 반환합니다."""
+    """청크별 trace 열과 호출 단위 retrieval 상태를 포함한 검색 결과를 반환합니다.
+
+    호출자는 반환 직후 ``result.attrs``에서 ``retrieval_mode``와
+    ``dense_error_type``을 읽을 수 있습니다. 결과 행의 순위와 원점수는 열에 있습니다.
+    """
     hits = hybrid_search(
         collection_name,
         chunks_df,
@@ -945,6 +1008,7 @@ def hybrid_search_with_meta(
         where_filter,
         tfidf_chunk_ids,
         academic_period_query,
+        dense_enabled=dense_enabled,
     )
     # Metadata schemas can contain the same logical field more than once after
     # an artifact migration (for example, ``department`` was added to the
@@ -966,7 +1030,9 @@ def hybrid_search_with_meta(
     # answer/source contract. Dropping them here silently turns valid official
     # evidence into unknown-campus or undated evidence downstream.
     desired = [
-        "chunk_id", "title", "chunk_text", "hybrid_score", "vector_score", "sparse_score",
+        "chunk_id", "document_key", "corpus_revision", "title", "chunk_text",
+        "hybrid_score", "vector_score", "sparse_score", "dense_rank", "sparse_rank",
+        "fusion_rank", "dense_distance_raw", "dense_similarity_raw", "sparse_score_raw",
         "topics", "category", "published_at", "apply_deadline", "url", "source", "notice_id",
         "department", "visibility",
         "major", "college_name", "entry_year", "source_type", "attachments",
@@ -976,7 +1042,7 @@ def hybrid_search_with_meta(
         "doc_id", "position",  # parent-document 확장(이웃 청크 결합)에 사용
         "is_closed", "restaurant", "meal_date",  # 학식: 휴무 패널티·식당/날짜 표시에 사용
         "schedule_start", "schedule_end", "campus_scope",
-        "filename", "relative_dir", "source_file", "document_key", "source_id",
+        "filename", "relative_dir", "source_file", "source_id",
         "board_code", "article_id", "schedule_id", "staff_id", "course_id", "rule_id",
         "canonical_key", "is_latest",
         "title_norm", "audience", "retrieval_context",
@@ -984,7 +1050,12 @@ def hybrid_search_with_meta(
         "has_substantive_body",  # 제목만 있는 공지를 근거 자리에서 뒤로 미는 데 사용
     ]
     existing = list(dict.fromkeys(col for col in desired if col in out.columns))
-    return out[existing]
+    result = out[existing]
+    result.attrs.update(
+        retrieval_mode=hits.attrs.get("retrieval_mode", "hybrid"),
+        dense_error_type=hits.attrs.get("dense_error_type"),
+    )
+    return result
 
 
 def _extract_title(text: str) -> str:

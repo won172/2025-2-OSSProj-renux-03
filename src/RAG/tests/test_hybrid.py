@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 import threading
 from pathlib import Path
@@ -243,6 +244,180 @@ def _make_dataset():
     vectorizer = TfidfVectorizer(max_features=100)
     matrix = vectorizer.fit_transform(chunks_df["chunk_text"].tolist())
     return chunks_df, vectorizer, matrix
+
+
+def _trace_dataset():
+    chunks_df, vectorizer, matrix = _make_dataset()
+    chunks_df["document_key"] = ["notices:1", "notices:2", "notices:3"]
+    chunks_df["corpus_revision"] = "revision-1"
+    return chunks_df, vectorizer, matrix
+
+
+def _ranking_bytes(hits):
+    return json.dumps(
+        hits[["chunk_id", "hybrid_score", "vector_score", "sparse_score"]].to_dict("records"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def test_hybrid_search_trace_keeps_head_results_and_exposes_ranks():
+    chunks_df, vectorizer, matrix = _trace_dataset()
+
+    class Collection:
+        metadata = {"hnsw:space": "cosine"}
+
+        def query(self, **_kwargs):
+            return {"ids": [["c2", "c1"]], "distances": [[0.1, 0.4]]}
+
+    with patch("src.search.hybrid.get_collection", return_value=Collection()), \
+         patch("src.search.hybrid.encode_queries", return_value=[[0.0]]):
+        hits = hybrid.hybrid_search_with_meta(
+            "dongguk_notices", chunks_df, vectorizer, matrix, "장학금 신청",
+            top_k=3, tfidf_chunk_ids=["c1", "c2", "c3"],
+        )
+
+    # Fixed from origin/main a0729f9 before the trace change: exact IDs, order, and scores.
+    assert _ranking_bytes(hits) == (
+        '[{"chunk_id":"c1","hybrid_score":1.171935483870968,'
+        '"vector_score":0.6,"sparse_score":0.8164965809277261},'
+        '{"chunk_id":"c2","hybrid_score":0.62,'
+        '"vector_score":0.9,"sparse_score":0.0}]'
+    )
+    assert hits.attrs == {"retrieval_mode": "hybrid", "dense_error_type": None}
+    assert hits["document_key"].tolist() == ["notices:1", "notices:2"]
+    assert hits["corpus_revision"].tolist() == ["revision-1", "revision-1"]
+    assert hits["dense_rank"].tolist() == [2, 1]
+    assert hits["sparse_rank"].tolist() == [1, None]
+    assert hits["fusion_rank"].tolist() == [1, 2]
+    assert hits["dense_distance_raw"].tolist() == [0.4, 0.1]
+    assert hits["dense_similarity_raw"].tolist() == [0.6, 0.9]
+    assert hits["sparse_score_raw"].tolist() == [0.8164965809277261, 0.0]
+
+
+def test_chroma_failure_trace_keeps_head_sparse_results():
+    chunks_df, vectorizer, matrix = _trace_dataset()
+
+    class BrokenCollection:
+        def query(self, **_kwargs):
+            raise chromadb.errors.InternalError("private failure detail")
+
+    with patch("src.search.hybrid.get_collection", return_value=BrokenCollection()), \
+         patch("src.search.hybrid.encode_queries", return_value=[[0.0]]):
+        hits = hybrid.hybrid_search_with_meta(
+            "dongguk_notices", chunks_df, vectorizer, matrix, "장학금 신청",
+            top_k=3, tfidf_chunk_ids=["c1", "c2", "c3"],
+        )
+
+    assert _ranking_bytes(hits) == (
+        '[{"chunk_id":"c1","hybrid_score":0.6799999999999999,'
+        '"vector_score":0.0,"sparse_score":0.8164965809277261}]'
+    )
+    assert hits.attrs == {
+        "retrieval_mode": "sparse_degraded", "dense_error_type": "InternalError",
+    }
+    assert "private failure detail" not in repr(hits.attrs)
+    assert hits.loc[0, "dense_rank"] is None
+    assert hits.loc[0, "sparse_rank"] == 1
+    assert hits.loc[0, "fusion_rank"] == 1
+    assert hits.loc[0, "dense_distance_raw"] is None
+    assert hits.loc[0, "dense_similarity_raw"] is None
+
+
+def test_intentionally_disabled_dense_reports_sparse_only_without_chroma_call():
+    chunks_df, vectorizer, matrix = _trace_dataset()
+    with patch("src.search.hybrid.get_collection") as get_collection:
+        hits = hybrid.hybrid_search_with_meta(
+            "dongguk_notices", chunks_df, vectorizer, matrix, "장학금 신청",
+            top_k=3, tfidf_chunk_ids=["c1", "c2", "c3"], dense_enabled=False,
+        )
+
+    get_collection.assert_not_called()
+    assert _ranking_bytes(hits) == (
+        '[{"chunk_id":"c1","hybrid_score":0.6799999999999999,'
+        '"vector_score":0.0,"sparse_score":0.8164965809277261}]'
+    )
+    assert hits.attrs == {"retrieval_mode": "sparse_only", "dense_error_type": None}
+
+
+def test_bm25_trace_retains_pre_normalization_score():
+    class Engine:
+        def get_scores(self, _tokens):
+            return [4.0, 2.0]
+
+    chunks_df = pd.DataFrame({
+        "chunk_id": ["c1", "c2"], "chunk_text": ["첫째", "둘째"],
+    })
+    vectorizer = BM25LexicalIndex(Engine(), "default", 2)
+    with patch("src.search.hybrid.get_collection", return_value=_fake_chroma([], [])), \
+         patch("src.search.hybrid.encode_queries", return_value=[[0.0]]):
+        hits = hybrid_search(
+            "fake", chunks_df, vectorizer, pd.DataFrame(index=range(2)), "질의",
+            top_k=2, tfidf_chunk_ids=["c1", "c2"],
+        )
+
+    assert hits["sparse_score"].tolist() == [1.0, 0.5]
+    assert hits["sparse_score_raw"].tolist() == [4.0, 2.0]
+    assert hits["sparse_rank"].tolist() == [1, 2]
+    assert hits["document_key"].tolist() == [None, None]
+    assert hits["corpus_revision"].tolist() == [None, None]
+
+
+def test_dense_hit_retains_sparse_raw_score_below_candidate_cutoff():
+    class Engine:
+        def get_scores(self, _tokens):
+            return [6.0, 5.0, 4.0, 3.0, 2.0, 1.0]
+
+    chunks_df = pd.DataFrame({
+        "chunk_id": [f"c{index}" for index in range(1, 7)],
+        "chunk_text": ["본문"] * 6,
+        "major": ["excluded"] * 5 + ["allowed"],
+    })
+    vectorizer = BM25LexicalIndex(Engine(), "default", 6)
+    with patch("src.search.hybrid.get_collection", return_value=_fake_chroma(["c6"], [0.0])), \
+         patch("src.search.hybrid.encode_queries", return_value=[[0.0]]), \
+         patch("src.search.hybrid.HYBRID_FUSION_MODE", "weighted"), \
+         patch("src.search.hybrid.HYBRID_TITLE_FOCUS_WEIGHT", 0.0):
+        hits = hybrid_search(
+            "fake", chunks_df, vectorizer, pd.DataFrame(index=range(6)), "질의",
+            top_k=1, alpha=0.7, where_filter={"major": {"$eq": "allowed"}},
+            tfidf_chunk_ids=[f"c{index}" for index in range(1, 7)],
+        )
+
+    # Fixed from origin/main a0729f9: sparse top-5 excludes c6; filtered candidates leave c6.
+    assert _ranking_bytes(hits) == (
+        '[{"chunk_id":"c6","hybrid_score":0.7,"vector_score":1.0,"sparse_score":0.0}]'
+    )
+    assert hits.loc[0, "dense_rank"] == 1
+    assert hits.loc[0, "sparse_rank"] is None
+    assert hits.loc[0, "sparse_score_raw"] == 1.0
+
+
+def test_duplicate_chunk_id_raw_sparse_score_matches_scoring_row():
+    class Engine:
+        def get_scores(self, _tokens):
+            return [1.0, 4.0]
+
+    chunks_df = pd.DataFrame({
+        "chunk_id": ["c1", "c1"], "chunk_text": ["첫 행", "둘째 행"],
+    })
+    vectorizer = BM25LexicalIndex(Engine(), "default", 2)
+    with patch("src.search.hybrid.get_collection", return_value=_fake_chroma([], [])), \
+         patch("src.search.hybrid.encode_queries", return_value=[[0.0]]), \
+         patch("src.search.hybrid.HYBRID_FUSION_MODE", "weighted"), \
+         patch("src.search.hybrid.HYBRID_TITLE_FOCUS_WEIGHT", 0.0):
+        hits = hybrid_search(
+            "fake", chunks_df, vectorizer, pd.DataFrame(index=range(2)), "질의",
+            top_k=1, tfidf_chunk_ids=["c1", "c1"],
+        )
+
+    # Fixed from origin/main a0729f9: descending candidates overwrite c1 with row 0.
+    assert _ranking_bytes(hits) == (
+        '[{"chunk_id":"c1","hybrid_score":0.25,'
+        '"vector_score":0.0,"sparse_score":0.25}]'
+    )
+    assert hits.loc[0, "chunk_text"] == "첫 행"
+    assert hits.loc[0, "sparse_score_raw"] == 1.0
 
 
 def test_hybrid_search_maps_sparse_by_chunk_ids():
