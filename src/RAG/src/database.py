@@ -503,6 +503,21 @@ class RagQueryLog(Base):
     retrievals = relationship("RagRetrievalLog", back_populates="query_log")
 
 
+class TelemetryHeartbeat(Base):
+    """Per-process telemetry snapshot; all timestamps are naive UTC."""
+
+    __tablename__ = "telemetry_heartbeats"
+
+    id = Column(Integer, primary_key=True)
+    host_id = Column(String, nullable=False, index=True)
+    process_id = Column(String, nullable=False, index=True)
+    recorded_at = Column(DateTime, nullable=False, index=True)
+    interval_started_at = Column(DateTime, nullable=False)
+    queries_logged = Column(Integer, nullable=False)
+    latest_query_log_at = Column(DateTime, nullable=True)
+    scheduler_alive = Column(Boolean, nullable=False)
+
+
 # 12. RAG 검색 문서/점수 평가 로그
 class RagRetrievalLog(Base):
     __tablename__ = "rag_retrieval_logs"
