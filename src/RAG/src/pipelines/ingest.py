@@ -8,10 +8,13 @@ from typing import Dict, Iterable, List, Tuple
 import json
 import argparse
 import inspect
+import hashlib
 import logging
 import os
+import sqlite3
 import tempfile
 
+import numpy as np
 import pandas as pd
 import re
 from sqlalchemy.orm import Session
@@ -24,6 +27,7 @@ from src.config import (
     DATA_SOURCES,
 )
 from src.models.embedding import encode_texts
+from src import config
 from src.search.hybrid import train_bm25
 from src.services.campus_scope import (
     classify_campus_scope,
@@ -60,6 +64,7 @@ from src.vectorstore.chroma_client import (
     add_items,
     upsert_items,
     get_all_ids,
+    get_items,
     delete_items,
     update_item_metadatas,
 )
@@ -111,6 +116,54 @@ DATASET_ARTIFACTS: Dict[str, DatasetArtifacts] = {
         chunk_path=CHUNKS_DIR / "meals.parquet",
     ),
 }
+
+
+EMBEDDING_INPUT_HASH_COLUMN = "embedding_input_hash"
+EMBEDDING_INPUT_FIELD_COLUMN = "embedding_input_field"
+
+
+def _embedding_input_hash(text: str, *, field: str = "retrieval_text") -> str:
+    """Fingerprint exactly the passage input and the settings that change its vector."""
+    payload = {
+        "schema": 1,
+        "input_field": field,
+        "text": text,
+        "model": config.EMBED_MODEL_NAME,
+        "revision": config.EMBED_MODEL_REVISION,
+        "passage_prefix": config.EMBED_PASSAGE_PREFIX,
+        "normalize_embeddings": True,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _reusable_vectors(
+    collection: str,
+    ids: list[str],
+    texts: list[str],
+    hashes: list[str],
+) -> dict[str, np.ndarray]:
+    """Fail closed on legacy entries or incomplete vector/metadata snapshots."""
+    existing = get_items(collection, ids, include_embeddings=True)
+    vectors: dict[str, np.ndarray] = {}
+    if not all(len(existing[field]) == len(existing["ids"]) for field in ("documents", "metadatas", "embeddings")):
+        raise RuntimeError("Chroma returned an incomplete embedding reuse snapshot")
+    wanted = {chunk_id: (text, digest) for chunk_id, text, digest in zip(ids, texts, hashes)}
+    for chunk_id, document, metadata, embedding in zip(
+        existing["ids"], existing["documents"], existing["metadatas"], existing["embeddings"]
+    ):
+        target = wanted.get(str(chunk_id))
+        if target is None or document != target[0] or not isinstance(metadata, dict):
+            continue
+        if metadata.get(EMBEDDING_INPUT_HASH_COLUMN) != target[1]:
+            continue
+        if metadata.get(EMBEDDING_INPUT_FIELD_COLUMN) != "retrieval_text":
+            continue
+        vector = np.asarray(embedding)
+        if vector.ndim == 1 and vector.size and np.isfinite(vector).all():
+            vectors[str(chunk_id)] = vector
+    return vectors
 
 
 def _canonicalize_campus_scope_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -183,7 +236,10 @@ def _train_lexical_indices(
         fts_kwargs: dict[str, object] = {}
         if corpus_revision is not None:
             fts_kwargs["corpus_revision"] = corpus_revision
-        build_fts_index(key, texts, chunk_ids, **fts_kwargs)
+        if _fts_index_matches_corpus(key, chunk_ids, corpus_revision):
+            logging.info("ingest_stage_completed dataset=%s stage=fts5 skipped=1 reason=unchanged_corpus", key)
+        else:
+            build_fts_index(key, texts, chunk_ids, **fts_kwargs)
     except Exception as exc:
         if LEXICAL_BACKEND == "fts5":
             raise
@@ -193,6 +249,27 @@ def _train_lexical_indices(
         )
 
     return vectorizer, matrix
+
+
+def _fts_index_matches_corpus(key: str, chunk_ids: list[str], corpus_revision: str | None) -> bool:
+    """Skip FTS writes only when revision, IDs, and tokenizer implementation agree."""
+    if not corpus_revision:
+        return False
+    from src.search import fts_index
+
+    index = fts_index.load_fts_index(key)
+    if index is None or index.corpus_revision != corpus_revision or index.chunk_ids != chunk_ids:
+        return False
+    if index.tokenizer_name != fts_index.TFIDF_TOKENIZER:
+        return False
+    try:
+        with sqlite3.connect(f"file:{index.db_path}?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                "SELECT tokenizer_backend FROM lexical_meta WHERE identifier = ?", (key,)
+            ).fetchone()
+    except sqlite3.DatabaseError:
+        return False
+    return bool(row and row[0] == fts_index.tokenizer_backend(fts_index.TFIDF_TOKENIZER))
 
 
 def _write_chunk_artifact_atomic(artifacts: DatasetArtifacts, chunks_df: pd.DataFrame) -> Path:
@@ -236,7 +313,11 @@ def _persist_chunks_unlocked(key: str, collection: str, chunks_df: pd.DataFrame)
         print(f"⚠️ Warning: No chunks generated for {key}")
         return chunks_df, None, None
 
-    chunks_df = enrich_retrieval_fields(chunks_df)
+    # Legacy Parquet may carry a model-specific hash. Keep it out of the
+    # canonical frame; only the vector writer certifies its embedding input.
+    chunks_df = enrich_retrieval_fields(chunks_df.drop(
+        columns=[EMBEDDING_INPUT_HASH_COLUMN, EMBEDDING_INPUT_FIELD_COLUMN], errors="ignore"
+    ))
     chunks_df, corpus_revision = stamp_corpus_revision(key, chunks_df)
     retrieval_text = chunks_df["retrieval_text"].fillna("").astype(str)
 
@@ -248,6 +329,11 @@ def _persist_chunks_unlocked(key: str, collection: str, chunks_df: pd.DataFrame)
     metadatas = [{k: (v if v is not None else "") for k, v in m.items()} for m in metadatas]
 
     target_ids = chunks_df["chunk_id"].astype(str).tolist()
+    texts = retrieval_text.tolist()
+    hashes = [_embedding_input_hash(text) for text in texts]
+    for metadata, digest in zip(metadatas, hashes):
+        metadata[EMBEDDING_INPUT_HASH_COLUMN] = digest
+        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "retrieval_text"
     context_dataset, run_id = current_ingestion_context(key)
     logging.info(
         "ingest_stage_started dataset=%s run_id=%s stage=embedding rows=%s",
@@ -255,12 +341,26 @@ def _persist_chunks_unlocked(key: str, collection: str, chunks_df: pd.DataFrame)
         run_id,
         len(target_ids),
     )
-    embeddings = encode_texts(retrieval_text.tolist())
+    reused = _reusable_vectors(collection, target_ids, texts, hashes)
+    missing_positions = [index for index, chunk_id in enumerate(target_ids) if chunk_id not in reused]
+    new_vectors = encode_texts([texts[index] for index in missing_positions]) if missing_positions else []
+    if len(new_vectors) != len(missing_positions):
+        raise ValueError("embedding row count does not match changed chunk count")
+    embeddings = [reused.get(chunk_id) for chunk_id in target_ids]
+    for index, vector in zip(missing_positions, new_vectors):
+        embeddings[index] = vector
+    logging.info(
+        "ingest_stage_completed dataset=%s run_id=%s stage=embedding reused=%s embedded=%s",
+        context_dataset,
+        run_id,
+        len(reused),
+        len(missing_positions),
+    )
 
     upsert_items(
         collection,
-        ids=chunks_df["chunk_id"],
-        documents=retrieval_text,
+        ids=target_ids,
+        documents=texts,
         metadatas=metadatas,
         embeddings=embeddings,
     )
@@ -304,7 +404,9 @@ def persist_dataset_artifacts_only(key: str, chunks_df: pd.DataFrame) -> Tuple[p
         return chunks_df, None, None
 
     with serialized_ingest_write(dataset=key, operation="persist_dataset_artifacts_only"):
-        chunks_df = enrich_retrieval_fields(chunks_df)
+        chunks_df = enrich_retrieval_fields(chunks_df.drop(
+            columns=[EMBEDDING_INPUT_HASH_COLUMN, EMBEDDING_INPUT_FIELD_COLUMN], errors="ignore"
+        ))
         chunks_df, corpus_revision = stamp_corpus_revision(key, chunks_df)
         retrieval_text = chunks_df["retrieval_text"].fillna("").astype(str)
         artifacts = DATASET_ARTIFACTS[key]
@@ -331,14 +433,38 @@ def update_collection_metadata_from_frame(key: str, chunks_df: pd.DataFrame) -> 
     if chunks_df.empty:
         return
     with serialized_ingest_write(dataset=key, operation="update_collection_metadata"):
+        # Preserve a certified hash only for the field actually embedded.
+        # Legacy notice vectors with no certified hash remain ineligible for reuse.
+        refreshed = enrich_retrieval_fields(chunks_df)
+        ids = refreshed["chunk_id"].astype(str).tolist()
+        expected = {
+            field: dict(zip(ids, refreshed[field].fillna("").astype(str).tolist()))
+            for field in ("retrieval_text", "chunk_text")
+        }
+        existing = get_items(DATASET_ARTIFACTS[key].collection, ids)
+        certified_hashes = {}
+        certified_fields = {}
+        for chunk_id, document, metadata in zip(
+            existing["ids"], existing["documents"], existing["metadatas"]
+        ):
+            field = metadata.get(EMBEDDING_INPUT_FIELD_COLUMN) if isinstance(metadata, dict) else None
+            text = expected.get(field, {}).get(str(chunk_id))
+            if text is not None and document == text:
+                digest = _embedding_input_hash(text, field=field)
+                if metadata.get(EMBEDDING_INPUT_HASH_COLUMN) == digest:
+                    certified_hashes[str(chunk_id)] = digest
+                    certified_fields[str(chunk_id)] = field
         metadatas = chunks_df.drop(
-            columns=["chunk_text", "retrieval_text"],
+            columns=["chunk_text", "retrieval_text", EMBEDDING_INPUT_HASH_COLUMN, EMBEDDING_INPUT_FIELD_COLUMN],
             errors="ignore",
         ).to_dict(orient="records")
         metadatas = [{key: (value if value is not None else "") for key, value in item.items()} for item in metadatas]
+        for chunk_id, metadata in zip(ids, metadatas):
+            metadata[EMBEDDING_INPUT_HASH_COLUMN] = certified_hashes.get(chunk_id, "")
+            metadata[EMBEDDING_INPUT_FIELD_COLUMN] = certified_fields.get(chunk_id, "")
         update_item_metadatas(
             DATASET_ARTIFACTS[key].collection,
-            chunks_df["chunk_id"].astype(str).tolist(),
+            ids,
             metadatas,
         )
 
@@ -374,6 +500,11 @@ def _persist_replacing_collection(
                 f"{key} Chroma replacement verification failed: "
                 f"expected={len(current_ids)} actual={len(final_ids)}"
             )
+        context_dataset, run_id = current_ingestion_context(key)
+        logging.info(
+            "ingest_stage_completed dataset=%s run_id=%s stage=chroma_replace deleted=%s",
+            context_dataset, run_id, len(stale_ids),
+        )
         return result
 
 

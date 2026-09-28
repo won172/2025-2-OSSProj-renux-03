@@ -185,6 +185,28 @@ def get_all_ids(name: str) -> list[str]:
     return result.get("ids", [])
 
 
+def get_items(name: str, ids: Iterable[str], *, include_embeddings: bool = False) -> dict:
+    """Read requested entries in bounded batches without scanning the collection."""
+    ids_list = list(ids)
+    result = {"ids": [], "documents": [], "metadatas": []}
+    if include_embeddings:
+        result["embeddings"] = []
+    for start in range(0, len(ids_list), 500):
+        batch = _with_live_collection(
+            name,
+            lambda collection, offset=start: collection.get(
+                ids=ids_list[offset : offset + 500],
+                include=["documents", "metadatas", "embeddings"] if include_embeddings else ["documents", "metadatas"],
+            ),
+        )
+        for field in result:
+            values = batch.get(field)
+            if values is None:
+                raise RuntimeError(f"Chroma did not return {field} for embedding reuse")
+            result[field].extend(values)
+    return result
+
+
 def get_existing_ids(name: str, ids: Iterable[str]) -> set[str]:
     """주어진 ID 목록 중 컬렉션에 이미 존재하는 ID들만 반환합니다."""
     if not ids:
@@ -231,5 +253,5 @@ def reset_collection(name: str) -> None:
 
 __all__ = [
     "get_client", "get_collection", "add_items", "upsert_items", "query_items",
-    "update_item_metadatas", "delete_items", "get_all_ids", "count_items", "reset_collection",
+    "update_item_metadatas", "delete_items", "get_all_ids", "get_items", "count_items", "reset_collection",
 ]
