@@ -12,6 +12,8 @@ _TRAILING_VERSION_RE = re.compile(
 )
 _EXTENSION_RE = re.compile(r"\.(?:hwp|hwpx|html?|pdf)$", re.IGNORECASE)
 _NON_WORD_RE = re.compile(r"[^0-9a-zA-Z가-힣]+")
+_LEADING_RULE_CODE_RE = re.compile(r"^\s*(\d+-\d+-\d+)(?!\d)")
+OFFICIAL_RULE_SOURCE_TYPE = "official_rule_web"
 
 
 def canonical_rule_title(value: object) -> str:
@@ -24,6 +26,40 @@ def canonical_rule_title(value: object) -> str:
 def canonical_rule_key(value: object) -> str:
     normalized = canonical_rule_title(value)
     return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+
+
+def rule_code_of(value: object) -> str:
+    """제목/파일명 앞의 규정번호(예: ``2-1-1``)를 돌려준다. 없으면 빈 문자열."""
+    match = _LEADING_RULE_CODE_RE.match(str(value or ""))
+    return match.group(1) if match else ""
+
+
+def rule_code_key(code: str) -> str:
+    return hashlib.sha1(f"rule-code:{code}".encode("utf-8")).hexdigest()
+
+
+def code_identity_codes(
+    codes: "pd.Series",
+    title_keys: "pd.Series",
+    official_mask: "pd.Series",
+) -> set[str]:
+    """규정번호를 동일성 기준으로 써도 안전한 번호 집합.
+
+    공식 현행판이 쓰는 번호이고, 그 번호를 쓰는 규정(정규화 제목)이 공식 행 안에서도
+    (현재·과거 공식 행 모두) 하나, 비공식(HWP 스냅샷) 행 안에서도 하나뿐인 경우다.
+    서로 다른 규정이 번호를 공유하면(예: 서울·WISE 캠퍼스 규정이 같은 번호) 잘못 묶어
+    한쪽을 현행에서 빼지 않도록 제목 기준을 유지한다.
+    """
+
+    def single_title_codes(mask: "pd.Series") -> tuple[set[str], set[str]]:
+        frame = pd.DataFrame({"code": codes[mask], "key": title_keys[mask]})
+        frame = frame[frame["code"].ne("")]
+        distinct = frame.groupby("code")["key"].nunique()
+        return set(distinct.index), set(distinct[distinct > 1].index)
+
+    official_codes, official_colliding = single_title_codes(official_mask)
+    _snapshot_codes, snapshot_colliding = single_title_codes(~official_mask)
+    return official_codes - official_colliding - snapshot_colliding
 
 
 def _filename_version(value: object) -> pd.Timestamp:
@@ -56,7 +92,20 @@ def annotate_rule_versions(frame: pd.DataFrame) -> pd.DataFrame:
         annotated["is_latest"] = True
         return annotated
 
-    annotated["canonical_key"] = annotated[title_col].map(canonical_rule_key)
+    title_keys = annotated[title_col].map(canonical_rule_key)
+    annotated["canonical_key"] = title_keys
+    if "source_type" in annotated.columns:
+        # 공식 현행판과 같은 규정번호를 쓰는 행은 제목이 달라도(상세 제목 표기 차이, 개칭)
+        # 같은 규정으로 묶어 최신판 하나만 is_latest가 되게 한다. 번호 없는 행은 제목 기준.
+        codes = annotated[title_col].map(rule_code_of)
+        if "rule_code" in annotated.columns:
+            explicit = annotated["rule_code"].fillna("").astype(str).str.strip()
+            codes = explicit.where(explicit.ne(""), codes)
+        official_mask = annotated["source_type"].fillna("").astype(str).eq(OFFICIAL_RULE_SOURCE_TYPE)
+        eligible = code_identity_codes(codes, title_keys, official_mask)
+        if eligible:
+            use_code = codes.isin(eligible)
+            annotated.loc[use_code, "canonical_key"] = codes[use_code].map(rule_code_key)
     published = (
         pd.to_datetime(annotated["published_at"], errors="coerce")
         if "published_at" in annotated.columns
@@ -99,4 +148,11 @@ def annotate_rule_versions(frame: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-__all__ = ["annotate_rule_versions", "canonical_rule_key", "canonical_rule_title"]
+__all__ = [
+    "annotate_rule_versions",
+    "canonical_rule_key",
+    "canonical_rule_title",
+    "code_identity_codes",
+    "rule_code_key",
+    "rule_code_of",
+]

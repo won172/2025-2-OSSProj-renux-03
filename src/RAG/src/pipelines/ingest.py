@@ -31,8 +31,8 @@ from src.services.campus_scope import (
 )
 from src.utils.preprocess import (
     apply_cleaning,
-    normalize_whitespace,
     make_doc_id,
+    split_rule_articles,
     to_chunks,
 )
 from src.utils.notice_visibility import (
@@ -1378,17 +1378,24 @@ def build_rule_chunks(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     enrich_documents_with_campus_scope(docs)
+    # 조문(제N조) 경계로 1차 분할하고 긴 조문만 CHUNK_SIZE로 2차 분할한다.
+    # 조문 표지가 없는 문서(입학년도별 안내 등)는 기존 고정 길이 분할과 같다.
     chunks = to_chunks(
         docs,
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
         include_title=True,
+        segmenter=_split_rule_text,
     )
     chunks_df = pd.DataFrame(chunks)
     if not chunks_df.empty:
         chunks_df.drop_duplicates(subset=["chunk_id"], inplace=True)
         chunks_df = annotate_rule_versions(chunks_df)
     return chunks_df
+
+
+def _split_rule_text(text: str) -> List[str]:
+    return split_rule_articles(text, CHUNK_SIZE, CHUNK_OVERLAP)
 
 
 def _entry_year_guide_cache_is_stale(output_path: Path, dependencies: Iterable[Path]) -> bool:
@@ -1678,11 +1685,156 @@ def ingest_schedule(
 
 # --- Courses ---
 
+# 교과목 청크 본문에 찍는 필드(화이트리스트). (한글 라벨, 후보 컬럼) 순서가 곧
+# 본문 순서다. 예전 구현은 payload의 모든 컬럼을 찍어서 collected_at·
+# collection_status·data_quality_score 같은 수집 bookkeeping이 청크의 77%에
+# 섞였고, collected_at 때문에 내용이 같아도 수집마다 청크 텍스트가 바뀌었다
+# (pipeline-audit 09 P0-2). 크롤러가 새 컬럼을 추가해도 여기에 올리기 전에는
+# 임베딩 텍스트로 새지 않는다. bookkeeping 값은 청크 메타데이터로만 남긴다.
+# 교과목명은 to_chunks(include_title=True)의 "[제목]" 접두가 이미 담으므로
+# 본문에 다시 찍지 않는다.
+_COURSE_TITLE_CANDIDATES = ["국문교과목명", "과목명", "course_name", "교과목명", "title", "교과목"]
+_COURSE_TEXT_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("영문명", ("english_title", "영문명", "영문교과목명")),
+    ("학수번호", ("학수번호", "course_code", "과목코드")),
+    ("학점", ("학점", "credit", "credit_value")),
+    ("이론시간", ("theory_hours", "이론")),
+    ("실습시간", ("practice_hours", "실습")),
+    ("이수구분", ("이수구분", "course_type", "전공구분")),
+    ("이수대상", ("이수대상", "학년", "grade", "recommended_grades")),
+    ("개설학기", ("개설학기", "학기", "semester", "offered_semesters")),
+    ("원어강의", ("원어강의", "original_language")),
+    ("교육과정", ("curriculum_year", "교육과정연도")),
+    ("개설학과", ("major", "department_name", "학과", "학과명", "전공")),
+    ("단과대학", ("college_name", "단과대학")),
+    ("교과과정 구분", ("section_title",)),
+    ("교과목 설명", ("description", "해설", "교과목해설", "설명")),
+    ("비고", ("remarks", "비고")),
+)
+_COURSE_TEXT_LABELS = {label for label, _ in _COURSE_TEXT_FIELDS} | {"교과목명"}
+
+# 크롤러는 표 한 행의 원래 열을 ``raw_text``("열이름: 값" 줄 목록)에만 담는다.
+# 공식 PDF 행의 이론·실습 시간·원어강의·비고, 학과 표의 설계·교과과정영역·
+# 모듈명 같은 열은 다른 컬럼에 없으므로 여기서 투영한다. 영문 키는 아래
+# 매핑에 있는 것만 한글 라벨로 바꾸고, 한글 열 이름은 그대로 쓴다. 한글이 없는
+# 키(col_N, "No.", 매핑되지 않은 영문·bookkeeping 키)와 연도형 키
+# ("2019", "2009~2012", "2016.02 이전")는 버린다.
+_COURSE_RAW_KEY_LABELS = {
+    "title": "교과목명",
+    "course_name": "교과목명",
+    "course_code": "학수번호",
+    "credit": "학점",
+    "theory_hours": "이론시간",
+    "이론": "이론시간",
+    "practice_hours": "실습시간",
+    "실습": "실습시간",
+    "course_type": "이수구분",
+    "grade": "이수대상",
+    "semester": "개설학기",
+    "original_language": "원어강의",
+    "원어 강의": "원어강의",
+    "english_title": "영문명",
+    "description": "교과목 설명",
+    "remarks": "비고",
+}
+_COURSE_RAW_KEY_SUFFIX_RE = re.compile(r"__\d+$")
+_COURSE_RAW_YEAR_KEY_RE = re.compile(r"\d{4}")
+_HANGUL_RE = re.compile(r"[가-힣]")
+_COURSE_RAW_URL_VALUE_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+_COURSE_RAW_TIMESTAMP_VALUE_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
+)
+
+
+def _course_text_value(row: pd.Series, candidates: Iterable[str]) -> str:
+    for col in candidates:
+        value = row.get(col, "")
+        if value is None or (not isinstance(value, str) and pd.isna(value)):
+            continue
+        text = str(value).strip()
+        if text and text.lower() not in {"nan", "none"}:
+            return text
+    return ""
+
+
+def _course_raw_text_fields(raw_text: str) -> List[Tuple[str, str]]:
+    """``raw_text``의 "열이름: 값" 줄을 (한글 라벨, 값) 목록으로 투영한다."""
+    fields: List[Tuple[str, str]] = []
+    for line in str(raw_text or "").splitlines():
+        key, sep, value = line.partition(": ")
+        if not sep:
+            continue
+        key = _COURSE_RAW_KEY_SUFFIX_RE.sub("", key.strip())
+        value = value.strip()
+        if not key or not value:
+            continue
+        label = _COURSE_RAW_KEY_LABELS.get(key, key)
+        if not _HANGUL_RE.search(label) or _COURSE_RAW_YEAR_KEY_RE.search(label):
+            continue
+        # 값이 URL이나 타임스탬프뿐이면 수집 정보다(예: "상세URL: https://…",
+        # "수집일시: 2026-01-01T00:00:00").
+        if _COURSE_RAW_URL_VALUE_RE.fullmatch(value) or _COURSE_RAW_TIMESTAMP_VALUE_RE.fullmatch(value):
+            continue
+        fields.append((label, value))
+    return fields
+
+
+def _format_course_value(label: str, value: str) -> str:
+    if re.fullmatch(r"\d+\.0", value) and label in {"교육과정", "이론시간", "실습시간"}:
+        value = value[:-2]
+    if label == "개설학기" and value in {"1", "2"}:
+        return value + "학기"
+    if label == "이수대상" and value.isdigit():
+        return value + "학년"
+    if label == "교육과정" and value.isdigit():
+        return value + "학년도"
+    return value
+
+
+def _build_course_text(row: pd.Series, title: str) -> str:
+    """교과목 payload를 사람이 읽는 필드만 한글 라벨로 투영한다."""
+    raw_fields = _course_raw_text_fields(_course_text_value(row, ("raw_text",)))
+    raw_by_label: Dict[str, str] = {}
+    for label, value in raw_fields:
+        raw_by_label.setdefault(label, value)
+
+    lines: List[str] = []
+    seen_values = {title} if title else set()
+    for label, candidates in _COURSE_TEXT_FIELDS:
+        value = _course_text_value(row, candidates) or raw_by_label.get(label, "")
+        if not value:
+            continue
+        value = _format_course_value(label, value)
+        # 설명·비고·구분이 제목이나 앞 필드와 같으면 반복하지 않는다
+        # (공식 PDF 행은 description=remarks, 본문형 행은 section_title=title).
+        if label in {"교과과정 구분", "교과목 설명", "비고"} and value in seen_values:
+            continue
+        seen_values.add(value)
+        lines.append(f"{label}: {value}")
+
+    # 화이트리스트에 없는 원래 표 열(설계, 교과과정영역, 모듈명 …)은 뒤에 붙인다.
+    # 중복은 (라벨, 값)으로 판단한다. 값만 보면 "설계: 0"이 "실습시간: 0"에,
+    # "설계: 3"이 "학점: 3"에 걸려 실제 필드가 사라진다. 값만으로 거르는 것은
+    # 설명문처럼 긴 값(10자 초과)이 다른 라벨로 반복될 때뿐이다.
+    printed = {(label, value) for label, value in (line.split(": ", 1) for line in lines)}
+    for label, value in raw_fields:
+        if label in _COURSE_TEXT_LABELS or (label, value) in printed:
+            continue
+        if len(value) > 10 and value in seen_values:
+            continue
+        printed.add((label, value))
+        seen_values.add(value)
+        lines.append(f"{label}: {value}")
+    # 필드 사이를 빈 줄로 둔다. normalize_whitespace는 종결되지 않은 단일 줄바꿈을
+    # 접으며 "MIS2001\n학점"처럼 숫자 뒤 한글은 공백 없이 붙여 버리므로
+    # ("MIS2001학점"), 필드 경계가 남는 문단 경계를 쓴다.
+    return "\n\n".join(lines).strip()
+
+
 def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
     docs: List[dict] = []
-    ignored_exact = {"_source_table", "db_id", "db_object", "major", "document_key"}
-    title_candidates = ["국문교과목명", "과목명", "course_name", "교과목명", "title", "교과목"]
-    
+    title_candidates = _COURSE_TITLE_CANDIDATES
+
     for _, row in combined.iterrows():
         db_id = row.get("db_id")
         title = next((str(row.get(col, "")).strip() for col in title_candidates if str(row.get(col, "")).strip()), "교과목 정보")
@@ -1706,25 +1858,10 @@ def build_course_chunks(combined: pd.DataFrame) -> pd.DataFrame:
             )
         )
 
-        text_parts: List[str] = []
-        for col, value in row.items():
-            if col in ignored_exact or col.startswith("Unnamed"):
-                continue
-            value_str = str(value).strip()
-            if not value_str:
-                continue
-            if col in title_candidates:
-                text_parts.append(value_str)
-            else:
-                label = normalize_whitespace(col)
-                # 개설학기 포맷팅 (예: "2" -> "2학기")
-                if label == "개설학기" and value_str in ["1", "2"]:
-                    value_str += "학기"
-                text_parts.append(f"{label}: {value_str}")
-        text = "\n".join(text_parts).strip()
-        if not text:
-            continue
-        
+        # 정본 행마다 청크가 하나 이상 있어야 계보 검사가 source_missing_artifact를
+        # 내지 않는다. 투영할 내용이 없으면 교과목명만으로 청크를 만든다.
+        text = _build_course_text(row, title) or f"교과목명: {title}"
+
         docs.append(
             {
                 "doc_id": doc_id,

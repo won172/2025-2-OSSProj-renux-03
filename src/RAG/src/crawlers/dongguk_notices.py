@@ -5,7 +5,7 @@ import re
 import time
 from datetime import datetime, date
 from typing import Any, Dict, Iterable, List, Optional
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 import pandas as pd
 import requests
@@ -556,13 +556,122 @@ def crawl_recent_notices(
     )
 
 
+# ===== 삭제 감지용 상세 URL 확인 =====
+NOTICE_PROBE_PRESENT = "present"
+NOTICE_PROBE_MISSING = "missing"
+NOTICE_PROBE_UNKNOWN = "unknown"
+_OFFICIAL_DETAIL_PATTERN = re.compile(
+    r"^https://www\.dongguk\.edu/article/(?P<board>[A-Z]+)/detail/(?P<article>\d+)$"
+)
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_MISSING_STATUSES = {404, 410}
+_OFFICIAL_HOSTS = frozenset({"www.dongguk.edu"})
+# 같은 게시판 목록 외에 삭제 글 리다이렉트 대상으로 확인된 오류 경로(소문자, 끝 "/"
+# 제외). 라이브 확인 전이므로 비워 둔다. 확인되면 여기에만 추가한다.
+NOTICE_DELETION_REDIRECT_EXTRA_PATHS: frozenset[str] = frozenset()
+
+
+def is_notice_deletion_redirect(detail_url: str, location: str, *, board_code: str) -> bool:
+    """리다이렉트 대상이 알려진 '삭제 글' 목적지인지 판단한다.
+
+    missing으로 보는 것은 공식 호스트의 같은 게시판 목록(``/article/{board}/list``,
+    게시판 코드 대소문자 무시, 쿼리 허용)과 명시적으로 등록한 오류 경로뿐이다.
+    로그인/SSO, 점검·WAF 페이지, 다른 게시판, 외부 호스트는 모두 False(unknown).
+    """
+    target = urlparse(urljoin(detail_url, location))
+    if target.scheme not in {"http", "https"}:
+        return False
+    if (target.hostname or "").lower() not in _OFFICIAL_HOSTS:
+        return False
+    path = target.path.rstrip("/").lower()
+    if path == f"/article/{board_code.lower()}/list":
+        return True
+    return path in NOTICE_DELETION_REDIRECT_EXTRA_PATHS
+
+
+def parse_official_notice_detail_url(url: str | None) -> tuple[str, int] | None:
+    """공식 공지 상세 URL이면 ``(board_code, article_id)``를, 아니면 None을 돌려준다.
+
+    삭제 확인은 이 크롤러가 직접 만든 URL 형태에만 적용한다. 수동 공지,
+    도서관 운영시간처럼 공지 형태로 합쳐진 다른 원천은 대상이 아니다.
+    """
+    match = _OFFICIAL_DETAIL_PATTERN.match(str(url or "").strip())
+    if match is None or match.group("board") not in BOARD_CODES.values():
+        return None
+    return match.group("board"), int(match.group("article"))
+
+
+def probe_notice_detail(
+    url: str,
+    *,
+    session: Any = None,
+    timeout: float = DEFAULT_REQUEST_TIMEOUT,
+) -> tuple[str, int | None]:
+    """리다이렉트를 따라가지 않고 상세 URL이 아직 존재하는지 한 번 확인한다.
+
+    반환값은 ``(present|missing|unknown, HTTP status)``다.
+
+    - 200 → present. 본문 구조는 검사하지 않는다(오판 시 삭제보다 유지를 택한다).
+    - 404/410, 또는 같은 게시판 목록·등록된 오류 경로로 가는 30x → missing.
+      감사 문서 10의 관찰(삭제 글 상세 URL이 302)에 근거한다.
+    - 그 밖의 모든 리다이렉트(로그인/SSO, 점검·WAF, 같은 글 정규화, Location 없음),
+      그 밖의 4xx/5xx, 네트워크 오류·타임아웃 → unknown. unknown은 절대 삭제 근거가
+      되지 않는다.
+
+    재시도하지 않는다. 일시 장애는 unknown으로 남고 다음 실행에서 다시 본다.
+    """
+    parsed = parse_official_notice_detail_url(url)
+    if parsed is None:
+        return NOTICE_PROBE_UNKNOWN, None
+    client = session if session is not None else requests
+    try:
+        response = client.get(
+            url,
+            headers=HEADERS,
+            timeout=timeout,
+            allow_redirects=False,
+            stream=True,
+        )
+    except Exception:  # noqa: BLE001 - 어떤 오류도 삭제 근거가 아니다.
+        return NOTICE_PROBE_UNKNOWN, None
+    try:
+        status = int(getattr(response, "status_code", 0) or 0)
+        if status == 200:
+            return NOTICE_PROBE_PRESENT, status
+        if status in _MISSING_STATUSES:
+            return NOTICE_PROBE_MISSING, status
+        if status in _REDIRECT_STATUSES:
+            headers = getattr(response, "headers", None) or {}
+            location = str(headers.get("Location") or headers.get("location") or "").strip()
+            if not location:
+                return NOTICE_PROBE_UNKNOWN, status
+            if is_notice_deletion_redirect(url, location, board_code=parsed[0]):
+                return NOTICE_PROBE_MISSING, status
+            # 로그인/SSO, 점검·WAF 페이지, 같은 글 정규화 등 삭제로 확정할 수 없는 곳.
+            return NOTICE_PROBE_UNKNOWN, status
+        return NOTICE_PROBE_UNKNOWN, status or None
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 __all__ = [
+    "NOTICE_PROBE_MISSING",
+    "NOTICE_PROBE_PRESENT",
+    "NOTICE_PROBE_UNKNOWN",
     "NoticeCrawlError",
     "crawl_notices",
     "crawl_recent_notices",
     "collect_board",
     "fetch_notice_list",
     "fetch_notice_detail",
+    "is_notice_deletion_redirect",
+    "parse_official_notice_detail_url",
+    "probe_notice_detail",
 ]
 
 
