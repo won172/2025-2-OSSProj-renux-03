@@ -93,15 +93,13 @@ test('스트림 텍스트는 프레임별로 합치고 모든 종료 경로에�
     const payload = { id: 'q-1', chatId: 'chat-1', content: '질문', createdTime: '2026-09-28T00:00:00Z' }
     const event = (type, fields = {}) => `data: ${JSON.stringify({ type, ...fields })}\n\n`
     const withFakeClock = async (runCase, useRaf = true) => {
-      const original = {
-        fetch: globalThis.fetch,
-        requestAnimationFrame: globalThis.requestAnimationFrame,
-        cancelAnimationFrame: globalThis.cancelAnimationFrame,
-        setTimeout: globalThis.setTimeout,
-        clearTimeout: globalThis.clearTimeout,
-      }
+      const globalNames = ['fetch', 'requestAnimationFrame', 'cancelAnimationFrame', 'setTimeout', 'clearTimeout']
+      const original = new Map(globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]))
+      const realSetTimeout = globalThis.setTimeout
+      const realClearTimeout = globalThis.clearTimeout
       const frames = new Map()
       const timers = new Map()
+      const fakeTimerHandles = new Set()
       let nextId = 0
       let streamController
       globalThis.requestAnimationFrame = useRaf ? (callback) => {
@@ -109,11 +107,17 @@ test('스트림 텍스트는 프레임별로 합치고 모든 종료 경로에�
         return nextId
       } : undefined
       globalThis.cancelAnimationFrame = (id) => frames.delete(id)
-      globalThis.setTimeout = (callback) => {
-        timers.set(++nextId, callback)
-        return nextId
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        if (delay !== 40) return realSetTimeout(callback, delay, ...args)
+        const handle = Symbol('stream-delivery-timer')
+        fakeTimerHandles.add(handle)
+        timers.set(handle, () => callback(...args))
+        return handle
       }
-      globalThis.clearTimeout = (id) => timers.delete(id)
+      globalThis.clearTimeout = (handle) => {
+        if (fakeTimerHandles.delete(handle)) timers.delete(handle)
+        else realClearTimeout(handle)
+      }
       globalThis.fetch = async () => new Response(new ReadableStream({
         start(controller) { streamController = controller },
       }), { status: 200 })
@@ -136,7 +140,10 @@ test('스트림 텍스트는 프레임별로 합치고 모든 종료 경로에�
           timerCount: () => timers.size,
         })
       } finally {
-        Object.assign(globalThis, original)
+        for (const [name, descriptor] of original) {
+          if (descriptor) Object.defineProperty(globalThis, name, descriptor)
+          else Reflect.deleteProperty(globalThis, name)
+        }
       }
     }
 

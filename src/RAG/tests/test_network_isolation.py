@@ -64,6 +64,8 @@ def test_urllib_loopback_destination_is_allowed(monkeypatch):
 
 
 def test_http_guards_check_destination_even_with_loopback_proxy(monkeypatch):
+    # urlopen caches an opener with the proxy settings; restore it with the env.
+    monkeypatch.setattr(urllib_request, "_opener", None)
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:8765")
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:8765")
     url = "https://example.test/"
