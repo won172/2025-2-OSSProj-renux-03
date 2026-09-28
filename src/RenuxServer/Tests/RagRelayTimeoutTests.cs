@@ -2,9 +2,12 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using RenuxServer.Apis.Chat;
+using RenuxServer.DbContexts;
+using RenuxServer.Models;
 
 internal static class RagRelayTimeoutTests
 {
@@ -84,6 +87,8 @@ internal static class RagRelayTimeoutTests
                    (TimeSpan.FromMilliseconds(20), Event(Done(id)))],
             DownstreamMode.Normal, expectPartial: true, check);
 
+        await VerifyCompletionMetadataAsync(shortLimits, check);
+
         await VerifyIncompleteEofAsync(shortLimits, check);
         await VerifyUnterminatedDataFallbackAsync(shortLimits, check);
         await VerifySlowPersistenceAsync(totalLimits, check);
@@ -135,6 +140,196 @@ internal static class RagRelayTimeoutTests
     private static string Completion(string requestId) =>
         $$"""{"type":"completion","request_id":"{{requestId}}","sources":[{"source_ref":"{{SourceRef}}","source":"{{SourceDocument}}","chunk_id":"{{SourceRef}}","url":"{{SourceUrl}}"}],"suggested_questions":["후속 질문"],"suggested_question_details":[{"question":"후속 질문","source_refs":["{{SourceRef}}"]}],"resolved_intents":["notices"],"grounded":true,"grounding_score":0.9,"fallback_reason":null}""";
     private static string Done(string requestId) => $$"""{"type":"done","request_id":"{{requestId}}"}""";
+
+    private static async Task VerifyCompletionMetadataAsync(
+        RagRelayTimeoutSettings limits, Action<bool, string> check)
+    {
+        foreach (var (statusJson, expectedStatus, scoreJson, expectedScore) in new[]
+        {
+            ("\"passed\"", "passed", "0.8", (double?)0.8),
+            ("\"failed\"", "failed", "0.2", (double?)0.2),
+            ("\"unavailable\"", "unavailable", "null", (double?)null),
+            ("\"not_required\"", "not_required", "null", (double?)null),
+            ("\"unknown\"", (string?)null, "1.2", (double?)null),
+            ("null", (string?)null, "null", (double?)null),
+        })
+        {
+            using var handler = new FakeUpstreamHandler(TimeSpan.Zero, id =>
+            {
+                string completion = Completion(id).Replace(
+                    "\"grounding_score\":0.9",
+                    $"\"grounding_score\":0.9,\"verification_status\":{statusJson},\"relevance_score\":{scoreJson}",
+                    StringComparison.Ordinal);
+                return [(TimeSpan.Zero, Event(Text)), (TimeSpan.Zero, Event(completion)),
+                    (TimeSpan.Zero, Event(Done(id)))];
+            });
+            using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+            using var downstream = new ControlledDownstream(DownstreamMode.Normal);
+            var context = new DefaultHttpContext();
+            context.Response.Body = downstream;
+            RagStreamRelayResult? persisted = null;
+            RagStreamRelayResult result = await ChatRequestApis.RelayRagStreamAsync(
+                context, Configuration(limits), client, new RecordingLogger(), "question", "session", null,
+                completed =>
+                {
+                    persisted = completed;
+                    return Task.FromResult(true);
+                },
+                _ => Task.CompletedTask).WaitAsync(TimeSpan.FromSeconds(3));
+
+            check(result.CompletedVersionReady && persisted is not null
+                  && persisted.VerificationStatus == expectedStatus
+                  && persisted.RelevanceScore == expectedScore,
+                $"Completion metadata {statusJson}: relay must pass validated values to persistence.");
+
+            if (persisted is not null)
+            {
+                var question = new ChatMessage { Id = Guid.NewGuid(), ChatId = Guid.NewGuid(), IsAsk = true };
+                DateTime createdTime = DateTime.UtcNow;
+                ChatMessage reply = ChatRequestApis.BuildReplyVersion(
+                    question, persisted, Guid.NewGuid(), createdTime, createdTime, 1);
+                var history = ChatRequestApis.ToDto(reply);
+                JsonElement historyJson = JsonSerializer.SerializeToElement(
+                    history, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                JsonElement statusProperty = historyJson.GetProperty("verificationStatus");
+                JsonElement scoreProperty = historyJson.GetProperty("relevanceScore");
+                check(reply.Grounded == true && reply.GroundingScore == 0.9
+                      && reply.VerificationStatus == expectedStatus
+                      && reply.RelevanceScore == expectedScore
+                      && history.Grounded == reply.Grounded
+                      && history.GroundingScore == reply.GroundingScore
+                      && history.VerificationStatus == expectedStatus
+                      && history.RelevanceScore == expectedScore
+                      && (expectedStatus is null
+                          ? statusProperty.ValueKind == JsonValueKind.Null
+                          : statusProperty.GetString() == expectedStatus)
+                      && (expectedScore is null
+                          ? scoreProperty.ValueKind == JsonValueKind.Null
+                          : scoreProperty.GetDouble() == expectedScore),
+                    $"Completion metadata {statusJson}: persistence builder and history DTO must retain validated values.");
+            }
+        }
+
+        using var missingHandler = new FakeUpstreamHandler(TimeSpan.Zero, id =>
+            [(TimeSpan.Zero, Event(Text)), (TimeSpan.Zero, Event(Completion(id))),
+             (TimeSpan.Zero, Event(Done(id)))]);
+        using var missingClient = new HttpClient(missingHandler) { Timeout = Timeout.InfiniteTimeSpan };
+        using var missingDownstream = new ControlledDownstream(DownstreamMode.Normal);
+        var missingContext = new DefaultHttpContext();
+        missingContext.Response.Body = missingDownstream;
+        RagStreamRelayResult missingResult = await ChatRequestApis.RelayRagStreamAsync(
+            missingContext, Configuration(limits), missingClient, new RecordingLogger(),
+            "question", "session", null, _ => Task.FromResult(true),
+            _ => Task.CompletedTask).WaitAsync(TimeSpan.FromSeconds(3));
+        check(missingResult.CompletedVersionReady && missingResult.VerificationStatus is null
+              && missingResult.RelevanceScore is null,
+            "Completion metadata absent: status and relevance must stay null.");
+    }
+
+    public static async Task RunPersistenceAsync(
+        DbContextOptions<ServerDbContext> options, Action<bool, string> check)
+    {
+        Guid chatId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        Guid organizationId = Guid.NewGuid();
+        Guid majorId = Guid.NewGuid();
+        try
+        {
+            await using (var setup = new ServerDbContext(options))
+            {
+                Guid roleId = await setup.Roles.Select(role => role.Id).FirstAsync();
+                setup.Majors.Add(new Major
+                {
+                    Id = majorId,
+                    Majorname = $"contract-{majorId:N}"
+                });
+                setup.Organizations.Add(new Organization { Id = organizationId, MajorId = majorId });
+                setup.Users.Add(new User
+                {
+                    Id = userId, MajorId = majorId, RoleId = roleId,
+                    UserId = $"contract-{userId:N}", Username = "contract user",
+                    HashPassword = "contract-test-only"
+                });
+                setup.Chats.Add(new ActiveChat
+                {
+                    Id = chatId, UserId = userId, OrganizationId = organizationId,
+                    Title = "verification persistence contract"
+                });
+                await setup.SaveChangesAsync();
+            }
+
+            var limits = new RagRelayTimeoutSettings(
+                TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2),
+                TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10));
+            foreach (var (statusJson, expectedStatus, scoreJson, expectedScore) in new[]
+            {
+                ("\"passed\"", "passed", "0.8", (double?)0.8),
+                ("\"unavailable\"", "unavailable", "0.4", (double?)0.4),
+                ("\"unknown\"", (string?)null, "0.3", (double?)0.3),
+            })
+            {
+                Guid questionId = Guid.NewGuid();
+                await using var writer = new ServerDbContext(options);
+                var question = new ChatMessage
+                {
+                    Id = questionId, ChatId = chatId, IsAsk = true,
+                    Content = $"question {questionId:N}"
+                };
+                writer.ChatMessages.Add(question);
+                await writer.SaveChangesAsync();
+
+                using var handler = new FakeUpstreamHandler(TimeSpan.Zero, id =>
+                {
+                    string completion = Completion(id).Replace(
+                        "\"grounding_score\":0.9",
+                        $"\"grounding_score\":0.9,\"verification_status\":{statusJson},\"relevance_score\":{scoreJson}",
+                        StringComparison.Ordinal);
+                    return [(TimeSpan.Zero, Event(Text)), (TimeSpan.Zero, Event(completion)),
+                        (TimeSpan.Zero, Event(Done(id)))];
+                });
+                using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+                using var downstream = new MemoryStream();
+                var context = new DefaultHttpContext();
+                context.Response.Body = downstream;
+                RagStreamRelayResult relay = await ChatRequestApis.RelayRagStreamAsync(
+                    context, Configuration(limits), client, new RecordingLogger(),
+                    question.Content, chatId.ToString(), null,
+                    result => ChatRequestApis.PersistRelayedReplyAsync(writer, question, result),
+                    _ => Task.CompletedTask).WaitAsync(TimeSpan.FromSeconds(15));
+
+                await using var reader = new ServerDbContext(options);
+                ChatMessage? stored = await reader.ChatMessages.AsNoTracking()
+                    .SingleOrDefaultAsync(message => message.ParentQuestionId == questionId && !message.IsAsk);
+                List<RenuxServer.Dtos.ChatDtos.ChatMessageDto> history =
+                    await ChatRequestApis.MessagesToList(reader, DateTime.UtcNow.AddMinutes(1), chatId);
+                var reloaded = history.SingleOrDefault(message => message.Id == stored?.Id);
+                JsonElement historyJson = JsonSerializer.SerializeToElement(
+                    reloaded, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+                check(relay.CompletedVersionReady
+                      && stored?.VerificationStatus == expectedStatus
+                      && stored?.RelevanceScore == expectedScore
+                      && reloaded?.VerificationStatus == expectedStatus
+                      && reloaded?.RelevanceScore == expectedScore
+                      && historyJson.GetProperty("verificationStatus").GetString() == expectedStatus
+                      && historyJson.GetProperty("relevanceScore").GetDouble() == expectedScore,
+                    $"Relay persistence/history must round-trip {statusJson} and relevance score.");
+            }
+        }
+        finally
+        {
+            await using var cleanup = new ServerDbContext(options);
+            await cleanup.ChatMessages.Where(message => message.ChatId == chatId && !message.IsAsk)
+                .ExecuteDeleteAsync();
+            await cleanup.ChatMessages.Where(message => message.ChatId == chatId)
+                .ExecuteDeleteAsync();
+            await cleanup.Chats.Where(chat => chat.Id == chatId).ExecuteDeleteAsync();
+            await cleanup.Users.Where(user => user.Id == userId).ExecuteDeleteAsync();
+            await cleanup.Organizations.Where(organization => organization.Id == organizationId)
+                .ExecuteDeleteAsync();
+            await cleanup.Majors.Where(major => major.Id == majorId).ExecuteDeleteAsync();
+        }
+    }
 
     private static async Task VerifyAsync(
         string? expectedPhase, RagRelayTimeoutSettings limits,

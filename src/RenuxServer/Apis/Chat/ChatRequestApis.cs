@@ -49,6 +49,8 @@ public sealed record RagStreamRelayResult(
     IReadOnlyList<string> SuggestedQuestions,
     bool? Grounded,
     double? GroundingScore,
+    string? VerificationStatus,
+    double? RelevanceScore,
     bool CompletedVersionReady);
 
 static public class ChatRequestApis
@@ -143,6 +145,8 @@ static public class ChatRequestApis
         List<string> suggestedQuestions = [];
         bool? grounded = null;
         double? groundingScore = null;
+        string? verificationStatus = null;
+        double? relevanceScore = null;
         // Keep both terminal frames, including their blank separators, until
         // EOF proves that the upstream completed without a transport failure.
         var pendingTerminalLines = new List<string>(4);
@@ -268,6 +272,8 @@ static public class ChatRequestApis
                                 suggestedQuestions = ReadSuggestedQuestions(chunk, "suggested_questions", suggestedQuestions);
                                 grounded = ReadNullableBoolean(chunk, "grounded") ?? grounded;
                                 groundingScore = ReadGroundingScore(chunk, "grounding_score") ?? groundingScore;
+                                verificationStatus = ReadVerificationStatus(chunk);
+                                relevanceScore = ReadGroundingScore(chunk, "relevance_score");
                                 if (chunk.TryGetProperty("sources", out var completionSourcesProp))
                                 {
                                     var completionSources = JsonSerializer.Deserialize<List<RagSource>>(completionSourcesProp.GetRawText(), JsonOptions);
@@ -382,6 +388,8 @@ static public class ChatRequestApis
             suggestedQuestions = [];
             grounded = null;
             groundingScore = null;
+            verificationStatus = null;
+            relevanceScore = null;
             fullAnswer.Append(DefaultRagFailureMessage);
             using var fallbackDelivery = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
             fallbackDelivery.CancelAfter(relaySettings.Inactivity);
@@ -406,7 +414,8 @@ static public class ChatRequestApis
 
         var result = new RagStreamRelayResult(
             backendRequestId, fullAnswer.ToString(), sources, fallbackTriggered, fallbackReason,
-            suggestedQuestions, grounded, groundingScore, CompletedVersionReady: false);
+            suggestedQuestions, grounded, groundingScore, verificationStatus, relevanceScore,
+            CompletedVersionReady: false);
         // Only a successful upstream terminal contract can create an answer
         // version and its completion telemetry.
         if (generationSucceeded && !context.RequestAborted.IsCancellationRequested)
@@ -641,15 +650,7 @@ static public class ChatRequestApis
                 {
                     if (!isAuthenticated) return true;
                     if (ask is null) return false;
-                    PersistReplyResult persisted = await PersistReplyVersionAsync(
-                        db, ask, result.Answer, result.Sources.ToList(),
-                        result.FallbackTriggered, result.FallbackReason,
-                        replaceExistingCurrent: true,
-                        requestId: result.RequestId,
-                        suggestedQuestions: result.SuggestedQuestions.ToList(),
-                        grounded: result.Grounded,
-                        groundingScore: result.GroundingScore);
-                    return persisted.Persisted;
+                    return await PersistRelayedReplyAsync(db, ask, result);
                 },
                 async relay =>
                 {
@@ -1185,18 +1186,21 @@ static public class ChatRequestApis
     // writer bypasses this application path.
     private sealed record PersistReplyResult(bool Persisted, Guid? ReplyId);
 
+    // Shared by the stream endpoint and the database contract test so the
+    // tested callback uses the same metadata-to-answer mapping as production.
+    internal static async Task<bool> PersistRelayedReplyAsync(
+        ServerDbContext db, ChatMessage question, RagStreamRelayResult result)
+    {
+        PersistReplyResult persisted = await PersistReplyVersionAsync(
+            db, question, result, replaceExistingCurrent: true);
+        return persisted.Persisted;
+    }
+
     static private async Task<PersistReplyResult> PersistReplyVersionAsync(
         ServerDbContext db,
         ChatMessage question,
-        string content,
-        List<ChatSourceDto>? sources,
-        bool isFallback,
-        string? fallbackReason,
-        bool replaceExistingCurrent,
-        string? requestId,
-        List<string>? suggestedQuestions,
-        bool? grounded,
-        double? groundingScore)
+        RagStreamRelayResult result,
+        bool replaceExistingCurrent)
     {
         var strategy = db.Database.CreateExecutionStrategy();
         Guid replyId = Guid.NewGuid();
@@ -1265,33 +1269,46 @@ static public class ChatRequestApis
                 await db.SaveChangesAsync();
             }
 
-            ChatMessage reply = new()
-            {
-                Id = replyId,
-                ChatId = question.ChatId,
-                Content = content,
-                IsAsk = false,
-                // Preserve the original answer slot so regenerating an old answer
-                // does not move it to the bottom of the conversation on reload.
-                CreatedTime = conversationCreatedTime,
-                ParentQuestionId = question.Id,
-                AnswerVersion = latestVersion + 1,
-                VersionCreatedTime = versionCreatedTime,
-                IsCurrent = true,
-                SourcesJson = SerializeSources(sources),
-                RequestId = requestId,
-                SuggestedQuestionsJson = SerializeSuggestedQuestions(suggestedQuestions),
-                Grounded = grounded,
-                GroundingScore = groundingScore,
-                IsFallback = isFallback,
-                FallbackReason = fallbackReason
-            };
+            ChatMessage reply = BuildReplyVersion(
+                question, result, replyId, conversationCreatedTime,
+                versionCreatedTime, latestVersion + 1);
 
             await db.ChatMessages.AddAsync(reply);
             await db.SaveChangesAsync();
             await transaction.CommitAsync();
             return new PersistReplyResult(true, replyId);
         });
+    }
+
+    // The persistence path and default-run contract tests use this same answer
+    // construction, including verification fields returned through history.
+    internal static ChatMessage BuildReplyVersion(
+        ChatMessage question, RagStreamRelayResult result, Guid replyId,
+        DateTime conversationCreatedTime, DateTime versionCreatedTime, int answerVersion)
+    {
+        return new ChatMessage
+        {
+            Id = replyId,
+            ChatId = question.ChatId,
+            Content = result.Answer,
+            IsAsk = false,
+            // Preserve the original answer slot so regenerating an old answer
+            // does not move it to the bottom of the conversation on reload.
+            CreatedTime = conversationCreatedTime,
+            ParentQuestionId = question.Id,
+            AnswerVersion = answerVersion,
+            VersionCreatedTime = versionCreatedTime,
+            IsCurrent = true,
+            SourcesJson = SerializeSources(result.Sources.ToList()),
+            RequestId = result.RequestId,
+            SuggestedQuestionsJson = SerializeSuggestedQuestions(result.SuggestedQuestions.ToList()),
+            Grounded = result.Grounded,
+            GroundingScore = result.GroundingScore,
+            VerificationStatus = result.VerificationStatus,
+            RelevanceScore = result.RelevanceScore,
+            IsFallback = result.FallbackTriggered,
+            FallbackReason = result.FallbackReason
+        };
     }
 
     // JWT의 sub 클레임에서 사용자 GUID를 추출한다.
@@ -1320,7 +1337,7 @@ static public class ChatRequestApis
         return messages.Select(message => ToDto(message)).ToList();
     }
 
-    static private ChatMessageDto ToDto(ChatMessage message)
+    internal static ChatMessageDto ToDto(ChatMessage message)
     {
         return new ChatMessageDto
         {
@@ -1334,6 +1351,8 @@ static public class ChatRequestApis
             SuggestedQuestions = DeserializeSuggestedQuestions(message.SuggestedQuestionsJson),
             Grounded = message.Grounded,
             GroundingScore = message.GroundingScore,
+            VerificationStatus = message.VerificationStatus,
+            RelevanceScore = message.RelevanceScore,
             IsFallback = message.IsFallback,
             FallbackReason = message.FallbackReason
         };
@@ -1447,6 +1466,19 @@ static public class ChatRequestApis
             return null;
         }
         return score;
+    }
+
+    static private string? ReadVerificationStatus(JsonElement element)
+    {
+        if (!element.TryGetProperty("verification_status", out var property)
+            || property.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        string? status = property.GetString();
+        return status is "passed" or "failed" or "unavailable" or "not_required"
+            ? status
+            : null;
     }
 
     static private List<string> ReadSuggestedQuestions(

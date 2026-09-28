@@ -2,9 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using System.Text.Json;
 
 using RenuxServer.Apis;
+using RenuxServer.Apis.Chat;
 using RenuxServer.DbContexts;
 using RenuxServer.Dtos.ChatDtos;
 using RenuxServer.Models;
@@ -265,6 +267,45 @@ Check(eventEntity?.GetIndexes().Any(index =>
 Check(messageEntity?.GetIndexes().Any(index =>
         index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual([nameof(ChatMessage.RequestId)])) == true,
     "Completed answer request ids must be unique.");
+Check(messageEntity?.FindProperty(nameof(ChatMessage.VerificationStatus))?.IsNullable == true
+      && messageEntity.FindProperty(nameof(ChatMessage.RelevanceScore))?.IsNullable == true,
+    "Chat answer verification status and relevance score must map as nullable columns.");
+Check(db.Database.GetMigrations().Contains("20260928000000_AddChatVerificationStatusAndRelevanceScore"),
+    "The additive chat verification migration must be discoverable by EF Core.");
+var verificationOperations = new RenuxServer.Migrations.AddChatVerificationStatusAndRelevanceScore()
+    .UpOperations;
+var verificationColumns = verificationOperations.OfType<AddColumnOperation>().ToArray();
+Check(verificationOperations.Count == 2 && verificationColumns.Length == 2
+      && verificationColumns.All(column => column.Table == "chat_messages" && column.IsNullable)
+      && verificationColumns.Any(column => column.Name == "verification_status" && column.ColumnType == "text")
+      && verificationColumns.Any(column => column.Name == "relevance_score" && column.ColumnType == "double precision"),
+    "Chat verification migration must add exactly two nullable answer columns.");
+
+var answerWithVerification = new ChatMessage
+{
+    Id = Guid.NewGuid(),
+    ChatId = Guid.NewGuid(),
+    IsAsk = false,
+    Content = "answer",
+    VerificationStatus = "unavailable",
+    RelevanceScore = 0.4,
+};
+var toChatDto = typeof(ChatRequestApis).GetMethod("ToDto",
+    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+var historyDto = toChatDto?.Invoke(null, [answerWithVerification]) as ChatMessageDto;
+var historyJson = historyDto is null
+    ? default
+    : JsonSerializer.SerializeToElement(historyDto, webJsonOptions);
+Check(historyDto?.VerificationStatus == "unavailable"
+      && historyDto.RelevanceScore == 0.4
+      && historyJson.GetProperty("verificationStatus").GetString() == "unavailable"
+      && historyJson.GetProperty("relevanceScore").GetDouble() == 0.4,
+    "Chat history DTO must return persisted verification status and relevance score.");
+answerWithVerification.VerificationStatus = null;
+answerWithVerification.RelevanceScore = null;
+var legacyHistoryDto = toChatDto?.Invoke(null, [answerWithVerification]) as ChatMessageDto;
+Check(legacyHistoryDto?.VerificationStatus is null && legacyHistoryDto?.RelevanceScore is null,
+    "Older answer rows must retain nullable verification fields in chat history.");
 
 DateTime cohortFrom = new(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
 DateTime cohortTo = new(2026, 7, 20, 0, 0, 0, DateTimeKind.Utc);
@@ -320,6 +361,7 @@ if (!string.IsNullOrWhiteSpace(integrationConnection))
     try
     {
         await using var firstWriter = new ServerDbContext(integrationOptions);
+        await firstWriter.Database.MigrateAsync();
         await using var secondWriter = new ServerDbContext(integrationOptions);
         var integrationContext = new ProductEventContext(
             integrationSubject,
@@ -357,6 +399,8 @@ if (!string.IsNullOrWhiteSpace(integrationConnection))
             integrationRequestId);
         Check(ownedCompletion?.SuggestionCount == 3 && foreignCompletion is null,
             "Completion lookup must bind the answer to the exact pseudonymous subject.");
+
+        await RagRelayTimeoutTests.RunPersistenceAsync(integrationOptions, Check);
     }
     catch (Exception exception)
     {

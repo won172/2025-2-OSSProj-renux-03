@@ -43,6 +43,10 @@ public class ChatMessage
 
     public double? GroundingScore { get; set; }
 
+    public string? VerificationStatus { get; set; }
+
+    public double? RelevanceScore { get; set; }
+
     [Required]
     public bool IsFallback { get; set; } = false;
 
