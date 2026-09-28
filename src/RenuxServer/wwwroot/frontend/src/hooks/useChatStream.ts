@@ -28,7 +28,7 @@ export interface ChatStreamGrounding {
 }
 
 export interface ChatStreamHandlers {
-  /** 토큰이 누적될 때마다 호출(누적된 전체 답변 문자열 전달) */
+  /** 프레임마다 합쳐진 전체 답변 문자열 전달; 종료 시 남은 텍스트는 즉시 전달 */
   onText: (accumulated: string) => void
   /** 검색 메타데이터(출처/폴백) 수신 시 호출 */
   onMetadata?: (meta: ChatStreamMetadata) => void
@@ -53,14 +53,18 @@ export interface ChatStreamResult {
 export const useChatStream = () => {
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
+  const pendingDeliveryRef = useRef<{ flush: () => void; discard: () => void } | null>(null)
 
   const stopStream = useCallback(() => {
+    pendingDeliveryRef.current?.flush()
     controllerRef.current?.abort()
     readerRef.current?.cancel().catch(() => {})
   }, [])
 
   useEffect(() => {
     return () => {
+      pendingDeliveryRef.current?.discard()
+      pendingDeliveryRef.current = null
       controllerRef.current?.abort()
       readerRef.current?.cancel().catch(() => {})
       controllerRef.current = null
@@ -72,6 +76,7 @@ export const useChatStream = () => {
     async (payload: ChatStreamPayload, handlers: ChatStreamHandlers): Promise<ChatStreamResult> => {
       const url = resolveApiUrl('/chat/stream')
       const controller = new AbortController()
+      pendingDeliveryRef.current?.flush()
       controllerRef.current?.abort()
       controllerRef.current = controller
 
@@ -111,6 +116,42 @@ export const useChatStream = () => {
         let receivedDone = false
         let completedRequestId: string | undefined
         let completedGrounded: boolean | undefined
+        let lastDeliveredAnswer = ''
+        let frame: number | null = null
+        let timer: ReturnType<typeof setTimeout> | null = null
+        let discarded = false
+
+        const cancelScheduledDelivery = () => {
+          if (frame !== null) globalThis.cancelAnimationFrame(frame)
+          if (timer !== null) globalThis.clearTimeout(timer)
+          frame = null
+          timer = null
+        }
+        const flushPending = () => {
+          cancelScheduledDelivery()
+          if (discarded) return
+          if (accumulatedAnswer !== lastDeliveredAnswer) {
+            lastDeliveredAnswer = accumulatedAnswer
+            handlers.onText(accumulatedAnswer)
+          }
+        }
+        const delivery = {
+          flush: flushPending,
+          discard: () => {
+            discarded = true
+            cancelScheduledDelivery()
+          },
+        }
+        pendingDeliveryRef.current = delivery
+
+        const scheduleDelivery = () => {
+          if (frame !== null || timer !== null) return
+          if (typeof globalThis.requestAnimationFrame === 'function') {
+            frame = globalThis.requestAnimationFrame(flushPending)
+          }
+          // Background tabs can pause rAF; the timer also covers runtimes without it.
+          timer = globalThis.setTimeout(flushPending, 40)
+        }
 
         const processLine = (rawLine: string) => {
           const data = parseChatStreamLine(rawLine)
@@ -126,7 +167,7 @@ export const useChatStream = () => {
             })
           } else if (data.type === 'text') {
             accumulatedAnswer += data.content ?? ''
-            handlers.onText(accumulatedAnswer)
+            if (accumulatedAnswer !== lastDeliveredAnswer) scheduleDelivery()
           } else if (data.type === 'suggestions') {
             handlers.onSuggestions?.(data.questions ?? [])
           } else if (data.type === 'grounding') {
@@ -136,6 +177,7 @@ export const useChatStream = () => {
               handlers.onGrounding?.({ ...grounding, grounded: grounding.grounded })
             }
           } else if (data.type === 'completion') {
+            flushPending()
             receivedCompletion = true
             completedRequestId = data.request_id ?? completedRequestId
             const verification = getCompletionVerification(data)
@@ -156,8 +198,10 @@ export const useChatStream = () => {
               handlers.onGrounding?.({ ...grounding, grounded: grounding.grounded })
             }
           } else if (data.type === 'done') {
+            flushPending()
             receivedDone = true
           } else if (data.type === 'error') {
+            flushPending()
             throw new Error(data.message ?? 'Streaming error')
           }
         }
@@ -180,11 +224,16 @@ export const useChatStream = () => {
           if (buffer.length > 0) {
             processLine(buffer)
           }
+          if (controller.signal.aborted) {
+            throw new DOMException('The chat stream was stopped.', 'AbortError')
+          }
           if (!receivedCompletion || !receivedDone) {
             throw new Error('Chat stream ended before its completion contract.')
           }
         } finally {
-          readerRef.current = null
+          flushPending()
+          if (pendingDeliveryRef.current === delivery) pendingDeliveryRef.current = null
+          if (readerRef.current === reader) readerRef.current = null
         }
 
         return {
@@ -203,7 +252,6 @@ export const useChatStream = () => {
         }
         return result
       } finally {
-        readerRef.current = null
         if (controllerRef.current === controller) {
           controllerRef.current = null
         }

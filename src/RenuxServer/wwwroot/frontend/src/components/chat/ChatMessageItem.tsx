@@ -160,7 +160,7 @@ const ChatMessageItem = ({
       <div className="ch-msg__doc">
         {(isStopped || message.isFallback) && (
           <div className="ch-msg__notes">
-            {isStopped && <span className="ch-note ch-note--muted" role="status">생성을 중단한 임시 답변</span>}
+            {isStopped && <span className="ch-note ch-note--muted">생성을 중단한 임시 답변</span>}
             {message.isFallback && (
               <span className="ch-note ch-note--warn">{getFallbackLabel(message.fallbackReason)}</span>
             )}

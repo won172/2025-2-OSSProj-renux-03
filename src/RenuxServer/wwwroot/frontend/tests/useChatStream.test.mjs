@@ -70,3 +70,151 @@ test('훅이 completion 검증 상태를 전달하고 누락된 grounded를 성�
     await server.close()
   }
 })
+
+test('스트림 텍스트는 프레임별로 합치고 모든 종료 경로에서 남은 텍스트를 전달한다', async (t) => {
+  const server = await createServer({
+    configFile: false,
+    root: new URL('../', import.meta.url).pathname,
+    server: { middlewareMode: true },
+    appType: 'custom',
+    logLevel: 'silent',
+  })
+  try {
+    const { useChatStream } = await server.ssrLoadModule('/src/hooks/useChatStream.ts')
+    let streamMessage
+    let stopStream
+    renderToStaticMarkup(React.createElement(() => {
+      ({ streamMessage, stopStream } = useChatStream())
+      return null
+    }))
+
+    const payload = { id: 'q-1', chatId: 'chat-1', content: '질문', createdTime: '2026-09-28T00:00:00Z' }
+    const event = (type, fields = {}) => `data: ${JSON.stringify({ type, ...fields })}\n\n`
+    const withFakeClock = async (runCase, useRaf = true) => {
+      const original = {
+        fetch: globalThis.fetch,
+        requestAnimationFrame: globalThis.requestAnimationFrame,
+        cancelAnimationFrame: globalThis.cancelAnimationFrame,
+        setTimeout: globalThis.setTimeout,
+        clearTimeout: globalThis.clearTimeout,
+      }
+      const frames = new Map()
+      const timers = new Map()
+      let nextId = 0
+      let streamController
+      globalThis.requestAnimationFrame = useRaf ? (callback) => {
+        frames.set(++nextId, callback)
+        return nextId
+      } : undefined
+      globalThis.cancelAnimationFrame = (id) => frames.delete(id)
+      globalThis.setTimeout = (callback) => {
+        timers.set(++nextId, callback)
+        return nextId
+      }
+      globalThis.clearTimeout = (id) => timers.delete(id)
+      globalThis.fetch = async () => new Response(new ReadableStream({
+        start(controller) { streamController = controller },
+      }), { status: 200 })
+      const send = async (events) => {
+        streamController.enqueue(new TextEncoder().encode(events))
+        await new Promise(setImmediate)
+      }
+      const fire = (callbacks) => {
+        const pending = [...callbacks.values()]
+        callbacks.clear()
+        for (const callback of pending) callback()
+      }
+      try {
+        await runCase({
+          send,
+          close: () => streamController.close(),
+          fireFrames: () => fire(frames),
+          fireTimers: () => fire(timers),
+          frameCount: () => frames.size,
+          timerCount: () => timers.size,
+        })
+      } finally {
+        Object.assign(globalThis, original)
+      }
+    }
+
+    await t.test('많은 delta가 한 프레임에서 한 번만 전달되고 완료 시 최종 문자열이 정확하다', async () => {
+      await withFakeClock(async ({ send, close, fireFrames, frameCount, timerCount }) => {
+        const updates = []
+        const resultPromise = streamMessage(payload, { onText: (answer) => updates.push(answer) })
+        await new Promise(setImmediate)
+        const parts = Array.from({ length: 100 }, (_, index) => `${index},`)
+        await send(parts.map((part) => event('text', { content: part })).join(''))
+        assert.deepEqual(updates, [])
+        assert.equal(frameCount(), 1)
+        assert.equal(timerCount(), 1)
+        fireFrames()
+        assert.deepEqual(updates, [parts.join('')])
+        await send(event('text', { content: '끝' }) + event('completion', { request_id: 'request-1' }) + event('done'))
+        close()
+        const result = await resultPromise
+        assert.deepEqual(updates, [parts.join(''), `${parts.join('')}끝`])
+        assert.equal(result.answer, `${parts.join('')}끝`)
+        assert.equal(frameCount(), 0)
+        assert.equal(timerCount(), 0)
+      })
+    })
+
+    await t.test('completion 자체가 대기 중인 텍스트를 즉시 전달한다', async () => {
+      await withFakeClock(async ({ send, close, frameCount }) => {
+        const updates = []
+        const resultPromise = streamMessage(payload, { onText: (answer) => updates.push(answer) })
+        await new Promise(setImmediate)
+        await send(event('text', { content: '미완성' }))
+        assert.deepEqual(updates, [])
+        await send(event('completion'))
+        assert.deepEqual(updates, ['미완성'])
+        assert.equal(frameCount(), 0)
+        await send(event('done'))
+        close()
+        assert.equal((await resultPromise).answer, '미완성')
+      })
+    })
+
+    await t.test('rAF가 없는 환경에서는 40ms 타이머가 한 번 전달한다', async () => {
+      await withFakeClock(async ({ send, close, fireTimers, timerCount }) => {
+        const updates = []
+        const resultPromise = streamMessage(payload, { onText: (answer) => updates.push(answer) })
+        await new Promise(setImmediate)
+        await send(event('text', { content: '가' }) + event('text', { content: '나' }))
+        assert.equal(timerCount(), 1)
+        fireTimers()
+        assert.deepEqual(updates, ['가나'])
+        await send(event('completion') + event('done'))
+        close()
+        assert.equal((await resultPromise).answer, '가나')
+      }, false)
+    })
+
+    await t.test('error와 abort는 대기 중인 부분 답변을 잃지 않는다', async () => {
+      await withFakeClock(async ({ send }) => {
+        const updates = []
+        const resultPromise = streamMessage(payload, { onText: (answer) => updates.push(answer) })
+        const rejected = assert.rejects(resultPromise, /연결 실패/)
+        await new Promise(setImmediate)
+        await send(event('text', { content: '부분 답변' }) + event('error', { message: '연결 실패' }))
+        await rejected
+        assert.deepEqual(updates, ['부분 답변'])
+      })
+      await withFakeClock(async ({ send, frameCount, timerCount }) => {
+        const updates = []
+        const resultPromise = streamMessage(payload, { onText: (answer) => updates.push(answer) })
+        const rejected = assert.rejects(resultPromise, { name: 'AbortError' })
+        await new Promise(setImmediate)
+        await send(event('text', { content: '중단 전' }))
+        stopStream()
+        assert.deepEqual(updates, ['중단 전'])
+        assert.equal(frameCount(), 0)
+        assert.equal(timerCount(), 0)
+        await rejected
+      })
+    })
+  } finally {
+    await server.close()
+  }
+})
