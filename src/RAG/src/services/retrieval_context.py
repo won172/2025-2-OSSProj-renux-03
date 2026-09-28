@@ -129,11 +129,52 @@ def build_retrieval_context(row: pd.Series) -> str:
     parts = [f"문서: {title}"]
     if published:
         parts.append(f"기준일: {published}")
-    if period:
+    if period and period not in title:
         parts.append(f"학사시기: {period}")
     if audience != "common":
         parts.append(f"대상: {_AUDIENCE_LABELS[audience]}")
     return f"[{' · '.join(parts)}]"
+
+
+def _retrieval_body(row: pd.Series) -> str:
+    """Keep the source chunk intact while indexing its title only in the header."""
+    body = _first_value(row, "chunk_text")
+    title = _first_value(row, "title", "filename")
+    if not title or not body:
+        return body
+
+    # to_chunks(include_title=True) adds this prefix for the LLM's source text.
+    # The retrieval header already carries the same title.
+    prefix = f"[{title}]"
+    if body == prefix:
+        body = ""
+    elif body.startswith(prefix + "\n"):
+        body = body[len(prefix):].lstrip("\n")
+
+    # Notice chunks can start with a board metadata line before their fallback
+    # title line. Treat only that fixed preamble as part of the leading header.
+    preamble = ""
+    if body.startswith("[게시판:"):
+        metadata_line, separator, remainder = body.partition("\n")
+        if separator and metadata_line.endswith("]"):
+            preamble = metadata_line
+            body = remainder.lstrip("\n")
+
+    # Some builders put a title-only heading immediately after the prefix.
+    # Drop the whole leading line, leaving substantive and later mentions intact.
+    first_line, separator, remainder = body.partition("\n")
+    title_lines = {
+        title,
+        f"공지 제목: {title}",
+        f"일정: {title}",
+        f"교과목명: {title}",
+        f"{title} 식단 메뉴",
+    }
+    if first_line.strip() in title_lines:
+        body = remainder.lstrip("\n") if separator else ""
+    if preamble:
+        body = f"{preamble}\n\n{body}" if body else preamble
+    return body.strip()
 
 
 def enrich_retrieval_fields(frame: pd.DataFrame) -> pd.DataFrame:
@@ -178,10 +219,7 @@ def enrich_retrieval_fields(frame: pd.DataFrame) -> pd.DataFrame:
         build_retrieval_context,
         axis=1,
     )
-    body = enriched.get(
-        "chunk_text",
-        pd.Series("", index=enriched.index, dtype=str),
-    ).fillna("").astype(str)
+    body = enriched.apply(_retrieval_body, axis=1)
     enriched["retrieval_text"] = (
         enriched["retrieval_context"].astype(str) + "\n\n" + body
     ).str.strip()
