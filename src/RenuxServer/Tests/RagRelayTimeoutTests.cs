@@ -121,6 +121,7 @@ internal static class RagRelayTimeoutTests
         string? connectPhase = null;
         try { using var response = await connectTimeouts.SendAsync(delayedClient, request); }
         catch (RagRelayTimeoutException exception) { connectPhase = exception.Phase; }
+        await delayedHandler.RequestCompleted.WaitAsync(TimeSpan.FromSeconds(3));
         check(connectPhase == "connect" && delayedHandler.RequestTokenWasCancelled,
             "A connect timeout must cancel the upstream request and identify the connect phase.");
     }
@@ -449,6 +450,8 @@ internal static class RagRelayTimeoutTests
             $"{label}: AnswerCompleted callback invocation count was wrong.");
         check((result.Answer == expectedAnswer) == expectPartial,
             $"{label}: partial answer state was wrong.");
+        if (expectedPhase == "connect")
+            await handler.RequestCompleted.WaitAsync(TimeSpan.FromSeconds(3));
         check((expectedPhase == "connect"
                   ? handler.RequestTokenWasCancelled
                   : handler.BodyTokenWasCancelled) == (expectedPhase is not null),
@@ -776,18 +779,27 @@ internal static class RagRelayTimeoutTests
         private int _cancelled;
         private ObservableContent? _content;
         private CancellationTokenRegistration _cancellationRegistration;
+        private readonly TaskCompletionSource _requestCompleted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool RequestTokenWasCancelled => Volatile.Read(ref _cancelled) != 0;
         public bool BodyTokenWasCancelled => _content?.TokenWasCancelled == true;
+        public Task RequestCompleted => _requestCompleted.Task;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            _cancellationRegistration = cancellationToken.Register(() => Interlocked.Exchange(ref _cancelled, 1));
-            try { await Task.Delay(headerDelay, cancellationToken); }
-            catch (OperationCanceledException) { throw; }
-            string requestId = request.Headers.GetValues("X-Request-ID").Single();
-            _body = new ChunkStream(chunks(requestId));
-            _content = new ObservableContent(_body);
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = _content };
+            try
+            {
+                _cancellationRegistration = cancellationToken.Register(() => Interlocked.Exchange(ref _cancelled, 1));
+                await Task.Delay(headerDelay, cancellationToken);
+                string requestId = request.Headers.GetValues("X-Request-ID").Single();
+                _body = new ChunkStream(chunks(requestId));
+                _content = new ObservableContent(_body);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = _content };
+            }
+            finally
+            {
+                _requestCompleted.TrySetResult();
+            }
         }
 
         protected override void Dispose(bool disposing)

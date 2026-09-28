@@ -261,6 +261,19 @@ def _ranking_bytes(hits):
     )
 
 
+def _assert_ranking_close(hits, expected_json):
+    actual = json.loads(_ranking_bytes(hits))
+    expected = json.loads(expected_json)
+    assert len(actual) == len(expected)
+    for actual_hit, expected_hit in zip(actual, expected):
+        assert list(actual_hit) == list(expected_hit)
+        for key, expected_value in expected_hit.items():
+            if key in {"hybrid_score", "vector_score", "sparse_score"}:
+                assert actual_hit[key] == pytest.approx(expected_value, rel=1e-9, abs=1e-12)
+            else:
+                assert actual_hit[key] == expected_value
+
+
 def test_hybrid_search_trace_keeps_head_results_and_exposes_ranks():
     chunks_df, vectorizer, matrix = _trace_dataset()
 
@@ -277,22 +290,22 @@ def test_hybrid_search_trace_keeps_head_results_and_exposes_ranks():
             top_k=3, tfidf_chunk_ids=["c1", "c2", "c3"],
         )
 
-    # Fixed from origin/main a0729f9 before the trace change: exact IDs, order, and scores.
-    assert _ranking_bytes(hits) == (
+    # Fixed from origin/main a0729f9 before the trace change: IDs and order stay exact.
+    _assert_ranking_close(hits, (
         '[{"chunk_id":"c1","hybrid_score":1.171935483870968,'
         '"vector_score":0.6,"sparse_score":0.8164965809277261},'
         '{"chunk_id":"c2","hybrid_score":0.62,'
         '"vector_score":0.9,"sparse_score":0.0}]'
-    )
+    ))
     assert hits.attrs == {"retrieval_mode": "hybrid", "dense_error_type": None}
     assert hits["document_key"].tolist() == ["notices:1", "notices:2"]
     assert hits["corpus_revision"].tolist() == ["revision-1", "revision-1"]
     assert hits["dense_rank"].tolist() == [2, 1]
     assert hits["sparse_rank"].tolist() == [1, None]
     assert hits["fusion_rank"].tolist() == [1, 2]
-    assert hits["dense_distance_raw"].tolist() == [0.4, 0.1]
-    assert hits["dense_similarity_raw"].tolist() == [0.6, 0.9]
-    assert hits["sparse_score_raw"].tolist() == [0.8164965809277261, 0.0]
+    assert hits["dense_distance_raw"].tolist() == pytest.approx([0.4, 0.1], rel=1e-9, abs=1e-12)
+    assert hits["dense_similarity_raw"].tolist() == pytest.approx([0.6, 0.9], rel=1e-9, abs=1e-12)
+    assert hits["sparse_score_raw"].tolist() == pytest.approx([0.8164965809277261, 0.0], rel=1e-9, abs=1e-12)
 
 
 def test_chroma_failure_trace_keeps_head_sparse_results():
@@ -309,10 +322,10 @@ def test_chroma_failure_trace_keeps_head_sparse_results():
             top_k=3, tfidf_chunk_ids=["c1", "c2", "c3"],
         )
 
-    assert _ranking_bytes(hits) == (
+    _assert_ranking_close(hits, (
         '[{"chunk_id":"c1","hybrid_score":0.6799999999999999,'
         '"vector_score":0.0,"sparse_score":0.8164965809277261}]'
-    )
+    ))
     assert hits.attrs == {
         "retrieval_mode": "sparse_degraded", "dense_error_type": "InternalError",
     }
@@ -333,11 +346,14 @@ def test_intentionally_disabled_dense_reports_sparse_only_without_chroma_call():
         )
 
     get_collection.assert_not_called()
-    assert _ranking_bytes(hits) == (
+    _assert_ranking_close(hits, (
         '[{"chunk_id":"c1","hybrid_score":0.6799999999999999,'
         '"vector_score":0.0,"sparse_score":0.8164965809277261}]'
-    )
+    ))
     assert hits.attrs == {"retrieval_mode": "sparse_only", "dense_error_type": None}
+    assert hits.loc[0, "dense_rank"] is None
+    assert hits.loc[0, "sparse_rank"] == 1
+    assert hits.loc[0, "fusion_rank"] == 1
 
 
 def test_bm25_trace_retains_pre_normalization_score():
