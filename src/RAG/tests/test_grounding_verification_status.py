@@ -352,6 +352,7 @@ def _patch_generated_path(monkeypatch, grounding_result: GroundingResult | None)
     async def plan(**_kwargs):
         return SimpleNamespace(
             route=["rules"],
+            strategy=rag_service.RetrievalStrategy("hybrid"),
             ontology_document_keys_by_dataset={},
             structured_document_keys_by_dataset={},
         )
@@ -486,9 +487,20 @@ async def test_generated_path_parity_unavailable_checker(monkeypatch):
             status=VERIFICATION_UNAVAILABLE,
         ),
     )
+    original_plan = rag_service._plan_query
+    plans = []
+
+    async def capture_plan(**kwargs):
+        plan = await original_plan(**kwargs)
+        plans.append(plan)
+        return plan
+
+    monkeypatch.setattr(rag_service, "_plan_query", capture_plan)
 
     nonstream, completion, payloads = await _run_both("휴학 신청 방법 알려줘")
 
+    assert len(plans) == 2 and plans[0] == plans[1]
+    assert plans[0].direct_handler is None
     assert nonstream.fallback_triggered is False
     assert nonstream.verification_status == VERIFICATION_UNAVAILABLE
     assert completion["verification_status"] == VERIFICATION_UNAVAILABLE
