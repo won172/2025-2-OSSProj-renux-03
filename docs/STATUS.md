@@ -75,11 +75,12 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| 프런트 fallback 사유 라벨 전체 매핑·추천 질문 요청 취소 (audit 08) | P1 | Client | `fix/client-fallback-labels` | `client-fallback-labels` | Review | 2026-09-28 로컬: 59/59·lint·build·tsc. 구현 codex, QA codex2 2회 → APPROVE. main 병합 후 재실행 동일 | iOS 네이티브 요청은 물리 취소 불가(결과만 무시). 실기기 미검증 | PR #21 merge 승인 대기 |
 | 메인 서버 RAG 중계 timeout 단계 분리 (audit 08 P1) | P1 | RAG/Backend (ASP.NET Core) | `fix/rag-relay-timeouts` | `rag-relay-timeouts` | Review | 2026-09-28 로컬: Release build 오류 0, 계약 테스트 통과(실제 relay 경로·SSE frame 파싱). QA codex2 7회 | 빈 upstream 뒤 fallback 쓰기는 total deadline 밖(저장 안 됨). 실 Kestrel·DB E2E 미실행. diff 큼(약 +390/-260) | PR #22 merge 승인 대기(리뷰 유의) |
 | PWA precache 축소·bundle budget 검사 (audit 08 성능) | P2 | Client | `fix/frontend-precache-budget` | `frontend-precache-budget` | Review | 2026-09-28 로컬: 50/50·lint·build·budget(precache 19개 1,184,847B, main JS 237,660B). QA codex2 APPROVE | main JS budget 여유 약 1%. 일부 공유 chunk는 오프라인 시 runtime cache 후 사용. 실제 오프라인 미검증 | PR #23 merge 승인 대기 |
 | `_academic_period`가 학수번호를 연도로 읽는 버그 수정 | P1 | RAG/Backend | `fix/academic-period-course-code` | `academic-period-course-code` | Review | 2026-09-28 로컬: 전체 RAG 1,223 passed/1 skipped(일반·빈 DB). 구현 codex 4회, QA codex2 3회. 핵심 사례 Orchestrator 직접 확인 | 재색인 후 반영. `2024.12.2` 같은 날짜에서 학기 추출 제거(의도된 차이). 실제 qrels 영향 미확인 | PR #26 merge 승인 대기 |
 | fallback 사유 세분화(미발표·stale·clarify·범위 밖·selector 거절) (audit 03 P1) | P1 | RAG/Backend | `feat/fallback-reasons` | `fallback-reasons` | Review | 2026-09-28 로컬: 관련 42개, 전체 RAG 1,184 passed/1 skipped(일반·빈 DB). 구현 codex, QA codex2 APPROVE | 새 reason 5개는 `fallback_triggered=true` → 메인 서버 IsFallback·fallback 비율 지표 상승. 프런트 전용 라벨은 #21 merge 후 후속 | PR #25 merge 승인 대기. 다음: 공통 QueryPlan(#25 merge 후) |
+| 청크 표현 P1: staff·schedule 라벨 템플릿, 빈 공지 low_value (audit 09 P1) | P1 | RAG/Backend | `fix/chunk-representation-p1` | `chunk-representation-p1` | Review | 2026-09-28 로컬: 전체 RAG 1,184 passed/1 skipped(일반·빈 DB). 구현 codex 3회, QA codex2 3회 → APPROVE | 재색인 후 반영. 제목 중복 제거는 retrieval_context.py(#26) 이후로 보류 | PR #27 merge 승인 대기 |
+| 프런트 verification_status 표시·새 fallback 사유 라벨 (audit 08 P0/04 P0) | P0 | Client | `feat/client-verification-status` | `client-verification-status` | Review | 2026-09-28 로컬: lint·66/66·tsc. QA codex2 2회 → APPROVE | C#가 verification_status를 저장·반환하지 않아 새로고침 이력은 grounded 기준. C# 후속은 #22 이후 | PR #28 merge 승인 대기 |
 | 공지 Chroma compactor 오류 진단·strict lineage 재통과 (P0) | P0 | RAG/Backend | - | - | Blocked | - | 실제 DB·artifacts 사본 필요. 에이전트의 사본 생성은 개인정보 처리로 권한 차단 | human이 읽기 전용 사본 경로 제공 또는 권한 허용 |
 | 실제 후보 골든 평가 190문항 (P0) | P0 | QA | - | - | Blocked | release gate는 fail-closed로 전환(PR #14) | 후보 endpoint·모델 비용 승인 필요 | human이 endpoint 제공 |
 | Orchestrator·Codex 실행 설정 후보 적용 | P1 | Orchestrator | `chore/agent-orchestration` | `agent-orchestration` | Blocked | runner 단위 테스트 22/22(2026-09-27 재실행) | staged 상태. 에이전트 권한 설정 commit이 auto mode에서 차단됨. base `cffe3e3`로 오래됨 | human이 commit·PR 여부 결정 |
@@ -92,7 +93,7 @@ Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 2026-09-28 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
 
 - Remote: `origin` = `github.com/won172/2025-2-OSSProj-renux-03` (fork, upstream `CSID-DGU/2025-2-OSSProj-renux-03`).
-- `origin/main` = `5ce5e85` (PR #13~#20 merge). branch protection 없음(human 설정 필요).
+- `origin/main` = `02feb23` (PR #13~#21 merge). branch protection 없음(human 설정 필요).
 - 새 task의 base branch는 `origin/main`이다. PR #13 이후 task PR은 STATUS.md를 수정하지 않는다.
 - merge된 task의 worktree·local branch는 정리했다. remote branch(`chore/golden-release-gate`,
   `fix/grounding-verification-status`, `chore/build-lineage-gate`, `fix/chunk-representation`,
@@ -202,6 +203,7 @@ Next Action:
 - 9월 27일 공식 규정 전체 분류 수집(77개), fail-safe·보고 (PR #18). 실제 전체 sync·재색인 미실행.
 - 9월 27일 삭제 공지 탐지 opt-in(기본 off, 2회 probe 확인·cap) (PR #19). 운영 dry_run 미실행.
 - 9월 28일 Codex 우선 위임 규칙 (PR #20).
+- 9월 28일 프런트 fallback 사유 라벨 전체 매핑·추천 질문 요청 취소 (PR #21, codex 구현·codex2 QA).
 
 ## Agent Tasks
 
