@@ -127,15 +127,16 @@ def validate_crawl(frame: pd.DataFrame, since: date, today: date, *, coop_only: 
         raise ValueError("Meal crawl has out-of-window dates; no data written")
     if not coop_only:
         dflex_dates = set(rows.loc[rows["restaurant"] == DFLEX_RESTAURANT, "date"])
+        blank_dates = set(diagnostics.get("dflex_blank_dates") or [])
         weekdays = {
             (since + timedelta(days=offset)).isoformat()
             for offset in range(requested)
             if (since + timedelta(days=offset)).weekday() < 5
         }
-        if not weekdays <= dflex_dates:
+        if not weekdays <= dflex_dates | blank_dates:
             raise ValueError(
                 "D-Flex historical retrieval does not prove weekday coverage "
-                f"(missing_weekdays={len(weekdays - dflex_dates)}); "
+                f"(missing_weekdays={len(weekdays - dflex_dates - blank_dates)}); "
                 "no data written (use --coop-only for an explicitly partial catch-up)"
             )
     return diagnostics
@@ -163,15 +164,16 @@ def catch_up(since: date, today: date, *, apply: bool, coop_only: bool, delay: f
     validate_crawl(frame, since, today, coop_only=True)
     if not coop_only:
         try:
-            dflex_rows = crawl_dflex_meals_range(since, today, delay=delay)
+            dflex_result = crawl_dflex_meals_range(since, today, delay=delay)
         except Exception as exc:
             raise ValueError(f"D-Flex catch-up failed ({type(exc).__name__}); no data written") from exc
         source_diagnostics = dict(frame.attrs.get("crawl_diagnostics") or {})
-        if dflex_rows:
-            frame = pd.concat([frame, pd.DataFrame(dflex_rows)], ignore_index=True)
+        if dflex_result.records:
+            frame = pd.concat([frame, pd.DataFrame(dflex_result.records)], ignore_index=True)
         frame.attrs["crawl_diagnostics"] = {
             **source_diagnostics,
-            "dflex_record_count": len(dflex_rows),
+            "dflex_record_count": len(dflex_result.records),
+            "dflex_blank_dates": sorted(dflex_result.blank_dates),
         }
     diagnostics = validate_crawl(frame, since, today, coop_only=coop_only)
     # Read as late as possible. The ingest below receives one complete frame;
@@ -186,6 +188,7 @@ def catch_up(since: date, today: date, *, apply: bool, coop_only: bool, delay: f
         "fetched_days": diagnostics["fetched_days"],
         "fetch_failed_days": diagnostics["fetch_failed_days"],
         "parse_empty_days": diagnostics["parse_empty_days"],
+        "dflex_blank_days": len(diagnostics.get("dflex_blank_dates") or []),
         "crawled_rows": len(frame),
         "preserved_active_rows": len(merged) - len(_meal_rows(frame)),
         "merged_rows": len(merged),
@@ -201,6 +204,7 @@ def catch_up(since: date, today: date, *, apply: bool, coop_only: bool, delay: f
             "fetch_failed_days": int(diagnostics["fetch_failed_days"]),
             "parsed_days_with_rows": int(diagnostics["parsed_days_with_rows"]),
             "parse_empty_days": int(diagnostics["parse_empty_days"]),
+            "dflex_blank_dates": diagnostics.get("dflex_blank_dates") or [],
             "crawled_rows": len(frame),
             "preserved_active_rows": summary["preserved_active_rows"],
         }

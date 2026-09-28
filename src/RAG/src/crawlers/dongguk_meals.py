@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
 from typing import Iterable, List, Optional
 
@@ -59,6 +60,13 @@ _DFLEX_WEEKDAY_WORDS = {"월요일", "화요일", "수요일", "목요일", "금
 # A weekly menu can be posted before the requested Monday. Two weeks covers
 # that lead time without parsing unrelated historical pinned/image-only PDFs.
 DFLEX_CATCHUP_POST_LOOKBACK_DAYS = 14
+
+
+@dataclass(frozen=True)
+class DflexRangeResult:
+    records: List[dict]
+    published_dates: frozenset[str]
+    blank_dates: frozenset[str]
 
 
 def make_soup(markup: str) -> BeautifulSoup:
@@ -293,6 +301,48 @@ def parse_dflex_pdf(pdf_bytes: bytes, ref_date: date) -> List[dict]:
     return records
 
 
+def inspect_dflex_pdf_dates(pdf_bytes: bytes, ref_date: date) -> dict[str, bool]:
+    """Map explicit PDF date headers to whether their menu column has content.
+
+    The strict catch-up path uses blank columns as evidence of publication for
+    the date, never as a meal or an inferred closure. A missing table/header
+    remains a parse failure.
+    """
+    import pdfplumber
+
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        tables = pdf.pages[0].extract_tables() if pdf.pages else []
+    if not tables:
+        raise ValueError("D-Flex PDF has no extractable table")
+    table = tables[0]
+    date_cols: dict[int, date] = {}
+    for row in table[:3]:
+        for ci, cell in enumerate(row):
+            match = DFLEX_PDF_DATE_PATTERN.search(cell or "")
+            if match and ci not in date_cols:
+                day = _infer_year(int(match.group(1)), int(match.group(2)), ref_date)
+                if day is None:
+                    raise ValueError("D-Flex PDF has an invalid date header")
+                date_cols[ci] = day
+    if not date_cols:
+        raise ValueError("D-Flex PDF has no date headers")
+
+    columns: dict[str, bool] = {}
+    for ci, day in date_cols.items():
+        has_menu_content = False
+        for row in table:
+            cell = (row[ci] or "") if ci < len(row) else ""
+            cell = re.sub(r"\s+", " ", cell).strip()
+            cell = DFLEX_PDF_DATE_PATTERN.sub("", cell).strip()
+            for weekday in _DFLEX_WEEKDAY_WORDS:
+                cell = cell.replace(weekday, "").strip()
+            if cell and not re.fullmatch(r"\(?[월화수목금토일]\)?", cell):
+                has_menu_content = True
+                break
+        columns[day.isoformat()] = has_menu_content
+    return columns
+
+
 def crawl_dflex_meals(
     *,
     max_posts: int = 3,
@@ -367,7 +417,7 @@ def crawl_dflex_meals_range(
     delay: float = DEFAULT_REQUEST_DELAY,
     request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
     request_retries: int = DEFAULT_REQUEST_RETRIES,
-) -> List[dict]:
+) -> DflexRangeResult:
     """Page through D-Flex PDFs until every weekday in the window is covered.
 
     This strict catch-up path is separate from the scheduler's tolerant
@@ -384,12 +434,13 @@ def crawl_dflex_meals_range(
         if (since + timedelta(days=offset)).weekday() < 5
     }
     if not weekdays:
-        return []
+        return DflexRangeResult([], frozenset(), frozenset())
     oldest_relevant_post = since - timedelta(days=DFLEX_CATCHUP_POST_LOOKBACK_DAYS)
 
     records: List[dict] = []
     seen_posts: set[int] = set()
     covered: set[str] = set()
+    blank_dates: set[str] = set()
     old_page_streak = 0
     for page in range(1, max_pages + 1):
         posts = fetch_notice_list(
@@ -439,9 +490,19 @@ def crawl_dflex_meals_range(
                 timeout=request_timeout,
                 retries=request_retries,
             )
+            date_columns = inspect_dflex_pdf_dates(response.content, ref_date)
             parsed = parse_dflex_pdf(response.content, ref_date)
-            if not parsed:
-                raise ValueError("D-Flex PDF has no parseable menu rows")
+            parsed_dates = {row.get("date") for row in parsed}
+            missing_parsed = {
+                day for day, has_content in date_columns.items()
+                if has_content and day not in parsed_dates
+            }
+            if missing_parsed:
+                raise ValueError("D-Flex PDF has nonblank but unparseable menu columns")
+            for day, has_content in date_columns.items():
+                if not has_content and since.isoformat() <= day <= through.isoformat():
+                    blank_dates.add(day)
+                    covered.add(day)
             for row in parsed:
                 try:
                     row_date = date.fromisoformat(row["date"])
@@ -452,7 +513,10 @@ def crawl_dflex_meals_range(
                     covered.add(row_date.isoformat())
             if weekdays <= covered:
                 # Later (newer) posts win if a date is republished.
-                return list({(row["date"], row["restaurant"]): row for row in reversed(records)}.values())
+                deduped = list({(row["date"], row["restaurant"]): row for row in reversed(records)}.values())
+                published = frozenset(covered)
+                actual_blank = frozenset(blank_dates - {row["date"] for row in deduped})
+                return DflexRangeResult(deduped, published, actual_blank)
             if delay:
                 time.sleep(delay)
         old_page_streak = old_page_streak + 1 if relevant_posts_on_page == 0 else 0
@@ -461,7 +525,7 @@ def crawl_dflex_meals_range(
 
     if not weekdays <= covered:
         raise ValueError(f"D-Flex historical coverage incomplete (missing_weekdays={len(weekdays - covered)})")
-    return records
+    return DflexRangeResult(records, frozenset(covered), frozenset(blank_dates))
 
 
 def crawl_meals(
@@ -566,6 +630,7 @@ __all__ = [
     "crawl_meals",
     "crawl_dflex_meals",
     "crawl_dflex_meals_range",
+    "inspect_dflex_pdf_dates",
     "parse_dflex_pdf",
     "fetch_day_html",
     "parse_day_menus",

@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from scripts import catch_up_meals
+from src.crawlers.dongguk_meals import DflexRangeResult
 from src.database import Base, IngestionRun, SourceDocument
 from src.pipelines import ingest
 from src.services.ingestion_freshness import build_ingestion_freshness_report
@@ -61,7 +62,9 @@ def test_catch_up_crawls_one_inclusive_window_and_ingests_one_merged_frame(monke
         return frame
 
     monkeypatch.setattr(catch_up_meals, "crawl_meals", fake_crawl)
-    monkeypatch.setattr(catch_up_meals, "crawl_dflex_meals_range", lambda *_args, **_kwargs: dflex_rows)
+    monkeypatch.setattr(catch_up_meals, "crawl_dflex_meals_range", lambda *_args, **_kwargs: DflexRangeResult(
+        dflex_rows, frozenset(row["date"] for row in dflex_rows), frozenset(),
+    ))
     monkeypatch.setattr(
         catch_up_meals,
         "load_meals_from_db",
@@ -157,7 +160,9 @@ def test_full_source_apply_persists_success_run(monkeypatch):
     session_factory = sessionmaker(bind=engine)
     monkeypatch.setattr(catch_up_meals, "SessionLocal", session_factory)
     monkeypatch.setattr(catch_up_meals, "crawl_meals", lambda **_kwargs: crawl_frame(day, day))
-    monkeypatch.setattr(catch_up_meals, "crawl_dflex_meals_range", lambda *_args, **_kwargs: [meal(day, catch_up_meals.DFLEX_RESTAURANT)])
+    monkeypatch.setattr(catch_up_meals, "crawl_dflex_meals_range", lambda *_args, **_kwargs: DflexRangeResult(
+        [meal(day, catch_up_meals.DFLEX_RESTAURANT)], frozenset({day.isoformat()}), frozenset(),
+    ))
     monkeypatch.setattr(catch_up_meals, "load_meals_from_db", lambda: pd.DataFrame())
     monkeypatch.setattr(catch_up_meals, "ingest_meals", lambda _rows: (pd.DataFrame([{"chunk": 1}]), None, None))
     summary = catch_up_meals.catch_up(day, day, apply=True, coop_only=False, delay=0)
@@ -168,6 +173,32 @@ def test_full_source_apply_persists_success_run(monkeypatch):
         assert run.documents_seen == 1
         assert json.loads(run.diagnostics_json)["source_scope"] == "coop_and_dflex"
     assert summary["run_status"] == "success"
+
+
+def test_blank_published_dflex_day_is_covered_without_inventing_meal(monkeypatch):
+    since, today = date(2026, 9, 24), date(2026, 9, 25)
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    ingested: list[pd.DataFrame] = []
+    monkeypatch.setattr(catch_up_meals, "SessionLocal", session_factory)
+    monkeypatch.setattr(catch_up_meals, "crawl_meals", lambda **_kwargs: crawl_frame(since, today))
+    monkeypatch.setattr(catch_up_meals, "crawl_dflex_meals_range", lambda *_args, **_kwargs: DflexRangeResult(
+        [meal(since, catch_up_meals.DFLEX_RESTAURANT)],
+        frozenset({since.isoformat(), today.isoformat()}),
+        frozenset({today.isoformat()}),
+    ))
+    monkeypatch.setattr(catch_up_meals, "load_meals_from_db", lambda: pd.DataFrame())
+    monkeypatch.setattr(catch_up_meals, "ingest_meals", lambda rows: (
+        ingested.append(rows.copy()) or pd.DataFrame([{"chunk": 1}]), None, None,
+    ))
+    summary = catch_up_meals.catch_up(since, today, apply=True, coop_only=False, delay=0)
+    assert summary["run_status"] == "success"
+    assert summary["dflex_blank_days"] == 1
+    assert ingested[0].loc[ingested[0]["restaurant"] == catch_up_meals.DFLEX_RESTAURANT, "date"].tolist() == [since.isoformat()]
+    with session_factory() as session:
+        run = session.query(IngestionRun).one()
+        assert json.loads(run.diagnostics_json)["dflex_blank_dates"] == [today.isoformat()]
 
 
 def test_ingest_failure_records_failed_run(monkeypatch):
@@ -222,7 +253,9 @@ def test_catch_up_blocks_missing_dflex_history(monkeypatch):
     since, today = date(2026, 8, 31), date(2026, 9, 2)
     frame = crawl_frame(since, today)
     monkeypatch.setattr(catch_up_meals, "crawl_meals", lambda **_kwargs: frame)
-    monkeypatch.setattr(catch_up_meals, "crawl_dflex_meals_range", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(catch_up_meals, "crawl_dflex_meals_range", lambda *_args, **_kwargs: DflexRangeResult(
+        [], frozenset(), frozenset(),
+    ))
     monkeypatch.setattr(catch_up_meals, "ingest_meals", lambda _rows: pytest.fail("wrote partial D-Flex"))
     with pytest.raises(ValueError, match="D-Flex historical retrieval"):
         catch_up_meals.catch_up(since, today, apply=True, coop_only=False, delay=0)
