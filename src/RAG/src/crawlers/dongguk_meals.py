@@ -56,6 +56,9 @@ DFLEX_BOARD_CODE = "FOODDFLEX"
 DFLEX_RESTAURANT = "경영관 D-Flex식당"
 DFLEX_PDF_DATE_PATTERN = re.compile(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일")
 _DFLEX_WEEKDAY_WORDS = {"월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"}
+# A weekly menu can be posted before the requested Monday. Two weeks covers
+# that lead time without parsing unrelated historical pinned/image-only PDFs.
+DFLEX_CATCHUP_POST_LOOKBACK_DAYS = 14
 
 
 def make_soup(markup: str) -> BeautifulSoup:
@@ -382,10 +385,12 @@ def crawl_dflex_meals_range(
     }
     if not weekdays:
         return []
+    oldest_relevant_post = since - timedelta(days=DFLEX_CATCHUP_POST_LOOKBACK_DAYS)
 
     records: List[dict] = []
     seen_posts: set[int] = set()
     covered: set[str] = set()
+    old_page_streak = 0
     for page in range(1, max_pages + 1):
         posts = fetch_notice_list(
             DFLEX_BOARD_CODE,
@@ -398,11 +403,18 @@ def crawl_dflex_meals_range(
         page_ids = {post.get("article_id") for post in posts}
         if None in page_ids or not page_ids - seen_posts:
             raise ValueError("D-Flex list pagination is missing IDs or repeating a page")
+        relevant_posts_on_page = 0
         for meta in posts:
             article_id = meta["article_id"]
             if article_id in seen_posts:
                 continue
             seen_posts.add(article_id)
+            listed_at = meta.get("posted_at")
+            if isinstance(listed_at, datetime):
+                listed_at = listed_at.date()
+            if isinstance(listed_at, date) and listed_at < oldest_relevant_post:
+                continue
+            relevant_posts_on_page += 1
             detail = fetch_notice_detail(
                 DFLEX_BOARD_CODE,
                 article_id,
@@ -410,8 +422,12 @@ def crawl_dflex_meals_range(
                 retries=request_retries,
             )
             ref_date = detail.get("posted_at") or meta.get("posted_at")
+            if isinstance(ref_date, datetime):
+                ref_date = ref_date.date()
             if not isinstance(ref_date, date):
                 raise ValueError("D-Flex post has no valid publication date")
+            if ref_date < oldest_relevant_post:
+                continue
             pdf_atts = [
                 attachment for attachment in detail.get("attachments", [])
                 if str(attachment.get("name", "")).lower().endswith(".pdf")
@@ -439,6 +455,9 @@ def crawl_dflex_meals_range(
                 return list({(row["date"], row["restaurant"]): row for row in reversed(records)}.values())
             if delay:
                 time.sleep(delay)
+        old_page_streak = old_page_streak + 1 if relevant_posts_on_page == 0 else 0
+        if old_page_streak >= 2:
+            break
 
     if not weekdays <= covered:
         raise ValueError(f"D-Flex historical coverage incomplete (missing_weekdays={len(weekdays - covered)})")

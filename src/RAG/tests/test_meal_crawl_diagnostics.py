@@ -57,9 +57,13 @@ def test_dflex_range_pages_back_until_all_weekdays_are_covered(monkeypatch):
     def list_page(_board, page, *, timeout, retries):
         seen_pages.append(page)
         day = {1: date(2026, 9, 2), 2: date(2026, 9, 1)}[page]
-        return [{"article_id": page, "posted_at": day}]
+        posts = [{"article_id": page, "posted_at": day}]
+        if page == 1:
+            posts.insert(0, {"article_id": 99, "posted_at": date(2026, 3, 13), "is_pinned": True})
+        return posts
 
     def detail(_board, article_id, *, timeout, retries):
+        assert article_id != 99, "unrelated old PDF must not be inspected"
         return {
             "posted_at": date(2026, 9, 3 - article_id),
             "attachments": [{"name": "menu.pdf", "url": "https://example.test/menu.pdf"}],
@@ -85,6 +89,26 @@ def test_dflex_range_pages_back_until_all_weekdays_are_covered(monkeypatch):
     )
     assert seen_pages == [1, 2]
     assert {row["date"] for row in rows} == {"2026-09-01", "2026-09-02"}
+
+
+def test_dflex_range_stops_after_old_pages_without_parsing_their_pdfs(monkeypatch):
+    pages: list[int] = []
+
+    def list_page(_board, page, *, timeout, retries):
+        pages.append(page)
+        return [{"article_id": page, "posted_at": date(2026, 3, 13)}]
+
+    monkeypatch.setattr(dongguk_notices, "fetch_notice_list", list_page)
+    monkeypatch.setattr(
+        dongguk_notices,
+        "fetch_notice_detail",
+        lambda *_args, **_kwargs: pytest.fail("old post detail fetched"),
+    )
+    with pytest.raises(ValueError, match="historical coverage incomplete"):
+        dongguk_meals.crawl_dflex_meals_range(
+            date(2026, 9, 21), date(2026, 9, 22), delay=0,
+        )
+    assert pages == [1, 2]
 
 
 def test_dflex_range_fails_closed_on_older_page_error(monkeypatch):
