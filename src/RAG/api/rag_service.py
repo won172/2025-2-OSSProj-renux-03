@@ -3856,6 +3856,47 @@ class _RetrievalPlan:
     structured_document_keys_by_dataset: Dict[str, tuple[str, ...]]
 
 
+@dataclass(frozen=True)
+class QueryPlan:
+    """Decision and already-computed inputs for either response transport."""
+
+    intent: str
+    routes: tuple[str, ...]
+    filters: Dict
+    direct_handler: str | None
+    confidence: float
+    reason: str
+    time_sensitivity: str
+    allow_wise: bool = False
+    strategy: RetrievalStrategy | None = None
+    ontology_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None
+    structured_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None
+    crisis: object | None = None
+    recommendation: tuple | None = None
+    cache_hit: Dict | None = None
+    smalltalk: object | None = None
+    future_unannounced: DirectAnswer | None = None
+    direct_answer: DirectAnswer | None = None
+    history_text: str = ""
+    semantic_cache_ns: str = ""
+    analysis_meta: QueryAnalysisMeta | None = None
+    clarification_fields: tuple[str, ...] = ()
+    query_for_retrieval: str = ""
+    expanded_query: str = ""
+    retrieval_queries: tuple[str, ...] = ()
+    semantic_query: str = ""
+    entry_year: int | None = None
+    recent_notice_query: bool = False
+    notice_board_filter: str | None = None
+    retrieval_policy: RetrievalPolicy | None = None
+    active_notice_query: bool = False
+    current_operational_notice_terms: list[str] | None = None
+
+    @property
+    def route(self) -> List[str]:
+        return list(self.routes)
+
+
 async def _plan_retrieval(
     *,
     raw_query: str,
@@ -3902,6 +3943,213 @@ async def _plan_retrieval(
         structured_document_count=sum(len(keys) for keys in structured_keys.values()),
     )
     return _RetrievalPlan(route, strategy, ontology_keys, structured_keys)
+
+
+async def _plan_query(
+    *,
+    req: AskRequest,
+    raw_query: str,
+    temporal_context: TemporalContext,
+    request_id: str,
+    session_id: str,
+    stage_timings: dict,
+    llm_usage: list[dict],
+    mode: str,
+) -> QueryPlan:
+    """Apply pre-retrieval decisions once, in the original priority order."""
+    as_of = temporal_context.as_of
+    allow_wise = False
+    filters: Dict = {
+        "as_of": as_of,
+        "campus": "wise_allowed" if allow_wise else "seoul_bmc",
+        "audience": None,
+        "department": None,
+        "date": None,
+        "where": {},
+        "notice_visibility": {},
+    }
+
+    def planned(handler: str | None, routes: List[str], reason: str, **values) -> QueryPlan:
+        stage_timings["query_plan"] = {"reason": reason, "direct_handler": handler}
+        analysis_meta = values.get("analysis_meta")
+        analysis = None if analysis_meta is None else analysis_meta.result
+        sensitivity = (
+            analysis.time_focus if analysis is not None and analysis.time_focus != "none"
+            else "date_bound" if filters["date"] is not None
+            else "future" if handler == "future_unannounced"
+            else "current" if handler in {"structured_direct", "semantic_cache"}
+            else "none"
+        )
+        return QueryPlan(
+            intent=(
+                analysis.intent if analysis is not None
+                else "future_unannounced" if handler == "future_unannounced"
+                else routes[0] if routes else "unknown"
+            ),
+            routes=tuple(routes), filters=filters, direct_handler=handler,
+            confidence=1.0 if handler is not None else (0.8 if analysis is not None else 0.5),
+            reason=reason, time_sensitivity=sensitivity,
+            allow_wise=allow_wise, **values,
+        )
+
+    crisis = detect_crisis(raw_query)
+    if crisis is not None:
+        return planned("crisis_support", ["crisis_support"], "crisis_signal", crisis=crisis)
+
+    user_major = req.major
+    if query_explicitly_requests_wise(raw_query):
+        filters["campus"] = "wise"
+        return planned("campus_out_of_scope", ["unknown"], "explicit_wise_campus")
+
+    semantic_cache_ns = _semantic_cache_namespace(user_major, allow_wise=allow_wise)
+    deterministic_smalltalk = detect_smalltalk(raw_query)
+    structured_direct_candidate = (
+        is_meal_direct_question(raw_query)
+        or is_schedule_direct_question(raw_query, as_of)
+    )
+    future_publication_candidate = bool(future_publication_years(raw_query, as_of))
+    history_text = ""
+    if USE_QUERY_ANALYSIS or RAG_SEMANTIC_CACHE_ENABLED:
+        started_at = time.perf_counter()
+        history_text = await run_in_threadpool(get_recent_history_text, session_id)
+        _mark_stage(stage_timings, "history_load", started_at)
+
+    common = {"history_text": history_text, "semantic_cache_ns": semantic_cache_ns}
+    recommendation = await run_in_threadpool(
+        _chat_course_recommendation, req, raw_query, history_text,
+    )
+    if recommendation is not None:
+        return planned("course_recommendation", ["courses"], "course_recommendation", recommendation=recommendation, **common)
+
+    if (
+        RAG_SEMANTIC_CACHE_ENABLED and req.as_of is None
+        and not (history_text or "").strip()
+        and deterministic_smalltalk is None
+        and not structured_direct_candidate
+        and not future_publication_candidate
+        and not _is_active_notice_state_query(raw_query)
+    ):
+        started_at = time.perf_counter()
+        hit = await run_in_threadpool(semantic_cache.get, raw_query, semantic_cache_ns)
+        _mark_stage(stage_timings, "semantic_cache_lookup", started_at)
+        if hit is not None:
+            return planned("semantic_cache", hit.get("route", []), "semantic_cache_hit", cache_hit=hit, **common)
+
+    if deterministic_smalltalk is not None:
+        return planned("smalltalk", ["smalltalk"], "smalltalk_detected", smalltalk=deterministic_smalltalk, **common)
+
+    future = await run_in_threadpool(_try_future_unannounced_answer, raw_query, as_of)
+    if future is not None:
+        return planned("future_unannounced", ["notices"], "future_publication_unannounced", future_unannounced=future, **common)
+
+    direct = await run_in_threadpool(_try_direct_answer, raw_query, as_of)
+    if direct is not None:
+        route = ["meals"] if direct.kind.startswith("meal") else ["schedule"]
+        return planned("structured_direct", route, direct.kind, direct_answer=direct, **common)
+
+    analysis_query = _query_for_analysis(raw_query)
+    analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
+    if USE_QUERY_ANALYSIS and not _can_skip_query_analysis(raw_query, analysis_query, history_text):
+        started_at = time.perf_counter()
+        result = await analyze_query(
+            analysis_query, history_text, temporal_context, usage_collector=llm_usage,
+        )
+        _mark_stage(stage_timings, "query_analysis", started_at)
+        analysis_meta = _analysis_to_meta(result, failed=result is None)
+    common["analysis_meta"] = analysis_meta
+
+    clarification_fields = _first_turn_clarification_fields(
+        analysis_query, analysis_meta, history_text,
+    )
+    if clarification_fields:
+        return planned("clarification", ["unknown"], "clarification_needed", clarification_fields=tuple(clarification_fields), **common)
+
+    if (
+        analysis_meta.result is not None
+        and analysis_meta.result.intent == "unknown"
+        and not _has_school_info_terms(raw_query)
+    ):
+        return planned("out_of_domain", ["unknown"], "out_of_domain", **common)
+
+    started_at = time.perf_counter()
+    query_for_retrieval = raw_query
+    if not analysis_meta.used and needs_context_rewrite(raw_query, history_text):
+        query_for_retrieval = rewrite_with_context(raw_query, history_text)
+        if query_for_retrieval != raw_query:
+            _log_event(logging.INFO, "followup_query_rewritten", request_id=request_id, rewritten=query_for_retrieval)
+    expanded_query = expand_query(query_for_retrieval)
+    retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta, user_major)
+    if raw_query not in retrieval_queries:
+        retrieval_queries.insert(0, raw_query)
+    semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
+    _mark_stage(stage_timings, "query_expansion", started_at)
+    if mode == "ask":
+        _log_event(
+            logging.INFO, "ask_started", request_id=request_id, raw_query=raw_query,
+            query_for_retrieval=query_for_retrieval, expanded_query=expanded_query,
+            retrieval_queries=retrieval_queries,
+            analysis_intent=None if analysis_meta.result is None else analysis_meta.result.intent,
+        )
+        _log_event(logging.INFO, "ask_session", request_id=request_id, session_id=session_id)
+
+    final_where_filter: Dict = {}
+    requested_major_filter = _requested_major_filter(raw_query)
+    if requested_major_filter is not None:
+        final_where_filter.update(requested_major_filter)
+        _log_event(logging.INFO, "course_scope_from_query", request_id=request_id, filter=requested_major_filter)
+    elif user_major and user_major not in _NO_MAJOR_SENTINELS:
+        college = None
+        if RAG_COLLEGE_SCOPE_ENABLED:
+            try:
+                college = college_of(user_major)
+            except Exception:
+                college = None
+        if college:
+            final_where_filter["$or"] = [{"major": {"$eq": user_major}}, {"college_name": {"$eq": college}}]
+        else:
+            final_where_filter["major"] = {"$eq": user_major}
+    notice_visibility_filter = _notice_visibility_where_filter(user_major)
+    if mode == "ask":
+        _log_event(logging.INFO, "ask_filters", request_id=request_id, filters=final_where_filter)
+
+    retrieval_plan = await _plan_retrieval(
+        raw_query=raw_query, query_for_retrieval=query_for_retrieval,
+        analysis_meta=analysis_meta, request_id=request_id,
+        session_id=session_id, stage_timings=stage_timings,
+    )
+    route = retrieval_plan.route
+    entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
+    started_at = time.perf_counter()
+    date_filter = await run_in_threadpool(extract_date_filter_from_query, semantic_query, today=as_of)
+    _mark_stage(stage_timings, "date_filter_parse", started_at)
+    recent_notice_query, notice_board_filter, retrieval_policy = _resolve_notice_retrieval_controls(
+        raw_query, semantic_query, route,
+    )
+    active_notice_query = _is_active_notice_state_query(raw_query, route)
+    current_operational_notice_terms = _current_operational_notice_terms(raw_query, route)
+    audience_by_query = {query: query_audience(query) for query in retrieval_queries}
+    filters.update({
+        "date": date_filter, "audience_by_query": audience_by_query,
+        "department": requested_major_filter or user_major,
+        "where": final_where_filter, "notice_visibility": notice_visibility_filter,
+    })
+    filters.pop("audience", None)
+    if len(set(audience_by_query.values())) == 1:
+        filters["audience"] = next(iter(audience_by_query.values()))
+    return planned(
+        None, route,
+        "analyzed_retrieval" if analysis_meta.used else "deterministic_retrieval",
+        strategy=retrieval_plan.strategy,
+        ontology_document_keys_by_dataset=retrieval_plan.ontology_document_keys_by_dataset,
+        structured_document_keys_by_dataset=retrieval_plan.structured_document_keys_by_dataset,
+        query_for_retrieval=query_for_retrieval, expanded_query=expanded_query,
+        retrieval_queries=tuple(retrieval_queries), semantic_query=semantic_query,
+        entry_year=entry_year, recent_notice_query=recent_notice_query,
+        notice_board_filter=notice_board_filter, retrieval_policy=retrieval_policy,
+        active_notice_query=active_notice_query,
+        current_operational_notice_terms=current_operational_notice_terms,
+        **common,
+    )
 
 
 def _ontology_candidate_lexical_score(query: str, row: pd.Series) -> float:
@@ -8293,11 +8541,13 @@ async def ask_stream(req: AskRequest, request: Request):
     async def _stream_body():
         _request_as_of.set(temporal_context.as_of.isoformat())
 
-        # 위기 신호는 다른 무엇보다 먼저 본다. 캠퍼스 범위·스몰톡·캐시·정형 조회는
-        # 모두 학사 질문을 전제로 하므로, 자살·성폭력 발화가 그 경로로 새면
-        # "자료를 찾지 못했습니다"가 응답이 된다(감사 2026-08-13에서 관찰).
-        crisis = detect_crisis(raw_query)
-        if crisis is not None:
+        plan = await _plan_query(
+            req=req, raw_query=raw_query, temporal_context=temporal_context,
+            request_id=request_id, session_id=session_id,
+            stage_timings=stage_timings, llm_usage=llm_usage, mode="stream",
+        )
+        crisis = plan.crisis
+        if plan.direct_handler == "crisis_support":
             _mark_stage(stage_timings, "total", request_started_at)
             yield "data: " + json.dumps(
                 {
@@ -8344,15 +8594,9 @@ async def ask_stream(req: AskRequest, request: Request):
             )
             return
 
-        user_major = req.major
-        wise_requested = query_explicitly_requests_wise(raw_query)
-        # WISE is a quarantine-only scope in the v1 product. Keep the
-        # retrieval flag permanently disabled even when the original question
-        # names WISE explicitly; that question is rejected before history,
-        # recommendation, cache, or retrieval can run.
-        allow_wise = False
-        semantic_cache_ns = _semantic_cache_namespace(user_major, allow_wise=allow_wise)
-        if wise_requested:
+        allow_wise = plan.allow_wise
+        semantic_cache_ns = plan.semantic_cache_ns
+        if plan.direct_handler == "campus_out_of_scope":
             answer = out_of_domain_reply(raw_query)
             _mark_stage(stage_timings, "total", request_started_at)
             yield "data: " + json.dumps(
@@ -8417,29 +8661,8 @@ async def ask_stream(req: AskRequest, request: Request):
             )
             return
 
-        deterministic_smalltalk = detect_smalltalk(raw_query)
-        structured_direct_candidate = (
-            is_meal_direct_question(raw_query)
-            or is_schedule_direct_question(raw_query, temporal_context.as_of)
-        )
-        future_publication_candidate = bool(
-            future_publication_years(raw_query, temporal_context.as_of)
-        )
-        # 후속질문은 대화 이력으로 해소되므로(맥락 의존) 이력이 있으면 시맨틱 캐시를 건너뛴다.
-        # raw_query만으로는 직전 맥락이 달라 잘못된 캐시 답을 줄 수 있기 때문(첫 턴만 캐시 대상).
-        history_text = ""
-        if USE_QUERY_ANALYSIS or RAG_SEMANTIC_CACHE_ENABLED:
-            stage_started_at = time.perf_counter()
-            history_text = await run_in_threadpool(get_recent_history_text, session_id)
-            _mark_stage(stage_timings, "history_load", stage_started_at)
-
-        course_recommendation = await run_in_threadpool(
-            _chat_course_recommendation,
-            req,
-            raw_query,
-            history_text,
-        )
-        if course_recommendation is not None:
+        course_recommendation = plan.recommendation
+        if plan.direct_handler == "course_recommendation":
             answer, recommendation_sources, missing_fields = course_recommendation
             serialized_sources = [source.model_dump() for source in recommendation_sources]
             yield "data: " + json.dumps(
@@ -8478,46 +8701,35 @@ async def ask_stream(req: AskRequest, request: Request):
             )
             return
 
-        if (
-            RAG_SEMANTIC_CACHE_ENABLED
-            and req.as_of is None
-            and not (history_text or "").strip()
-            and deterministic_smalltalk is None
-            and not structured_direct_candidate
-            and not future_publication_candidate
-            and not _is_active_notice_state_query(raw_query)
-        ):
-            stage_started_at = time.perf_counter()
-            hit = await run_in_threadpool(semantic_cache.get, raw_query, semantic_cache_ns)
-            _mark_stage(stage_timings, "semantic_cache_lookup", stage_started_at)
-            if hit is not None:
-                _mark_stage(stage_timings, "total", request_started_at)
-                yield "data: " + json.dumps({"type": "metadata", "request_id": request_id, "sources": hit.get("sources", []), "citations": hit.get("citations", ""), "route": hit.get("route", []), "fallback_triggered": False}, ensure_ascii=False) + "\n\n"
-                yield "data: " + json.dumps({"type": "text", "content": hit["answer"]}, ensure_ascii=False) + "\n\n"
-                if hit.get("suggested_questions"):
-                    yield "data: " + json.dumps({"type": "suggestions", "questions": hit["suggested_questions"]}, ensure_ascii=False) + "\n\n"
-                if hit.get("grounded") is False:
-                    yield "data: " + json.dumps({"type": "grounding", "grounded": False, "score": hit.get("grounding_score"), "reason": None}, ensure_ascii=False) + "\n\n"
-                await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"])
-                _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
-                yield _completion_stream_event(
-                    request_id=request_id,
-                    grounded=hit.get("grounded"),
-                    grounding_score=hit.get("grounding_score"),
-                    relevance_score=hit.get("relevance_score"),
-                    verification_status=_cached_verification_status(hit),
-                    suggested_questions=hit.get("suggested_questions", []),
-                    fallback_reason=None,
-                    sources=hit.get("sources", []),
-                    suggested_question_details=hit.get("suggested_question_details", []),
-                    resolved_intents=hit.get("resolved_intents", hit.get("route", [])),
-                )
-                return
+        if plan.direct_handler == "semantic_cache":
+            hit = plan.cache_hit
+            _mark_stage(stage_timings, "total", request_started_at)
+            yield "data: " + json.dumps({"type": "metadata", "request_id": request_id, "sources": hit.get("sources", []), "citations": hit.get("citations", ""), "route": hit.get("route", []), "fallback_triggered": False}, ensure_ascii=False) + "\n\n"
+            yield "data: " + json.dumps({"type": "text", "content": hit["answer"]}, ensure_ascii=False) + "\n\n"
+            if hit.get("suggested_questions"):
+                yield "data: " + json.dumps({"type": "suggestions", "questions": hit["suggested_questions"]}, ensure_ascii=False) + "\n\n"
+            if hit.get("grounded") is False:
+                yield "data: " + json.dumps({"type": "grounding", "grounded": False, "score": hit.get("grounding_score"), "reason": None}, ensure_ascii=False) + "\n\n"
+            await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"])
+            _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
+            yield _completion_stream_event(
+                request_id=request_id,
+                grounded=hit.get("grounded"),
+                grounding_score=hit.get("grounding_score"),
+                relevance_score=hit.get("relevance_score"),
+                verification_status=_cached_verification_status(hit),
+                suggested_questions=hit.get("suggested_questions", []),
+                fallback_reason=None,
+                sources=hit.get("sources", []),
+                suggested_question_details=hit.get("suggested_question_details", []),
+                resolved_intents=hit.get("resolved_intents", hit.get("route", [])),
+            )
+            return
 
         # 인사·감사·정체성 발화는 검색이 필요 없다. RAG로 보내면 "자료를 찾지 못했습니다"로
         # 답하게 되는데(로그에서 "안녕" 34회가 그랬다), 첫인사에 실패 메시지를 주는 셈이다.
-        smalltalk = deterministic_smalltalk
-        if smalltalk is not None:
+        smalltalk = plan.smalltalk
+        if plan.direct_handler == "smalltalk":
             _mark_stage(stage_timings, "total", request_started_at)
             yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['smalltalk'], 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'text', 'content': smalltalk.answer}, ensure_ascii=False)}\n\n"
@@ -8542,12 +8754,8 @@ async def ask_stream(req: AskRequest, request: Request):
             )
             return
 
-        future_unannounced = await run_in_threadpool(
-            _try_future_unannounced_answer,
-            raw_query,
-            temporal_context.as_of,
-        )
-        if future_unannounced is not None:
+        future_unannounced = plan.future_unannounced
+        if plan.direct_handler == "future_unannounced":
             answer = future_unannounced.answer
             route = ["notices"]
             _mark_stage(stage_timings, "total", request_started_at)
@@ -8583,12 +8791,8 @@ async def ask_stream(req: AskRequest, request: Request):
 
         # 날짜·기간형 질문은 정형 표를 먼저 조회한다. 검색 결과가 잘못된 답을 자신 있게
         # 고른 뒤에는 폴백이 발동하지 않으므로, 이 순서가 정확성 보장의 핵심이다.
-        direct = await run_in_threadpool(
-            _try_direct_answer,
-            raw_query,
-            temporal_context.as_of,
-        )
-        if direct is not None:
+        direct = plan.direct_answer
+        if plan.direct_handler == "structured_direct":
             direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
             direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
             direct_fallback_reason = _direct_answer_fallback_reason(direct)
@@ -8635,34 +8839,9 @@ async def ask_stream(req: AskRequest, request: Request):
             )
             return
 
-        # 검색어 교정은 질의 분석보다 먼저 적용한다. 검색 단계에서만 "긱사"를
-        # "기숙사"로 바꾸면 분석기가 먼저 모호한 질문으로 판정해 검색까지 도달하지
-        # 못한다. 사용자에게 보여 주고 로그에 남기는 원문은 그대로 보존한다.
-        analysis_query = _query_for_analysis(raw_query)
-        analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
-        if USE_QUERY_ANALYSIS and not _can_skip_query_analysis(
-            raw_query,
-            analysis_query,
-            history_text,
-        ):
-            # 후속 질문("그럼 신청 기간은?")의 대명사/생략을 해소하기 위해
-            # 위에서 받아둔 최근 대화 이력을 함께 전달해 독립형 질문으로 재작성하게 한다.
-            stage_started_at = time.perf_counter()
-            analysis_result = await analyze_query(
-                analysis_query,
-                history_text,
-                temporal_context,
-                usage_collector=llm_usage,
-            )
-            _mark_stage(stage_timings, "query_analysis", stage_started_at)
-            analysis_meta = _analysis_to_meta(analysis_result, failed=analysis_result is None)
-
-        clarification_fields = _first_turn_clarification_fields(
-            analysis_query,
-            analysis_meta,
-            history_text,
-        )
-        if clarification_fields:
+        analysis_meta = plan.analysis_meta
+        clarification_fields = plan.clarification_fields
+        if plan.direct_handler == "clarification":
             clarification_answer = _build_clarification_answer(clarification_fields)
             _mark_stage(stage_timings, "total", request_started_at)
             yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_CLARIFICATION_NEEDED}, ensure_ascii=False)}\n\n"
@@ -8693,11 +8872,7 @@ async def ask_stream(req: AskRequest, request: Request):
             return
 
         # 1. 일반 대화 처리 (검색 불필요한 경우)
-        if (
-            analysis_meta.result is not None
-            and analysis_meta.result.intent == "unknown"
-            and not _has_school_info_terms(raw_query)
-        ):
+        if plan.direct_handler == "out_of_domain":
             # 근거가 하나도 없는 상태로 생성하지 않는다. 예전에는 여기서 LLM에게
             # "자연스럽고 짧게 답하세요"라고만 일러 보내서, 학교와 무관한 질문에
             # 모델이 자기 지식으로 답했다("샤갈은 프랑스의 화가이자 …").
@@ -8740,82 +8915,24 @@ async def ask_stream(req: AskRequest, request: Request):
             )
             return
 
-        # 2. RAG 검색 프로세스
-        stage_started_at = time.perf_counter()
-        # LLM 질의 분석이 꺼졌거나 실패했을 때를 위한 결정적 안전망:
-        # "자세히 알려줘"·"거기 오늘 열어?"처럼 지시어만 남은 발화는 직전 질문을 덧붙인다.
-        query_for_retrieval = raw_query
-        if not analysis_meta.used and needs_context_rewrite(raw_query, history_text):
-            query_for_retrieval = rewrite_with_context(raw_query, history_text)
-            if query_for_retrieval != raw_query:
-                _log_event(
-                    logging.INFO, "followup_query_rewritten",
-                    request_id=request_id, rewritten=query_for_retrieval,
-                )
-        expanded_query = expand_query(query_for_retrieval)
-        retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta, req.major)
-        if raw_query not in retrieval_queries:
-            retrieval_queries.insert(0, raw_query)
-        semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
-        _mark_stage(stage_timings, "query_expansion", stage_started_at)
-
-        final_where_filter = {}
-        # 질문이 학과를 명시했다면 본인 전공보다 그쪽이 우선이다 — 통계학과 학생이
-        # "컴퓨터·AI학부 교과과정"을 물으면 컴퓨터·AI학부를 찾아야 한다.
-        requested_major_filter = _requested_major_filter(raw_query)
-        if requested_major_filter is not None:
-            final_where_filter.update(requested_major_filter)
-            _log_event(
-                logging.INFO,
-                "course_scope_from_query",
-                request_id=request_id,
-                filter=requested_major_filter,
-            )
-        # 백엔드는 학과 미지정 시 null을 보낸다("Unknown"/"Default"는 보내지 않지만 방어적으로 함께 제외).
-        elif user_major and user_major not in _NO_MAJOR_SENTINELS:
-            college = None
-            if RAG_COLLEGE_SCOPE_ENABLED:
-                try:
-                    college = college_of(user_major)
-                except Exception:
-                    college = None
-            if college:
-                final_where_filter["$or"] = [{"major": {"$eq": user_major}}, {"college_name": {"$eq": college}}]
-            else:
-                final_where_filter["major"] = {"$eq": user_major}
-
-        notice_visibility_filter = _notice_visibility_where_filter(user_major)
-
-        retrieval_plan = await _plan_retrieval(
-            raw_query=raw_query,
-            query_for_retrieval=query_for_retrieval,
-            analysis_meta=analysis_meta,
-            request_id=request_id,
-            session_id=session_id,
-            stage_timings=stage_timings,
-        )
-        route = retrieval_plan.route
-        ontology_document_keys_by_dataset = retrieval_plan.ontology_document_keys_by_dataset
-        structured_document_keys_by_dataset = retrieval_plan.structured_document_keys_by_dataset
-
-        entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
-        stage_started_at = time.perf_counter()
-        date_filter = await run_in_threadpool(
-            extract_date_filter_from_query,
-            semantic_query,
-            today=temporal_context.as_of,
-        )
-        _mark_stage(stage_timings, "date_filter_parse", stage_started_at)
+        query_for_retrieval = plan.query_for_retrieval
+        expanded_query = plan.expanded_query
+        retrieval_queries = list(plan.retrieval_queries)
+        semantic_query = plan.semantic_query
+        final_where_filter = plan.filters["where"]
+        notice_visibility_filter = plan.filters["notice_visibility"]
+        route = plan.route
+        ontology_document_keys_by_dataset = plan.ontology_document_keys_by_dataset
+        structured_document_keys_by_dataset = plan.structured_document_keys_by_dataset
+        entry_year = plan.entry_year
+        date_filter = plan.filters["date"]
         date_filter_applied = date_filter is not None
         date_filter_relaxed = False
-        recent_notice_query, notice_board_filter, retrieval_policy = _resolve_notice_retrieval_controls(
-            raw_query,
-            semantic_query,
-            route,
-        )
-        active_notice_query = _is_active_notice_state_query(raw_query, route)
-        current_operational_notice_terms = _current_operational_notice_terms(raw_query, route)
-
+        recent_notice_query = plan.recent_notice_query
+        notice_board_filter = plan.notice_board_filter
+        retrieval_policy = plan.retrieval_policy
+        active_notice_query = plan.active_notice_query
+        current_operational_notice_terms = plan.current_operational_notice_terms
         stage_started_at = time.perf_counter()
         frames, date_filter_eliminated_any, unavailable_datasets = await _retrieve_frames_for_queries(
             route=route, queries=retrieval_queries, final_where_filter=final_where_filter,
@@ -9285,9 +9402,13 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     llm_usage: list[dict] = []
     request_started_at = time.perf_counter()
 
-    # 스트리밍 경로와 같은 순서 — 위기 신호가 학사 경로로 새지 않게 가장 먼저 본다.
-    crisis = detect_crisis(raw_query)
-    if crisis is not None:
+    plan = await _plan_query(
+        req=req, raw_query=raw_query, temporal_context=temporal_context,
+        request_id=request_id, session_id=session_id,
+        stage_timings=stage_timings, llm_usage=llm_usage, mode="ask",
+    )
+    crisis = plan.crisis
+    if plan.direct_handler == "crisis_support":
         _mark_stage(stage_timings, "total", request_started_at)
         await run_in_threadpool(
             _save_rag_evaluation_log,
@@ -9317,13 +9438,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=None,
         )
 
-    user_major = req.major
-    wise_requested = query_explicitly_requests_wise(raw_query)
-    # Keep WISE out of every product route. Explicit WISE wording is a
-    # deterministic out-of-scope signal, not permission to retrieve WISE data.
-    allow_wise = False
-    semantic_cache_ns = _semantic_cache_namespace(user_major, allow_wise=allow_wise)
-    if wise_requested:
+    allow_wise = plan.allow_wise
+    semantic_cache_ns = plan.semantic_cache_ns
+    if plan.direct_handler == "campus_out_of_scope":
         answer = out_of_domain_reply(raw_query)
         _mark_stage(stage_timings, "total", request_started_at)
         await run_in_threadpool(
@@ -9374,28 +9491,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
         )
 
-    deterministic_smalltalk = detect_smalltalk(raw_query)
-    structured_direct_candidate = (
-        is_meal_direct_question(raw_query)
-        or is_schedule_direct_question(raw_query, temporal_context.as_of)
-    )
-    future_publication_candidate = bool(
-        future_publication_years(raw_query, temporal_context.as_of)
-    )
-    # 후속질문은 대화 이력으로 해소되므로(맥락 의존) 이력이 있으면 시맨틱 캐시를 건너뛴다(첫 턴만 대상).
-    history_text = ""
-    if USE_QUERY_ANALYSIS or RAG_SEMANTIC_CACHE_ENABLED:
-        stage_started_at = time.perf_counter()
-        history_text = await run_in_threadpool(get_recent_history_text, session_id)
-        _mark_stage(stage_timings, "history_load", stage_started_at)
-
-    course_recommendation = await run_in_threadpool(
-        _chat_course_recommendation,
-        req,
-        raw_query,
-        history_text,
-    )
-    if course_recommendation is not None:
+    course_recommendation = plan.recommendation
+    if plan.direct_handler == "course_recommendation":
         answer, recommendation_sources, missing_fields = course_recommendation
         await run_in_threadpool(append_manual_history, session_id, raw_query, answer)
         _mark_stage(stage_timings, "total", request_started_at)
@@ -9420,45 +9517,34 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=None,
         )
 
-    if (
-        RAG_SEMANTIC_CACHE_ENABLED
-        and req.as_of is None
-        and not (history_text or "").strip()
-        and deterministic_smalltalk is None
-        and not structured_direct_candidate
-        and not future_publication_candidate
-        and not _is_active_notice_state_query(raw_query)
-    ):
-        stage_started_at = time.perf_counter()
-        hit = await run_in_threadpool(semantic_cache.get, raw_query, semantic_cache_ns)
-        _mark_stage(stage_timings, "semantic_cache_lookup", stage_started_at)
-        if hit is not None:
-            _mark_stage(stage_timings, "total", request_started_at)
-            _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
-            await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"])
-            return AskResponse(
-                request_id=request_id,
-                answer=hit["answer"],
-                citations=hit.get("citations", ""),
-                route=hit.get("route", []),
-                resolved_intents=hit.get("resolved_intents", hit.get("route", [])),
-                sources=[SourceChunk(**s) for s in hit.get("sources", [])],
-                suggested_questions=hit.get("suggested_questions", []),
-                suggested_question_details=[
-                    SuggestedQuestionDetail(**detail)
-                    for detail in hit.get("suggested_question_details", [])
-                ],
-                grounded=hit.get("grounded"),
-                grounding_score=hit.get("grounding_score"),
-                relevance_score=hit.get("relevance_score"),
-                verification_status=_cached_verification_status(hit),
-                fallback_triggered=False,
-                fallback_reason=None,
-            )
+    if plan.direct_handler == "semantic_cache":
+        hit = plan.cache_hit
+        _mark_stage(stage_timings, "total", request_started_at)
+        _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
+        await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"])
+        return AskResponse(
+            request_id=request_id,
+            answer=hit["answer"],
+            citations=hit.get("citations", ""),
+            route=hit.get("route", []),
+            resolved_intents=hit.get("resolved_intents", hit.get("route", [])),
+            sources=[SourceChunk(**s) for s in hit.get("sources", [])],
+            suggested_questions=hit.get("suggested_questions", []),
+            suggested_question_details=[
+                SuggestedQuestionDetail(**detail)
+                for detail in hit.get("suggested_question_details", [])
+            ],
+            grounded=hit.get("grounded"),
+            grounding_score=hit.get("grounding_score"),
+            relevance_score=hit.get("relevance_score"),
+            verification_status=_cached_verification_status(hit),
+            fallback_triggered=False,
+            fallback_reason=None,
+        )
 
     # 스트리밍 경로와 동일하게 스몰톡은 검색 전에 처리한다.
-    smalltalk = deterministic_smalltalk
-    if smalltalk is not None:
+    smalltalk = plan.smalltalk
+    if plan.direct_handler == "smalltalk":
         _mark_stage(stage_timings, "total", request_started_at)
         await run_in_threadpool(
             _save_rag_evaluation_log,
@@ -9481,12 +9567,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=None,
         )
 
-    future_unannounced = await run_in_threadpool(
-        _try_future_unannounced_answer,
-        raw_query,
-        temporal_context.as_of,
-    )
-    if future_unannounced is not None:
+    future_unannounced = plan.future_unannounced
+    if plan.direct_handler == "future_unannounced":
         answer = future_unannounced.answer
         route = ["notices"]
         _mark_stage(stage_timings, "total", request_started_at)
@@ -9520,12 +9602,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=FALLBACK_REASON_FUTURE_UNANNOUNCED,
         )
 
-    direct = await run_in_threadpool(
-        _try_direct_answer,
-        raw_query,
-        temporal_context.as_of,
-    )
-    if direct is not None:
+    direct = plan.direct_answer
+    if plan.direct_handler == "structured_direct":
         direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
         direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
         direct_fallback_reason = _direct_answer_fallback_reason(direct)
@@ -9569,32 +9647,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=direct_fallback_reason,
         )
 
-    # 스트리밍 경로와 동일하게, 알려진 오타·구어체를 질의 분석 전에 교정한다.
-    # 원문은 응답·로그·후속 검색 후보에 계속 보존된다.
-    analysis_query = _query_for_analysis(raw_query)
-    analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
-    if USE_QUERY_ANALYSIS and not _can_skip_query_analysis(
-        raw_query,
-        analysis_query,
-        history_text,
-    ):
-        # 후속 질문의 대명사/생략 해소를 위해 위에서 받아둔 최근 대화 이력을 함께 전달(스트리밍 경로와 동일)
-        stage_started_at = time.perf_counter()
-        analysis_result = await analyze_query(
-            analysis_query,
-            history_text,
-            temporal_context,
-            usage_collector=llm_usage,
-        )
-        _mark_stage(stage_timings, "query_analysis", stage_started_at)
-        analysis_meta = _analysis_to_meta(analysis_result, failed=analysis_result is None)
-
-    clarification_fields = _first_turn_clarification_fields(
-        analysis_query,
-        analysis_meta,
-        history_text,
-    )
-    if clarification_fields:
+    analysis_meta = plan.analysis_meta
+    clarification_fields = plan.clarification_fields
+    if plan.direct_handler == "clarification":
         clarification_answer = _build_clarification_answer(clarification_fields)
         _mark_stage(stage_timings, "total", request_started_at)
         await run_in_threadpool(
@@ -9636,11 +9691,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=FALLBACK_REASON_CLARIFICATION_NEEDED,
         )
 
-    if (
-        analysis_meta.result is not None
-        and analysis_meta.result.intent == "unknown"
-        and not _has_school_info_terms(raw_query)
-    ):
+    if plan.direct_handler == "out_of_domain":
         # 스트리밍 경로와 같은 규칙 — 근거 없이 생성하지 않는다.
         answer = out_of_domain_reply(raw_query)
         _log_event(
@@ -9689,92 +9740,24 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             fallback_reason=FALLBACK_REASON_OUT_OF_DOMAIN,
         )
 
-    stage_started_at = time.perf_counter()
-    # 스트리밍 경로와 동일한 후속 발화 보정.
-    query_for_retrieval = raw_query
-    if not analysis_meta.used and needs_context_rewrite(raw_query, history_text):
-        query_for_retrieval = rewrite_with_context(raw_query, history_text)
-        if query_for_retrieval != raw_query:
-            _log_event(
-                logging.INFO, "followup_query_rewritten",
-                request_id=request_id, rewritten=query_for_retrieval,
-            )
-    expanded_query = expand_query(query_for_retrieval)
-    retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta, req.major)
-    if raw_query not in retrieval_queries:
-        retrieval_queries.insert(0, raw_query)
-    semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
-    _mark_stage(stage_timings, "query_expansion", stage_started_at)
-    _log_event(
-        logging.INFO,
-        "ask_started",
-        request_id=request_id,
-        raw_query=raw_query,
-        query_for_retrieval=query_for_retrieval,
-        expanded_query=expanded_query,
-        retrieval_queries=retrieval_queries,
-        analysis_intent=None if analysis_meta.result is None else analysis_meta.result.intent,
-    )
-
-    # 로그에 처리된 질문과 세션 ID를 출력하여 디버깅을 돕습니다.
-    _log_event(logging.INFO, "ask_session", request_id=request_id, session_id=session_id)
-
-    final_where_filter: Dict = {}
-    # 질문이 학과를 명시했다면 본인 전공보다 그쪽이 우선이다(스트리밍 경로와 동일 규칙).
-    requested_major_filter = _requested_major_filter(raw_query)
-    if requested_major_filter is not None:
-        final_where_filter.update(requested_major_filter)
-        _log_event(
-            logging.INFO,
-            "course_scope_from_query",
-            request_id=request_id,
-            filter=requested_major_filter,
-        )
-    # 백엔드는 학과 미지정 시 null을 보낸다("Unknown"/"Default"는 보내지 않지만 방어적으로 함께 제외).
-    elif user_major and user_major not in _NO_MAJOR_SENTINELS:
-        college = None
-        if RAG_COLLEGE_SCOPE_ENABLED:
-            try:
-                college = college_of(user_major)
-            except Exception:
-                college = None
-        if college:
-            final_where_filter["$or"] = [{"major": {"$eq": user_major}}, {"college_name": {"$eq": college}}]
-        else:
-            final_where_filter["major"] = {"$eq": user_major}
-
-    notice_visibility_filter = _notice_visibility_where_filter(user_major)
-
-    _log_event(logging.INFO, "ask_filters", request_id=request_id, filters=final_where_filter)
-    retrieval_plan = await _plan_retrieval(
-        raw_query=raw_query,
-        query_for_retrieval=query_for_retrieval,
-        analysis_meta=analysis_meta,
-        request_id=request_id,
-        session_id=session_id,
-        stage_timings=stage_timings,
-    )
-    route = retrieval_plan.route
-    ontology_document_keys_by_dataset = retrieval_plan.ontology_document_keys_by_dataset
-    structured_document_keys_by_dataset = retrieval_plan.structured_document_keys_by_dataset
-    entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
-    stage_started_at = time.perf_counter()
-    date_filter = await run_in_threadpool(
-        extract_date_filter_from_query,
-        semantic_query,
-        today=temporal_context.as_of,
-    )
-    _mark_stage(stage_timings, "date_filter_parse", stage_started_at)
+    query_for_retrieval = plan.query_for_retrieval
+    expanded_query = plan.expanded_query
+    retrieval_queries = list(plan.retrieval_queries)
+    semantic_query = plan.semantic_query
+    final_where_filter = plan.filters["where"]
+    notice_visibility_filter = plan.filters["notice_visibility"]
+    route = plan.route
+    ontology_document_keys_by_dataset = plan.ontology_document_keys_by_dataset
+    structured_document_keys_by_dataset = plan.structured_document_keys_by_dataset
+    entry_year = plan.entry_year
+    date_filter = plan.filters["date"]
     date_filter_applied = date_filter is not None
     date_filter_relaxed = False
-    recent_notice_query, notice_board_filter, retrieval_policy = _resolve_notice_retrieval_controls(
-        raw_query,
-        semantic_query,
-        route,
-    )
-    active_notice_query = _is_active_notice_state_query(raw_query, route)
-    current_operational_notice_terms = _current_operational_notice_terms(raw_query, route)
-
+    recent_notice_query = plan.recent_notice_query
+    notice_board_filter = plan.notice_board_filter
+    retrieval_policy = plan.retrieval_policy
+    active_notice_query = plan.active_notice_query
+    current_operational_notice_terms = plan.current_operational_notice_terms
     stage_started_at = time.perf_counter()
     frames, date_filter_eliminated_any, unavailable_datasets = await _retrieve_frames_for_queries(
         route=route,

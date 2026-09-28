@@ -91,9 +91,11 @@ def test_current_cohort_rules_preserve_notice_companion_and_analysis_intent():
 
 
 def test_both_endpoints_use_the_shared_revision_checked_retrieval_plan():
+    planner = inspect.getsource(rag_service._plan_query)
+    assert "await _plan_retrieval(" in planner
     for endpoint in (rag_service.ask, rag_service.ask_stream):
         source = inspect.getsource(endpoint)
-        assert "await _plan_retrieval(" in source
+        assert "await _plan_query(" in source
         assert "structured_document_keys_by_dataset=structured_document_keys_by_dataset" in source
 
 
