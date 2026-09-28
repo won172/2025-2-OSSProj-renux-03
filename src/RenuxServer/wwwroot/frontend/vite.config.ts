@@ -45,8 +45,20 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           navigateFallback: '/index.html',
-          globPatterns: ['**/*.{js,css,html,png,svg,woff2,otf}'],
+          globPatterns: ['**/*.{js,css,html,png,svg}'],
+          globIgnores: [
+            '**/assets/dongddoki-logo-*.png',
+            '**/assets/{admin*,Admin*,DashboardPage*,ReviewPage*,ContentPage*,ChatLogPage*,FeedbackPage*,UsersPage*,SystemPage*,DepartmentAdminPage*,UniversityOnly*,TrendChart*,QuickFaqModal*,Modal-*,ui-*,format-*}.{js,css}',
+          ],
           runtimeCaching: [
+            {
+              urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/assets/'),
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'dongttok-assets',
+                expiration: { maxEntries: 80, maxAgeSeconds: 30 * 24 * 60 * 60 },
+              },
+            },
             {
               urlPattern: ({ request }) => request.mode === 'navigate',
               handler: 'NetworkFirst',
