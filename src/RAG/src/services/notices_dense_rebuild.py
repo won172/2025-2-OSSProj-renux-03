@@ -22,7 +22,12 @@ import pandas as pd
 
 from src import config
 from src.models.embedding import encode_queries, encode_texts
-from src.pipelines.ingest import DATASET_ARTIFACTS
+from src.pipelines.ingest import (
+    DATASET_ARTIFACTS,
+    EMBEDDING_INPUT_FIELD_COLUMN,
+    EMBEDDING_INPUT_HASH_COLUMN,
+    _embedding_input_hash,
+)
 from src.services.maintenance_lock import maintenance_lock
 from src.vectorstore.chroma_client import get_client, get_collection
 from src.vectorstore.collection_pointer import (
@@ -398,11 +403,17 @@ def _metadata_value(value: Any) -> str | int | float | bool:
 def _batch_payload(frame: pd.DataFrame) -> tuple[list[str], list[str], list[dict[str, object]]]:
     ids = frame["chunk_id"].astype(str).tolist()
     documents = frame["chunk_text"].astype(str).tolist()
-    metadata_frame = frame.drop(columns=["chunk_text"])
+    metadata_frame = frame.drop(
+        columns=["chunk_text", EMBEDDING_INPUT_HASH_COLUMN, EMBEDDING_INPUT_FIELD_COLUMN],
+        errors="ignore",
+    )
     metadatas = [
         {str(key): _metadata_value(value) for key, value in row.items()}
         for row in metadata_frame.to_dict(orient="records")
     ]
+    for document, metadata in zip(documents, metadatas):
+        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "chunk_text"
+        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(document, field="chunk_text")
     return ids, documents, metadatas
 
 

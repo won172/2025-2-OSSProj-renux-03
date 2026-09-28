@@ -28,7 +28,12 @@ import pandas as pd
 
 from src import config
 from src.models.embedding import encode_queries, encode_texts
-from src.pipelines.ingest import DATASET_ARTIFACTS
+from src.pipelines.ingest import (
+    DATASET_ARTIFACTS,
+    EMBEDDING_INPUT_FIELD_COLUMN,
+    EMBEDDING_INPUT_HASH_COLUMN,
+    _embedding_input_hash,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -538,8 +543,14 @@ def _batch_payload(frame: pd.DataFrame) -> tuple[list[str], list[str], list[dict
     documents = frame["chunk_text"].astype(str).tolist()
     metadatas = [
         {str(key): _metadata_value(value) for key, value in row.items()}
-        for row in frame.drop(columns=["chunk_text"]).to_dict(orient="records")
+        for row in frame.drop(
+            columns=["chunk_text", EMBEDDING_INPUT_HASH_COLUMN, EMBEDDING_INPUT_FIELD_COLUMN],
+            errors="ignore",
+        ).to_dict(orient="records")
     ]
+    for document, metadata in zip(documents, metadatas):
+        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "chunk_text"
+        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(document, field="chunk_text")
     return ids, documents, metadatas
 
 
