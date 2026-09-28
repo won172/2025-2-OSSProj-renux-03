@@ -115,6 +115,10 @@ namespace RenuxServer.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("parent_question_id");
 
+                    b.Property<double?>("RelevanceScore")
+                        .HasColumnType("double precision")
+                        .HasColumnName("relevance_score");
+
                     b.Property<string>("RequestId")
                         .HasColumnType("text")
                         .HasColumnName("request_id");
@@ -126,6 +130,10 @@ namespace RenuxServer.Migrations
                     b.Property<string>("SuggestedQuestionsJson")
                         .HasColumnType("text")
                         .HasColumnName("suggested_questions_json");
+
+                    b.Property<string>("VerificationStatus")
+                        .HasColumnType("text")
+                        .HasColumnName("verification_status");
 
                     b.Property<DateTime?>("VersionCreatedTime")
                         .HasColumnType("timestamp with time zone")

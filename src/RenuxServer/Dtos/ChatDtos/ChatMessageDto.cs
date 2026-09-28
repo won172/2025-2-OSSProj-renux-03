@@ -21,6 +21,10 @@ public class ChatMessageDto
 
     public double? GroundingScore { get; init; }
 
+    public string? VerificationStatus { get; init; }
+
+    public double? RelevanceScore { get; init; }
+
     public bool IsFallback { get; init; }
 
     public string? FallbackReason { get; init; }

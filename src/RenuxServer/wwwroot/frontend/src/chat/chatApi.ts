@@ -1,6 +1,6 @@
 import { apiFetch } from '../api/client.ts'
 import { withGuestTokenHeader } from './guestToken.ts'
-import type { ChatViewMessage } from './chatState'
+import type { ChatVerificationStatus, ChatViewMessage } from './chatState'
 import type { HomeBriefing } from '../types/briefing'
 import type { ActiveChat } from '../types/chat'
 import type { Department } from '../types/organization'
@@ -24,11 +24,30 @@ export const startChat = (org: Department, title: string, guestToken?: string) =
     json: { org, title },
   })
 
+type ChatHistoryMessage = Omit<ChatViewMessage, 'verificationStatus' | 'relevanceScore'> & {
+  verificationStatus?: unknown
+  relevanceScore?: unknown
+}
+
+const isVerificationStatus = (value: unknown): value is ChatVerificationStatus =>
+  value === 'passed' || value === 'failed' || value === 'unavailable' || value === 'not_required'
+
+export const mapChatHistoryMessage = (message: ChatHistoryMessage): ChatViewMessage => {
+  const { verificationStatus, relevanceScore, ...rest } = message
+  return {
+    ...rest,
+    verificationStatus: isVerificationStatus(verificationStatus) ? verificationStatus : undefined,
+    relevanceScore: typeof relevanceScore === 'number' && Number.isFinite(relevanceScore)
+      ? relevanceScore
+      : relevanceScore === null ? null : undefined,
+  }
+}
+
 export const loadChatMessages = (chatId: string, lastTime: string) =>
-  apiFetch<ChatViewMessage[]>('/chat/load', {
+  apiFetch<ChatHistoryMessage[]>('/chat/load', {
     method: 'POST',
     json: { chatId, lastTime },
-  })
+  }).then((messages) => Array.isArray(messages) ? messages.map(mapChatHistoryMessage) : [])
 
 export const fetchFollowups = (requestId: string, guestToken?: string, signal?: AbortSignal) =>
   apiFetch<{ questions: string[] }>('/chat/followups', {

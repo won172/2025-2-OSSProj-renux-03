@@ -115,6 +115,8 @@ public class ServerDbContext : DbContext
         message.Property(c => c.SuggestedQuestionsJson).HasColumnName("suggested_questions_json");
         message.Property(c => c.Grounded).HasColumnName("grounded");
         message.Property(c => c.GroundingScore).HasColumnName("grounding_score");
+        message.Property(c => c.VerificationStatus).HasColumnName("verification_status");
+        message.Property(c => c.RelevanceScore).HasColumnName("relevance_score");
         message.Property(c => c.IsFallback).HasColumnName("is_fallback").HasDefaultValue(false);
         message.Property(c => c.FallbackReason).HasColumnName("fallback_reason");
 
