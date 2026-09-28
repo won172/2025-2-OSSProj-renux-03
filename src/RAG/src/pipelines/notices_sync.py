@@ -3,14 +3,31 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import pandas as pd
 
-from src.config import RAG_NOTICES_INCREMENTAL_EMBED
+from src.config import (
+    RAG_NOTICE_DELETION_CHECK_BUDGET,
+    RAG_NOTICE_DELETION_CHECK_DELAY_SECONDS,
+    RAG_NOTICE_DELETION_CHECK_MAX_CONSECUTIVE_UNKNOWN,
+    RAG_NOTICE_DELETION_CHECK_MAX_DELETIONS,
+    RAG_NOTICE_DELETION_CHECK_MAX_FRACTION,
+    RAG_NOTICE_DELETION_CHECK_MAX_SECONDS,
+    RAG_NOTICE_DELETION_CHECK_MAX_UNKNOWN,
+    RAG_NOTICE_DELETION_CHECK_MIN_SAMPLE,
+    RAG_NOTICE_DELETION_CHECK_MODE,
+    RAG_NOTICE_DELETION_CHECK_STRIKE_MAX_AGE_DAYS,
+    RAG_NOTICE_DELETION_CHECK_WINDOW_MONTHS,
+    RAG_NOTICES_INCREMENTAL_EMBED,
+    RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS,
+)
 from src.crawlers.dongguk_notices import BOARD_CODES
 from src.database import (
     Chunk,
@@ -56,6 +73,7 @@ NOTICE_REQUIRED_FIELDS = {
     "board_code": "게시판 코드가 비어 있습니다.",
 }
 BOARD_NAMES_BY_CODE = {code: name for name, code in BOARD_CODES.items()}
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -69,6 +87,9 @@ class NoticeCollectResult:
     documents_deleted: int
     documents_failed: int
     crawl_incomplete_boards: list[str]
+    seen_source_ids: list[str] = field(default_factory=list)
+    missing_detection_applied: bool = False
+    deletion_check: dict[str, Any] | None = None
 
 
 def _safe_filename(value: str) -> str:
@@ -838,6 +859,8 @@ def collect_notice_documents(
             documents_deleted=documents_deleted,
             documents_failed=documents_failed,
             crawl_incomplete_boards=crawl_incomplete_boards,
+            seen_source_ids=sorted(seen_source_ids),
+            missing_detection_applied=effective_missing_detection,
         )
     except Exception as exc:
         session.rollback()
@@ -981,8 +1004,498 @@ def rebuild_notices_from_source_documents() -> tuple[pd.DataFrame, object, objec
     return _persist_replacing_collection("notices", NOTICE_COLLECTION, frame)
 
 
+# ===== 정기 증분 수집의 삭제 감지 =====
+# 증분 수집은 게시판 앞쪽 페이지만 읽으므로 사이트에서 지워진 글(상세 URL이 목록
+# 페이지로 302)이 활성으로 남는다. 아래 확인은 증분 목록에 보이지 않은 최근 활성
+# 공지의 상세 URL을 제한된 예산(요청 수·벽시계 시간) 안에서 직접 확인한다.
+#
+# 삭제 확정은 기존 경로를 그대로 쓴다: SourceDocument.status를 "deleted"로 바꾸고
+# 그 document_key를 sync_notices의 target_keys에 넣으면
+# apply_notice_normalized_documents → _apply_hidden_notices가 Notice 행과 SQLite
+# 청크·Chroma 벡터를 지우고, refresh_notice_artifacts가 parquet/TF-IDF를 재생성하며,
+# _finalize_notice_derivatives가 corpus_revision과 파생 DAG를 갱신한다.
+#
+# 누적 표식(probe strike)은 스키마 변경 없이 IngestionRun 진단에 둔다:
+# ``diagnostics_json["deletion_check"]["probe_strike_ledger"]``는
+# ``{document_id: {"run_id", "at", "document_key", "source_url"}}``이며 매 실행이
+# 직전 원장을 이어받아 갱신한다. 전체 수집 경로의 SourceDocument.miss_count는
+# 읽지도 쓰지도 않는다(고정글 유예 등 기존 의미 유지). 삭제는 직전 원장에 같은
+# 모드의 "상세 확인 missing" 표식이 있고(최대 경과일 이내) 이번 확인도 missing일
+# 때만, 즉 서로 다른 두 실행의 상세 확인이 모두 missing일 때만 확정된다.
+NOTICE_DELETION_MODES = frozenset({"off", "dry_run", "enforce"})
+NOTICE_DELETION_DIAGNOSTICS_KEY = "deletion_check"
+NOTICE_DELETION_LEDGER_KEY = "probe_strike_ledger"
+_NOTICE_VISIBLE_STATUSES = ("active", "updated")
+_DIAGNOSTICS_LOOKBACK_RUNS = 50
+
+NoticeProbe = Callable[[str], tuple[str, "int | None"]]
+
+
+@dataclass(frozen=True)
+class NoticeDeletionCheckSettings:
+    mode: str = "off"
+    window_months: int = 6
+    budget: int = 60
+    delay_seconds: float = 0.5
+    max_consecutive_unknown: int = 5
+    max_total_unknown: int = 10
+    max_seconds: float = 120.0
+    max_deletions: int = 20
+    max_fraction: float = 0.2
+    min_sample: int = 20
+    strike_max_age_days: float = 7.0
+    request_timeout: float = 15.0
+
+    @classmethod
+    def from_config(cls) -> "NoticeDeletionCheckSettings":
+        return cls(
+            mode=RAG_NOTICE_DELETION_CHECK_MODE,
+            window_months=RAG_NOTICE_DELETION_CHECK_WINDOW_MONTHS,
+            budget=RAG_NOTICE_DELETION_CHECK_BUDGET,
+            delay_seconds=RAG_NOTICE_DELETION_CHECK_DELAY_SECONDS,
+            max_consecutive_unknown=RAG_NOTICE_DELETION_CHECK_MAX_CONSECUTIVE_UNKNOWN,
+            max_total_unknown=RAG_NOTICE_DELETION_CHECK_MAX_UNKNOWN,
+            max_seconds=RAG_NOTICE_DELETION_CHECK_MAX_SECONDS,
+            max_deletions=RAG_NOTICE_DELETION_CHECK_MAX_DELETIONS,
+            max_fraction=RAG_NOTICE_DELETION_CHECK_MAX_FRACTION,
+            min_sample=RAG_NOTICE_DELETION_CHECK_MIN_SAMPLE,
+            strike_max_age_days=RAG_NOTICE_DELETION_CHECK_STRIKE_MAX_AGE_DAYS,
+            request_timeout=RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS,
+        )
+
+
+@dataclass(frozen=True)
+class _DeletionProbeTarget:
+    document_id: int
+    document_key: str
+    source_url: str
+    pending: bool
+
+
+def _recent_deletion_diagnostics(session, run_id: int) -> list[dict[str, Any]]:
+    """현재 실행 이전 notices 실행들의 deletion_check 진단(최신순)."""
+    runs = (
+        session.query(IngestionRun)
+        .filter(
+            IngestionRun.dataset == "notices",
+            IngestionRun.id < run_id,
+            IngestionRun.diagnostics_json.isnot(None),
+        )
+        .order_by(IngestionRun.id.desc())
+        .limit(_DIAGNOSTICS_LOOKBACK_RUNS)
+        .all()
+    )
+    found: list[dict[str, Any]] = []
+    for run in runs:
+        try:
+            decoded = json.loads(run.diagnostics_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        info = decoded.get(NOTICE_DELETION_DIAGNOSTICS_KEY) if isinstance(decoded, dict) else None
+        if isinstance(info, dict):
+            found.append(info)
+    return found
+
+
+def _load_deletion_cursor(history: list[dict[str, Any]]) -> int:
+    for info in history:
+        if isinstance(info.get("cursor_document_id"), int):
+            return int(info["cursor_document_id"])
+    return 0
+
+
+def _parse_ledger_time(value: Any):
+    from datetime import datetime
+
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed.replace(tzinfo=None)
+
+
+def _load_probe_strike_ledger(
+    history: list[dict[str, Any]],
+    *,
+    mode: str,
+    max_age_days: float,
+) -> dict[int, dict[str, Any]]:
+    """같은 모드의 가장 최근 원장을 읽고 오래된 표식은 버린다."""
+    for info in history:
+        if info.get("mode") != mode or not isinstance(info.get(NOTICE_DELETION_LEDGER_KEY), dict):
+            continue
+        now = kst_now().replace(tzinfo=None)
+        ledger: dict[int, dict[str, Any]] = {}
+        for raw_id, entry in info[NOTICE_DELETION_LEDGER_KEY].items():
+            if not isinstance(entry, dict):
+                continue
+            try:
+                document_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            struck_at = _parse_ledger_time(entry.get("at"))
+            if struck_at is None or (now - struck_at) > timedelta(days=max(max_age_days, 0)):
+                continue
+            ledger[document_id] = dict(entry)
+        return ledger
+    return {}
+
+
+def _plan_deletion_probes(
+    session,
+    *,
+    seen_source_ids: set[str],
+    ledger: dict[int, dict[str, Any]],
+    cursor: int,
+    settings: NoticeDeletionCheckSettings,
+) -> tuple[list[_DeletionProbeTarget], dict[int, _DeletionProbeTarget]]:
+    """확인 대상을 고른다.
+
+    대상: 게시일이 창(window_months × 30일) 안이고, 이번 증분 목록에 보이지 않은
+    활성/updated 공식 공지(수동 공지 제외, URL과 source_id 일치). 반환:
+    (예산만큼 자른 확인 계획, 전체 후보 {document_id: target}).
+
+    순서: 직전 원장에 probe strike가 있는 글(확정 대기)을 먼저 확인하고, 남은 예산은
+    나머지 후보를 document id 오름차순으로 직전 커서 다음부터 순환하며 쓴다.
+    확정 대기 글이 예산보다 많으면 그 실행은 순환 없이 확정 대기만 확인하며, 커서는
+    그대로 유지된다. 따라서 대기 글이 줄어들면 순환은 멈췄던 위치에서 이어진다.
+    """
+    from src.crawlers.dongguk_notices import parse_official_notice_detail_url
+
+    cutoff = (kst_now().date() - timedelta(days=30 * max(settings.window_months, 0))).isoformat()
+    documents = (
+        session.query(SourceDocument)
+        .filter(
+            SourceDocument.dataset == "notices",
+            SourceDocument.status.in_(_NOTICE_VISIBLE_STATUSES),
+            SourceDocument.source_type != "manual_notice",
+            SourceDocument.published_at >= cutoff,
+        )
+        .order_by(SourceDocument.id.asc())
+        .all()
+    )
+    candidates: dict[int, _DeletionProbeTarget] = {}
+    for doc in documents:
+        if doc.source_id in seen_source_ids:
+            continue
+        parsed = parse_official_notice_detail_url(doc.source_url)
+        # URL과 원문 식별자가 어긋난 행은 어떤 글을 확인하는지 확신할 수 없다.
+        if parsed is None or f"{parsed[0]}:{parsed[1]}" != doc.source_id:
+            continue
+        entry = ledger.get(int(doc.id))
+        pending = bool(entry) and entry.get("source_url") == doc.source_url
+        candidates[int(doc.id)] = _DeletionProbeTarget(
+            document_id=int(doc.id),
+            document_key=str(doc.document_key),
+            source_url=str(doc.source_url),
+            pending=pending,
+        )
+
+    pending = [item for item in candidates.values() if item.pending]
+    rotation = [item for item in candidates.values() if not item.pending]
+    rotation = [item for item in rotation if item.document_id > cursor] + [
+        item for item in rotation if item.document_id <= cursor
+    ]
+    budget = max(settings.budget, 0)
+    return (pending + rotation)[:budget], candidates
+
+
+def _default_notice_probe(settings: NoticeDeletionCheckSettings):
+    import requests
+
+    from src.crawlers.dongguk_notices import probe_notice_detail
+
+    http = requests.Session()
+
+    def probe(url: str):
+        return probe_notice_detail(url, session=http, timeout=settings.request_timeout)
+
+    return probe, http.close
+
+
+def _effective_min_sample(settings: NoticeDeletionCheckSettings) -> int:
+    """비율 상한이 항상 평가되도록 최소 표본을 예산 이하로 제한한다."""
+    return max(1, min(settings.min_sample, max(settings.budget, 1)))
+
+
+def _deletion_cap_exceeded(confirmed: int, checked: int, settings: NoticeDeletionCheckSettings) -> bool:
+    if confirmed <= 0:
+        return False
+    if confirmed > max(settings.max_deletions, 0):
+        return True
+    return (
+        checked >= _effective_min_sample(settings)
+        and confirmed / max(checked, 1) > settings.max_fraction
+    )
+
+
+def _stage_deletion_check_record(
+    session,
+    run_id: int,
+    summary: dict[str, Any],
+    *,
+    deleted: int,
+    capped: bool,
+) -> None:
+    """진단·원장·삭제 수를 주어진 세션에 올린다(commit은 호출자 책임).
+
+    확정 삭제 상태 변경과 같은 트랜잭션으로 commit해야, 기록 실패 시 상태만 바뀌고
+    색인 반영 대상(hidden_keys)에서 빠지는 불일치가 생기지 않는다.
+    """
+    run = session.get(IngestionRun, run_id)
+    if run is None:
+        return
+    diagnostics: dict[str, Any] = {}
+    try:
+        decoded = json.loads(run.diagnostics_json or "{}")
+        if isinstance(decoded, dict):
+            diagnostics.update(decoded)
+    except (TypeError, json.JSONDecodeError):
+        pass
+    diagnostics[NOTICE_DELETION_DIAGNOSTICS_KEY] = summary
+    run.diagnostics_json = canonical_json(diagnostics)
+    run.documents_deleted = int(run.documents_deleted or 0) + deleted
+    if capped:
+        if run.status == "success":
+            run.status = "partial_success"
+        run.error_summary = (
+            (run.error_summary + "; ") if run.error_summary else ""
+        ) + "notice deletion check capped; no deletions applied"
+
+
+def _record_deletion_check(run_id: int, summary: dict[str, Any], *, deleted: int, capped: bool) -> None:
+    session = SessionLocal()
+    try:
+        _stage_deletion_check_record(session, run_id, summary, deleted=deleted, capped=capped)
+        session.commit()
+    finally:
+        session.close()
+
+
+def run_notice_deletion_check(
+    collect_result: NoticeCollectResult,
+    *,
+    settings: NoticeDeletionCheckSettings | None = None,
+    probe: NoticeProbe | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[list[str], dict[str, Any]]:
+    """증분 목록에 없던 최근 활성 공지를 확인하고, 서로 다른 두 실행의 상세 확인에서
+    모두 사라진 글만 deleted로 바꾼다.
+
+    반환: (deleted로 바뀐 document_key 목록, 진단 요약). 진단은 해당 IngestionRun의
+    ``diagnostics_json["deletion_check"]``에도 저장되며, 다음 실행의 순환 커서
+    (``cursor_document_id``: 이번에 순환 확인한 마지막 document id, 순환 확인이 없으면
+    이전 값 유지)와 probe strike 원장을 함께 담는다.
+
+    ``dry_run``은 SourceDocument를 바꾸지 않고 자기 원장(dry_run 모드 전용)만 이어
+    가므로 would_delete가 enforce와 같은 규칙으로 계산된다. enforce는 enforce 원장만
+    읽는다.
+    """
+    settings = settings or NoticeDeletionCheckSettings.from_config()
+    mode = settings.mode if settings.mode in NOTICE_DELETION_MODES else "off"
+    summary: dict[str, Any] = {
+        "mode": mode,
+        "status": "skipped",
+        "skip_reason": None,
+        "window_months": settings.window_months,
+        "budget": settings.budget,
+        "candidates": 0,
+        "checked": 0,
+        "present": 0,
+        "missing_strike_1": 0,
+        "confirmed_deleted": 0,
+        "would_delete": 0,
+        "unknown": 0,
+        "strikes_cleared": 0,
+        "state_changed_during_check": 0,
+        "aborted_reason": None,
+        "capped": False,
+        "deleted_document_keys": [],
+    }
+
+    skip_reason = None
+    if settings.mode not in NOTICE_DELETION_MODES:
+        skip_reason = "invalid_mode"
+        logger.warning(
+            "[notices] 알 수 없는 삭제 감지 모드 %r — off로 처리합니다 (off|dry_run|enforce)",
+            settings.mode,
+        )
+    elif mode == "off":
+        skip_reason = "disabled"
+    elif collect_result.crawl_incomplete_boards:
+        # 목록 수집이 불완전한 실행은 사이트가 불안정하다는 신호다.
+        skip_reason = "incomplete_boards"
+    elif collect_result.missing_detection_applied:
+        # 전체 목록 대조가 이미 수행된 실행이다.
+        skip_reason = "full_missing_detection"
+    elif settings.budget <= 0:
+        skip_reason = "zero_budget"
+    if skip_reason is not None:
+        summary["skip_reason"] = skip_reason
+        if mode != "off" or skip_reason == "invalid_mode":
+            _record_deletion_check(collect_result.run_id, summary, deleted=0, capped=False)
+        return [], summary
+
+    # 1) 후보 선정: 짧은 읽기 트랜잭션. 네트워크 확인 중에는 DB 세션을 잡지 않는다.
+    seen_source_ids = set(collect_result.seen_source_ids)
+    session = SessionLocal()
+    try:
+        history = _recent_deletion_diagnostics(session, collect_result.run_id)
+        previous_cursor = _load_deletion_cursor(history)
+        previous_ledger = _load_probe_strike_ledger(
+            history,
+            mode=mode,
+            max_age_days=settings.strike_max_age_days,
+        )
+        plan, candidates = _plan_deletion_probes(
+            session,
+            seen_source_ids=seen_source_ids,
+            ledger=previous_ledger,
+            cursor=previous_cursor,
+            settings=settings,
+        )
+    finally:
+        session.close()
+    summary["candidates"] = len(candidates)
+    summary["pending_strikes"] = sum(1 for item in candidates.values() if item.pending)
+
+    # 2) 상세 URL 확인(요청 수·벽시계 시간·연속/누적 unknown 상한).
+    close_probe = None
+    if probe is None:
+        probe, close_probe = _default_notice_probe(settings)
+    outcomes: list[tuple[_DeletionProbeTarget, str, int | None]] = []
+    consecutive_unknown = 0
+    total_unknown = 0
+    started = clock()
+    try:
+        for index, target in enumerate(plan):
+            if settings.max_seconds > 0 and clock() - started >= settings.max_seconds:
+                summary["aborted_reason"] = "time_budget"
+                break
+            if index and settings.delay_seconds > 0:
+                sleep(settings.delay_seconds)
+            try:
+                outcome, http_status = probe(target.source_url)
+            except Exception:  # noqa: BLE001 - 확인 실패는 unknown이다.
+                outcome, http_status = "unknown", None
+            if outcome not in {"present", "missing"}:
+                outcome = "unknown"
+            outcomes.append((target, outcome, http_status))
+            if outcome == "unknown":
+                consecutive_unknown += 1
+                total_unknown += 1
+                if (
+                    settings.max_consecutive_unknown > 0
+                    and consecutive_unknown >= settings.max_consecutive_unknown
+                ):
+                    summary["aborted_reason"] = "consecutive_unknown"
+                    break
+                if settings.max_total_unknown > 0 and total_unknown >= settings.max_total_unknown:
+                    summary["aborted_reason"] = "total_unknown"
+                    break
+            else:
+                consecutive_unknown = 0
+    finally:
+        if close_probe is not None:
+            close_probe()
+    summary["elapsed_seconds"] = round(max(clock() - started, 0.0), 3)
+    rotation_checked = [target.document_id for target, _, _ in outcomes if not target.pending]
+    summary["cursor_document_id"] = rotation_checked[-1] if rotation_checked else previous_cursor
+    summary["checked"] = len(outcomes)
+    summary["http_statuses"] = {}
+    for _, _, http_status in outcomes:
+        key = str(http_status) if http_status is not None else "error"
+        summary["http_statuses"][key] = summary["http_statuses"].get(key, 0) + 1
+
+    # 3) 결과 반영: 확인 직전 상태와 달라진 행(동시 수정)은 건드리지 않는다.
+    deleted_keys: list[str] = []
+    struck_at = kst_now().replace(tzinfo=None).isoformat()
+    session = SessionLocal()
+    try:
+        present_ids: list[int] = []
+        strike_targets: list[_DeletionProbeTarget] = []
+        confirm_docs: list[SourceDocument] = []
+        for target, outcome, _ in outcomes:
+            if outcome == "unknown":
+                summary["unknown"] += 1
+                continue
+            doc = session.get(SourceDocument, target.document_id)
+            if (
+                doc is None
+                or doc.status not in _NOTICE_VISIBLE_STATUSES
+                or doc.source_url != target.source_url
+            ):
+                summary["state_changed_during_check"] += 1
+                continue
+            if outcome == "present":
+                summary["present"] += 1
+                present_ids.append(target.document_id)
+            elif target.pending:
+                confirm_docs.append(doc)
+            else:
+                summary["missing_strike_1"] += 1
+                strike_targets.append(target)
+
+        summary["would_delete"] = len(confirm_docs)
+        capped = _deletion_cap_exceeded(len(confirm_docs), len(outcomes), settings)
+        summary["capped"] = capped
+        summary["strikes_cleared"] = sum(1 for doc_id in present_ids if doc_id in previous_ledger)
+
+        # 다음 원장: 이전 표식 중 여전히 후보(보이지 않은 활성 글)인 것만 이어받고,
+        # 200이면 해제, 확정 삭제되면 제거. 상한 초과 실행은 새 표식을 추가하지 않는다.
+        ledger: dict[int, dict[str, Any]] = {
+            doc_id: entry
+            for doc_id, entry in previous_ledger.items()
+            if doc_id in candidates and candidates[doc_id].pending and doc_id not in present_ids
+        }
+        if not capped:
+            for target in strike_targets:
+                ledger[target.document_id] = {
+                    "run_id": collect_result.run_id,
+                    "at": struck_at,
+                    "document_key": target.document_key,
+                    "source_url": target.source_url,
+                }
+            for doc in confirm_docs:
+                if mode == "enforce":
+                    doc.status = "deleted"
+                    deleted_keys.append(str(doc.document_key))
+                ledger.pop(int(doc.id), None)
+        summary[NOTICE_DELETION_LEDGER_KEY] = {str(doc_id): entry for doc_id, entry in sorted(ledger.items())}
+        summary["confirmed_deleted"] = len(deleted_keys)
+        summary["deleted_document_keys"] = list(deleted_keys)
+        summary["status"] = "capped" if summary["capped"] else "completed"
+        # 상태 변경(enforce)과 진단·원장을 한 트랜잭션으로 commit한다. dry_run은
+        # SourceDocument를 바꾸지 않으므로 진단만 기록된다. 기록이 실패하면 전체가
+        # rollback되어 deleted로 바뀐 행도 남지 않는다.
+        _stage_deletion_check_record(
+            session,
+            collect_result.run_id,
+            summary,
+            deleted=len(deleted_keys),
+            capped=bool(summary["capped"]) and mode == "enforce",
+        )
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+    finally:
+        session.close()
+
+    if summary["capped"]:
+        logger.warning(
+            "[notices] 삭제 감지 안전 상한 초과 — 적용 안 함 mode=%s checked=%s would_delete=%s",
+            mode,
+            summary["checked"],
+            summary["would_delete"],
+        )
+    return deleted_keys, summary
+
+
 def _notice_collect_summary(result: NoticeCollectResult) -> dict[str, int]:
-    return {
+    summary = {
         "run_id": result.run_id,
         "seen": result.documents_seen,
         "new": result.documents_new,
@@ -991,6 +1504,44 @@ def _notice_collect_summary(result: NoticeCollectResult) -> dict[str, int]:
         "failed": result.documents_failed,
         "incomplete_boards": len(result.crawl_incomplete_boards),
     }
+    check = result.deletion_check
+    if isinstance(check, dict):
+        summary["deletion_checked"] = int(check.get("checked") or 0)
+        summary["deletion_strike_1"] = int(check.get("missing_strike_1") or 0)
+        summary["deletion_confirmed"] = int(check.get("confirmed_deleted") or 0)
+        summary["deletion_unknown"] = int(check.get("unknown") or 0)
+        summary["deletion_capped"] = int(bool(check.get("capped")))
+        summary["deletion_enforce"] = int(check.get("mode") == "enforce")
+    return summary
+
+
+def _apply_scheduled_deletion_check(
+    collect_result: NoticeCollectResult,
+    *,
+    settings: NoticeDeletionCheckSettings | None,
+    probe: NoticeProbe | None,
+    sleep: Callable[[float], None],
+) -> None:
+    """삭제 감지 실패가 정상 증분 반영을 막지 않도록 격리한다."""
+    try:
+        deleted_keys, check = run_notice_deletion_check(
+            collect_result,
+            settings=settings,
+            probe=probe,
+            sleep=sleep,
+        )
+    except Exception as exc:  # noqa: BLE001 - 삭제 감지는 보조 단계다.
+        logger.error("[notices] 삭제 감지 실패: %s", exc, exc_info=True)
+        check = {"status": "error", "error_type": type(exc).__name__}
+        deleted_keys = []
+        try:
+            _record_deletion_check(collect_result.run_id, check, deleted=0, capped=False)
+        except Exception:  # noqa: BLE001
+            pass
+    collect_result.deletion_check = check
+    if deleted_keys:
+        collect_result.hidden_keys = list(dict.fromkeys(collect_result.hidden_keys + deleted_keys))
+        collect_result.documents_deleted += len(deleted_keys)
 
 
 def _finalize_notice_derivatives(result: NoticeCollectResult) -> None:
@@ -1051,8 +1602,18 @@ def sync_notices(
     *,
     allow_missing_detection: bool = False,
     mode: str = "full-sync",
+    deletion_check: bool = False,
+    deletion_settings: NoticeDeletionCheckSettings | None = None,
+    deletion_probe: NoticeProbe | None = None,
+    deletion_sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, int]:
-    """공지 수집 결과를 raw/normalized/indexed 계층에 반영합니다."""
+    """공지 수집 결과를 raw/normalized/indexed 계층에 반영합니다.
+
+    ``deletion_check=True``는 정기 증분 수집용이다. 설정
+    (``RAG_NOTICE_DELETION_CHECK_*``)에 따라 목록에 보이지 않은 최근 공지의 상세
+    URL을 확인하고, 확정 삭제분은 숨김 공지와 같은 경로로 색인에서 제거한다.
+    ``collect-only`` 모드에서는 색인과 상태가 어긋나지 않도록 실행하지 않는다.
+    """
     collect_result = collect_notice_documents(
         incoming_df,
         allow_missing_detection=allow_missing_detection,
@@ -1061,6 +1622,14 @@ def sync_notices(
     try:
         if mode == "collect-only":
             return _notice_collect_summary(collect_result)
+
+        if deletion_check:
+            _apply_scheduled_deletion_check(
+                collect_result,
+                settings=deletion_settings,
+                probe=deletion_probe,
+                sleep=deletion_sleep,
+            )
 
         target_keys = list(dict.fromkeys(collect_result.changed_keys + collect_result.hidden_keys))
         if mode == "normalize-only":
@@ -1191,7 +1760,9 @@ __all__ = [
     "ensure_manual_notice_source_document",
     "normalize_existing_notice_documents",
     "migrate_legacy_notice_payloads",
+    "NoticeDeletionCheckSettings",
     "record_notice_ingestion_failure",
+    "run_notice_deletion_check",
     "refresh_notice_artifacts",
     "rebuild_notices_from_source_documents",
     "sync_notices",
