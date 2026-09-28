@@ -75,8 +75,8 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| 공통 `execute_query` 실행 코어 (audit 06 P1) | P1 | RAG/Backend | `refactor/execute-query-core` | `execute-query-core` | Review | 2026-09-28 로컬: 전체 RAG 1,341 passed/1 skipped(일반·빈 DB). 구현 codex·QA codex2 각 4회 → APPROVE. `rag_service.py` 10,511→9,863줄 | 응답·SSE·저장은 HEAD 스냅샷으로 고정. 기본 replace 정책의 stream/JSON 차이는 HEAD 동작 유지. 직접응답 일부 분기 잔존 | PR #37 merge 승인 대기 → trace·heartbeat 노출 |
-| telemetry heartbeat (audit 07 P0) | P0 | RAG/Backend | `feat/telemetry-heartbeat` | `telemetry-heartbeat` | Review | 2026-09-28 로컬: 1,336 passed/1 skipped. QA codex2 | 신규 테이블(운영 적용 승인 필요). 모든 replica 중단은 외부 cron으로 `report_telemetry_heartbeat.py --alert` 실행 필요 | PR #36 merge 승인 대기 |
+| 단순 질문 LLM 호출 축소 (audit 03/04 P1) | P1 | RAG/Backend | `perf/simple-query-llm-bypass` | `simple-query-llm-bypass` | In Progress | QA codex2 2회 CHANGES REQUESTED(시점 표현 우회, 다중 대상 우회, 정규화 점수 기반 단일 문서 우회) → 안전한 규칙만 남기는 3차 진행 | 단일 고신뢰 문서·식별자 기반 우회는 사람 판정 qrels 이후로 보류 | QA 통과 후 PR |
+| 변경 청크만 재임베딩 (audit 09 P2, 01 성능) | P2 | RAG/Backend | `perf/incremental-reembed` | `incremental-reembed` | In Progress | codex 구현 중 | #17·#26·#27·#29 재색인 비용 절감 목적 | QA 통과 후 PR |
 | 공지 Chroma compactor 오류 진단·strict lineage 재통과 (P0) | P0 | RAG/Backend | - | - | Blocked | - | 실제 DB·artifacts 사본 필요. 에이전트의 사본 생성은 개인정보 처리로 권한 차단 | human이 읽기 전용 사본 경로 제공 또는 권한 허용 |
 | 실제 후보 골든 평가 190문항 (P0) | P0 | QA | - | - | Blocked | release gate는 fail-closed로 전환(PR #14) | 후보 endpoint·모델 비용 승인 필요 | human이 endpoint 제공 |
 | Orchestrator·Codex 실행 설정 후보 적용 | P1 | Orchestrator | `chore/agent-orchestration` | `agent-orchestration` | Blocked | runner 단위 테스트 22/22(2026-09-27 재실행) | staged 상태. 에이전트 권한 설정 commit이 auto mode에서 차단됨. base `cffe3e3`로 오래됨 | human이 commit·PR 여부 결정 |
@@ -89,7 +89,7 @@ Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 2026-09-28 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
 
 - Remote: `origin` = `github.com/won172/2025-2-OSSProj-renux-03` (fork, upstream `CSID-DGU/2025-2-OSSProj-renux-03`).
-- `origin/main` = `b74145e` (PR #13~#35 merge). branch protection 없음(human 설정 필요).
+- `origin/main` = `6bd6de3` (PR #13~#42 merge). branch protection 없음(human 설정 필요).
 - 새 task의 base branch는 `origin/main`이다. PR #13 이후 task PR은 STATUS.md를 수정하지 않는다.
 - merge된 task의 worktree·local branch는 정리했다. remote branch(`chore/golden-release-gate`,
   `fix/grounding-verification-status`, `chore/build-lineage-gate`, `fix/chunk-representation`,
@@ -212,6 +212,11 @@ Next Action:
 - 9월 28일 scheduler job DB lease(다중 replica 단일 실행) (PR #32, 신규 테이블).
 - 9월 28일 검색 결과 trace·dense degraded 표시(검색 계층) (PR #34).
 - 9월 28일 테스트 실제 네트워크 호출 제거·suite guard, suite 약 62초→24초 (PR #35).
+- 9월 28일 telemetry heartbeat, 외부 cron으로 `report_telemetry_heartbeat.py --alert` 필요 (PR #36, 신규 테이블).
+- 9월 28일 공통 `execute_query` 실행 코어, `rag_service.py` 10,511→9,863줄 (PR #37).
+- 9월 28일 스트리밍 렌더링 프레임 단위 묶음·상태 전환만 스크린리더 안내 (PR #39).
+- 9월 28일 `retrieval_mode`/`degraded_datasets` 응답·query log 노출, `/ready` heartbeat·복구 힌트 (PR #40).
+- 9월 28일 검색 제한 상태 메인 서버 저장·프런트 표시 (PR #42, **DB migration 포함**).
 
 ## Agent Tasks
 
@@ -250,6 +255,8 @@ Next:
 - 실로그 변경 후보의 relevance·관계 정확성 사람 판정 및 검토 담당자 확정.
 - 실제 평가에 사용할 후보 endpoint/검증 환경과 모델 호출 비용 승인.
 - 품질·정합성 gate 통과 후 운영 배포 여부 승인. 현재 배포를 승인한 상태는 아니다.
+- 운영 DB migration 적용 승인(백업 선행): #31(verification_status), #32(scheduler lease 테이블), #36(heartbeat 테이블), #42(retrieval_mode).
+- 모든 replica 중단 감지용 외부 cron(`report_telemetry_heartbeat.py --alert`) 구성.
 - GitHub `main` branch protection(직접 push·force push 차단, PR·CI 필수) 적용 여부.
   원격 저장소 설정 변경이므로 agent가 수행하지 않는다.
 - 골든 평가 threshold(현재 0.75/0.80/0.70/0.80, 감사 권고 0.85) 상향 여부.
