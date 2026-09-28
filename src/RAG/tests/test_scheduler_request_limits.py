@@ -11,7 +11,12 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.crawlers import dongguk_meals, dongguk_notices, dongguk_staff_contacts  # noqa: E402
+from src.crawlers import (  # noqa: E402
+    dongguk_library_hours,
+    dongguk_meals,
+    dongguk_notices,
+    dongguk_staff_contacts,
+)
 from src.services import scheduler  # noqa: E402
 
 
@@ -221,11 +226,23 @@ def test_scheduler_jobs_pass_and_log_configured_request_limits(monkeypatch, capl
     monkeypatch.setitem(sys.modules, notices_pipeline.__name__, notices_pipeline)
     monkeypatch.setitem(sys.modules, meals_crawler.__name__, meals_crawler)
     monkeypatch.setitem(sys.modules, meals_pipeline.__name__, meals_pipeline)
+
+    def fake_library_fetch(*, timeout):
+        calls["library"] = {"timeout": timeout}
+        return dongguk_library_hours.LibraryHoursFetchResult(
+            payload={"list": [], "totalCount": 0},
+            source_url=dongguk_library_hours.LIBRARY_OPERATION_TIME_URL,
+            fetched_at="2026-07-21T03:04:05Z",
+        )
+
+    monkeypatch.setattr(dongguk_library_hours, "fetch_library_operation_times", fake_library_fetch)
     monkeypatch.setattr(scheduler, "RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS", 8.0)
     monkeypatch.setattr(scheduler, "RAG_SCHEDULER_REQUEST_RETRIES", 2)
     monkeypatch.setattr(scheduler, "_refresh_runtime_dataset_state", lambda _dataset: None)
     monkeypatch.setattr(scheduler, "_start_ingestion_run", lambda _dataset: 1)
     monkeypatch.setattr(scheduler, "_finish_ingestion_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(scheduler, "_record_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(scheduler, "_start_faq_draft_worker", lambda: None)
 
     with caplog.at_level(logging.INFO, logger=scheduler.__name__):
         scheduler.refresh_notices_job()
@@ -233,6 +250,7 @@ def test_scheduler_jobs_pass_and_log_configured_request_limits(monkeypatch, capl
 
     assert calls["notices"]["request_timeout"] == 8.0
     assert calls["notices"]["request_retries"] == 2
+    assert calls["library"]["timeout"] == 8.0
     assert calls["meals"]["request_timeout"] == 8.0
     assert calls["meals"]["request_retries"] == 2
     assert caplog.text.count("request_timeout=8.0s request_retries=2") == 2

@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.crawlers import dongguk_notices  # noqa: E402
+from src.crawlers import dongguk_library_hours, dongguk_notices  # noqa: E402
 from src.database import Base, IngestionRun, SourceDocument, kst_now  # noqa: E402
 from src.pipelines import notices_sync  # noqa: E402
 from src.services import ingest_runtime  # noqa: E402
@@ -846,6 +846,17 @@ def test_scheduler_requests_deletion_check_and_flags_only_enforced_cap(
     pipeline.sync_notices = fake_sync
     monkeypatch.setitem(sys.modules, crawler.__name__, crawler)
     monkeypatch.setitem(sys.modules, pipeline.__name__, pipeline)
+    library_timeouts: list[float] = []
+
+    def fake_library_fetch(*, timeout):
+        library_timeouts.append(timeout)
+        return dongguk_library_hours.LibraryHoursFetchResult(
+            payload={"list": [], "totalCount": 0},
+            source_url=dongguk_library_hours.LIBRARY_OPERATION_TIME_URL,
+            fetched_at="2026-07-21T03:04:05Z",
+        )
+
+    monkeypatch.setattr(dongguk_library_hours, "fetch_library_operation_times", fake_library_fetch)
     monkeypatch.setattr(scheduler, "_refresh_runtime_dataset_state", lambda _d: None)
     monkeypatch.setattr(scheduler, "_start_faq_draft_worker", lambda: None)
     monkeypatch.setattr(
@@ -854,6 +865,7 @@ def test_scheduler_requests_deletion_check_and_flags_only_enforced_cap(
 
     scheduler.refresh_notices_job()
 
+    assert library_timeouts == [scheduler.RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS]
     assert captured["deletion_check"] is True
     assert captured["allow_missing_detection"] is False
     assert captured["mode"] == "full-sync"

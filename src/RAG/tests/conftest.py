@@ -14,12 +14,108 @@
 """
 from __future__ import annotations
 
+import ipaddress
+import socket
 import sys
 from pathlib import Path
+from urllib import request as urllib_request
+from urllib.parse import urlsplit
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+def _is_loopback_host(host: str | bytes) -> bool:
+    if isinstance(host, bytes):
+        host = host.decode("ascii", errors="replace")
+    if not isinstance(host, str):
+        return False
+    if host.lower() in {"localhost", "localhost."}:
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or bool(
+        isinstance(address, ipaddress.IPv6Address)
+        and address.ipv4_mapped
+        and address.ipv4_mapped.is_loopback
+    )
+
+
+@pytest.fixture(autouse=True)
+def _외부_네트워크_차단(monkeypatch):
+    """실제 외부 DNS 조회/연결은 즉시 실패시키고 loopback 서버는 허용한다.
+
+    pytest.fail은 일반 Exception보다 상위이므로 크롤러의 광범위한 예외 처리에도
+    테스트 실패가 삼켜지지 않는다. HTTP 경계도 검사해 로컬 proxy를 통한
+    외부 URL 전달을 막는다. AF_UNIX 연결은 로컬 IPC이므로 그대로 둔다.
+    """
+    import httpx
+    import requests
+
+    original_getaddrinfo = socket.getaddrinfo
+    original_create_connection = socket.create_connection
+    original_connect = socket.socket.connect
+    original_connect_ex = socket.socket.connect_ex
+    original_requests_request = requests.Session.request
+    original_httpx_request = httpx.Client.request
+    original_httpx_async_request = httpx.AsyncClient.request
+    original_urllib_open = urllib_request.OpenerDirector.open
+
+    def check_host(host):
+        if not _is_loopback_host(host):
+            pytest.fail(f"test attempted outbound network access: {host}", pytrace=False)
+
+    def getaddrinfo(host, port, *args, **kwargs):
+        if host not in (None, "", b""):
+            check_host(host)
+        return original_getaddrinfo(host, port, *args, **kwargs)
+
+    def create_connection(address, *args, **kwargs):
+        check_host(address[0])
+        return original_create_connection(address, *args, **kwargs)
+
+    def connect(sock, address):
+        if sock.family != socket.AF_UNIX:
+            check_host(address[0])
+        return original_connect(sock, address)
+
+    def connect_ex(sock, address):
+        if sock.family != socket.AF_UNIX:
+            check_host(address[0])
+        return original_connect_ex(sock, address)
+
+    def check_url(url):
+        check_host(urlsplit(str(url)).hostname or "")
+
+    def requests_request(session, method, url, *args, **kwargs):
+        check_url(url)
+        return original_requests_request(session, method, url, *args, **kwargs)
+
+    def httpx_request(client, method, url, *args, **kwargs):
+        check_url(url)
+        return original_httpx_request(client, method, url, *args, **kwargs)
+
+    async def httpx_async_request(client, method, url, *args, **kwargs):
+        check_url(url)
+        return await original_httpx_async_request(client, method, url, *args, **kwargs)
+
+    def urllib_open(opener, fullurl, *args, **kwargs):
+        url = fullurl.full_url if isinstance(fullurl, urllib_request.Request) else fullurl
+        if urlsplit(str(url)).scheme not in {"file", "data"}:
+            check_url(url)
+        return original_urllib_open(opener, fullurl, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(socket, "create_connection", create_connection)
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+    monkeypatch.setattr(requests.Session, "request", requests_request)
+    monkeypatch.setattr(httpx.Client, "request", httpx_request)
+    monkeypatch.setattr(httpx.AsyncClient, "request", httpx_async_request)
+    monkeypatch.setattr(urllib_request.OpenerDirector, "open", urllib_open)
 
 
 @pytest.fixture(autouse=True)
