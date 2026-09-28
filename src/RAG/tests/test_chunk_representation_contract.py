@@ -26,6 +26,7 @@ from src.utils.preprocess import (  # noqa: E402
     chunk_text,
     make_chunk_id,
     make_doc_id,
+    normalize_whitespace,
     split_rule_articles,
 )
 
@@ -490,8 +491,6 @@ def test_meal_chunks_exclude_bookkeeping():
 
 
 def test_staff_chunks_exclude_bookkeeping_labels():
-    # staff 투영은 현재 컬럼 값을 모두 본문에 잇는다(audit P1-5, 이번 범위 밖).
-    # 실제 수집 컬럼 구성에서 내부 필드 라벨이 새지 않는 것만 고정한다.
     frame = pd.DataFrame([{
         "조직(트리)": "동국대학교 > 학사지원본부",
         "성명": "김**",
@@ -504,6 +503,164 @@ def test_staff_chunks_exclude_bookkeeping_labels():
     _assert_no_bookkeeping(ingest.build_staff_chunks(frame), sentinels=False)
     text = ingest.build_staff_chunks(frame).iloc[0]["chunk_text"]
     assert str(BOOKKEEPING["db_id"]) not in text
+
+
+def test_staff_projection_labels_content_and_omits_title_duplicates():
+    row = {
+        "조직(트리)": "학사지원팀",
+        "부서경로": "동국대학교 > 학사지원팀",
+        "성명": "김**",
+        "직위": "팀장",
+        "직책": "학사 책임자",
+        "담당업무": "수강신청 운영",
+        "전화번호": "02-2260-3000",
+        "이메일": "staff@example.test",
+        "document_key": "staff:person",
+        **BOOKKEEPING,
+    }
+    chunks = ingest.build_staff_chunks(pd.DataFrame([row]))
+    assert len(chunks) == 1
+    _assert_no_bookkeeping(chunks, sentinels=False)
+    chunk = chunks.iloc[0]
+    assert chunk["chunk_text"] == (
+        "[학사지원팀 - 김**]\n\n소속: 학사지원팀\n\n"
+        "부서경로: 동국대학교 > 학사지원팀\n\n직위: 팀장\n\n"
+        "직책: 학사 책임자\n\n담당업무: 수강신청 운영\n\n"
+        "전화번호: 02-2260-3000\n\n이메일: staff@example.test"
+    )
+    assert chunk["chunk_text"].count("김**") == 1
+    assert "정보:" not in chunk["chunk_text"]
+    assert chunk["staff_position"] == "팀장"
+    assert chunk["staff_role"] == "수강신청 운영"
+    assert chunk["staff_phone"] == "02-2260-3000"
+    assert chunk["doc_id"] == "staff:person"
+    assert chunk["chunk_id"] == make_chunk_id("staff:person", 0)
+
+
+def test_staff_legacy_fields_are_labeled_and_bookkeeping_is_not_projected():
+    chunks = ingest.build_staff_chunks(pd.DataFrame([{
+        "조직(트리)": "전산팀", "Data_0": "이**", "Data_1": "팀원",
+        "Data_2": "서버 운영", "Data_3": "770-2773",
+        "collection_status": "fresh_SENTINEL_STATUS",
+        "document_key": "staff:legacy",
+    }]))
+    text = chunks.iloc[0]["chunk_text"]
+    assert "[전산팀 - 이**]" in text
+    assert "직위: 팀원" in text
+    assert "담당업무: 서버 운영" in text
+    assert "전화번호: 770-2773" in text
+    assert "fresh_SENTINEL_STATUS" not in text
+
+
+def test_staff_legacy_extra_data_is_kept_with_head_identity_when_unkeyed():
+    frame = pd.DataFrame([{
+        "조직(트리)": "전산팀",
+        "Data_0": "이**",
+        "Data_1": "팀원",
+        "Data_2": "서버 운영",
+        "Data_3": "평일 09:00~18:00",
+        "Data_4": "770-2773",
+    }])
+    chunk = ingest.build_staff_chunks(frame).iloc[0]
+    text = chunk["chunk_text"]
+    assert "[전산팀 - 이**]" in text
+    assert "직위: 팀원" in text
+    assert "담당업무: 서버 운영" in text
+    assert "기타: 평일 09:00~18:00" in text
+    assert "전화번호: 770-2773" in text
+    assert text.count("이**") == 1
+
+    # HEAD hashed the unlabeled text in column order, even though the indexed
+    # representation now uses labels. Keep both legacy IDs byte-identical.
+    head_text = (
+        "소속: 전산팀\n\n정보: 이** 팀원 서버 운영 평일 09:00~18:00"
+        "\n\n전화번호: 770-2773"
+    )
+    head_doc_id = make_doc_id("staff", "전산팀", head_text)
+    assert chunk["doc_id"] == head_doc_id
+    assert chunk["chunk_id"] == make_chunk_id(head_doc_id, 0)
+
+
+def test_schedule_is_one_labeled_chunk_even_when_content_is_long():
+    content = "행사장 안내와 참석 절차를 확인하세요. " * 80
+    chunks = ingest.build_schedule_chunks(pd.DataFrame([{
+        "title": "가을 학위수여식", "content": content,
+        "start_date": "2026-08-21", "end_date": "2026-08-22",
+        "category": "학사일정", "department": "학사지원팀",
+        "document_key": "schedule:long", "db_id": 12,
+    }]))
+    assert len(chunks) == 1
+    chunk = chunks.iloc[0]
+    normalized = normalize_whitespace(chunk["chunk_text"])
+    assert "일정: 가을 학위수여식\n\n내용:" in normalized
+    assert "기간: 2026-08-21 ~ 2026-08-22\n\n구분: 학사일정" in normalized
+    assert "\n\n주관부서: 학사지원팀" in normalized
+    assert chunk["doc_id"] == "schedule:long"
+    assert chunk["chunk_id"] == make_chunk_id("schedule:long", 0)
+    assert chunk["schedule_id"] == 12
+    assert chunk["schedule_start"] == "2026-08-21"
+    assert chunk["schedule_end"] == "2026-08-22"
+
+
+def test_schedule_and_staff_empty_canonical_rows_keep_artifacts():
+    schedule = ingest.build_schedule_chunks(pd.DataFrame([{"document_key": "schedule:empty"}]))
+    staff = ingest.build_staff_chunks(pd.DataFrame([{"document_key": "staff:empty"}]))
+    assert schedule["chunk_id"].tolist() == [make_chunk_id("schedule:empty", 0)]
+    assert staff["chunk_id"].tolist() == [make_chunk_id("staff:empty", 0)]
+    assert schedule.iloc[0]["chunk_text"].strip()
+    assert staff.iloc[0]["chunk_text"].strip()
+
+
+def test_notice_low_value_metadata_keeps_every_canonical_document():
+    base = {
+        "게시판": "학사공지", "게시일": "2026-06-19",
+        "상세URL": "https://example.test/notice",
+    }
+    frame = pd.DataFrame([
+        {**base, "제목": "본문 없음", "본문": "", "첨부파일": " [ ] ", "document_key": "notices:empty"},
+        {**base, "제목": "첨부만 있음", "본문": "", "첨부파일": [{"name": "요강.pdf"}], "document_key": "notices:file"},
+        {**base, "제목": "본문 있음", "본문": "신청 기간 안내", "첨부파일": [], "document_key": "notices:body"},
+        {**base, "제목": "링크도 없음", "본문": "", "첨부파일": [], "상세URL": "", "document_key": "notices:bare"},
+        {**base, "제목": "", "본문": "", "첨부파일": [], "상세URL": "", "document_key": "notices:untitled"},
+    ])
+    chunks = ingest.build_notice_chunks(frame)
+    by_id = chunks.set_index("doc_id")
+    assert set(by_id.index) == {"notices:empty", "notices:file", "notices:body", "notices:bare", "notices:untitled"}
+    assert by_id.loc["notices:empty", "low_value"] == "1"
+    assert by_id.loc["notices:bare", "low_value"] == "1"
+    assert by_id.loc["notices:untitled", "low_value"] == "1"
+    assert by_id.loc["notices:file", "low_value"] == "0"
+    assert by_id.loc["notices:body", "low_value"] == "0"
+    assert by_id.loc["notices:empty", "has_substantive_body"] == "0"
+    assert "공지 제목: 링크도 없음" in by_id.loc["notices:bare", "chunk_text"]
+    assert "공지 내용 확인 필요" in by_id.loc["notices:untitled", "chunk_text"]
+    for doc_id in by_id.index:
+        assert by_id.loc[doc_id, "chunk_id"] == make_chunk_id(doc_id, 0)
+        assert by_id.loc[doc_id, "chunk_text"]
+
+
+@pytest.mark.parametrize(
+    ("url", "head_fallback"),
+    [
+        (
+            "https://example.test/notice",
+            "공지 제목: 본문 없음\n"
+            "본문이 비어 있어 상세 내용은 공지 링크를 확인하세요: https://example.test/notice",
+        ),
+        ("", "공지 제목: 본문 없음"),
+    ],
+)
+def test_titled_empty_notice_keeps_head_fallback_text(url: str, head_fallback: str):
+    frame = pd.DataFrame([{
+        "제목": "본문 없음", "본문": "", "게시판": "학사공지",
+        "게시일": "2026-06-19", "상세URL": url, "첨부파일": [],
+        "document_key": "notices:empty",
+    }])
+    chunk = ingest.build_notice_chunks(frame).iloc[0]
+    assert chunk["chunk_text"] == (
+        "[본문 없음]\n\n[게시판: 학사공지, 게시일: 2026-06-19]\n\n"
+        + head_fallback
+    )
 
 
 
