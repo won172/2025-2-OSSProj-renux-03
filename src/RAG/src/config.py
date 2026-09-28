@@ -299,6 +299,9 @@ RAG_ONTOLOGY_MAX_DOCUMENTS = max(1, int(os.getenv("RAG_ONTOLOGY_MAX_DOCUMENTS", 
 RAG_RETRIEVAL_TOP_K_PER_DATASET = int(
     os.getenv("RAG_RETRIEVAL_TOP_K_PER_DATASET", "20")
 )
+# Limit in-flight dataset searches across all expansions of one request.
+# 1 preserves sequential execution; cap at 3 to protect the shared threadpool.
+RAG_RETRIEVAL_CONCURRENCY = min(3, max(1, int(os.getenv("RAG_RETRIEVAL_CONCURRENCY", "2"))))
 # 재현 가능한 골든 테스트/과거 시점 검증에서만 요청의 asOf 값을 허용한다.
 # 운영 기본값에서는 클라이언트가 임의의 과거 시점을 현재 답변처럼 만들 수 없게 막는다.
 RAG_ALLOW_AS_OF_OVERRIDE = os.getenv("RAG_ALLOW_AS_OF_OVERRIDE", "0") == "1"
@@ -550,6 +553,7 @@ __all__ = [
     "RAG_SEARCH_ALL_DATASETS",
     "RAG_SINGLE_QUERY_RETRIEVAL",
     "RAG_RETRIEVAL_TOP_K_PER_DATASET",
+    "RAG_RETRIEVAL_CONCURRENCY",
     "RAG_ALLOW_AS_OF_OVERRIDE",
     "RAG_EVIDENCE_CANDIDATES_PER_DATASET",
     "RAG_EVIDENCE_MAX_CANDIDATES",
