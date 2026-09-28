@@ -356,6 +356,95 @@ def crawl_dflex_meals(
     return records
 
 
+def crawl_dflex_meals_range(
+    since: date,
+    through: date,
+    *,
+    max_pages: int = 40,
+    delay: float = DEFAULT_REQUEST_DELAY,
+    request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
+    request_retries: int = DEFAULT_REQUEST_RETRIES,
+) -> List[dict]:
+    """Page through D-Flex PDFs until every weekday in the window is covered.
+
+    This strict catch-up path is separate from the scheduler's tolerant
+    three-post refresh. A list/detail/PDF error cannot silently mark a full
+    historical catch-up successful.
+    """
+    from src.crawlers.dongguk_notices import fetch_notice_detail, fetch_notice_list
+
+    if since > through or max_pages < 1:
+        raise ValueError("Invalid D-Flex catch-up window or page limit")
+    weekdays = {
+        (since + timedelta(days=offset)).isoformat()
+        for offset in range((through - since).days + 1)
+        if (since + timedelta(days=offset)).weekday() < 5
+    }
+    if not weekdays:
+        return []
+
+    records: List[dict] = []
+    seen_posts: set[int] = set()
+    covered: set[str] = set()
+    for page in range(1, max_pages + 1):
+        posts = fetch_notice_list(
+            DFLEX_BOARD_CODE,
+            page=page,
+            timeout=request_timeout,
+            retries=request_retries,
+        )
+        if not posts:
+            break
+        page_ids = {post.get("article_id") for post in posts}
+        if None in page_ids or not page_ids - seen_posts:
+            raise ValueError("D-Flex list pagination is missing IDs or repeating a page")
+        for meta in posts:
+            article_id = meta["article_id"]
+            if article_id in seen_posts:
+                continue
+            seen_posts.add(article_id)
+            detail = fetch_notice_detail(
+                DFLEX_BOARD_CODE,
+                article_id,
+                timeout=request_timeout,
+                retries=request_retries,
+            )
+            ref_date = detail.get("posted_at") or meta.get("posted_at")
+            if not isinstance(ref_date, date):
+                raise ValueError("D-Flex post has no valid publication date")
+            pdf_atts = [
+                attachment for attachment in detail.get("attachments", [])
+                if str(attachment.get("name", "")).lower().endswith(".pdf")
+            ]
+            if not pdf_atts:
+                raise ValueError("D-Flex post has no PDF attachment")
+            response = _get_with_retry(
+                pdf_atts[0]["url"],
+                timeout=request_timeout,
+                retries=request_retries,
+            )
+            parsed = parse_dflex_pdf(response.content, ref_date)
+            if not parsed:
+                raise ValueError("D-Flex PDF has no parseable menu rows")
+            for row in parsed:
+                try:
+                    row_date = date.fromisoformat(row["date"])
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ValueError("D-Flex PDF has an invalid meal date") from exc
+                if since <= row_date <= through:
+                    records.append(row)
+                    covered.add(row_date.isoformat())
+            if weekdays <= covered:
+                # Later (newer) posts win if a date is republished.
+                return list({(row["date"], row["restaurant"]): row for row in reversed(records)}.values())
+            if delay:
+                time.sleep(delay)
+
+    if not weekdays <= covered:
+        raise ValueError(f"D-Flex historical coverage incomplete (missing_weekdays={len(weekdays - covered)})")
+    return records
+
+
 def crawl_meals(
     *,
     days_back: int | None = None,
@@ -457,6 +546,7 @@ def crawl_meals(
 __all__ = [
     "crawl_meals",
     "crawl_dflex_meals",
+    "crawl_dflex_meals_range",
     "parse_dflex_pdf",
     "fetch_day_html",
     "parse_day_menus",
