@@ -981,6 +981,18 @@ def _extract_notice_apply_deadline(title: object, content: object, published_dat
 
 # --- Notices ---
 
+def _has_notice_attachments(value: object) -> bool:
+    if isinstance(value, str):
+        value = value.strip()
+        if not value or value.lower() in {"nan", "none", "null"}:
+            return False
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return True
+    return bool(value)
+
+
 def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
     column = {
         "title": "제목",
@@ -1017,12 +1029,7 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 fallback_parts.append(f"공지 제목: {title}")
             if url:
                 fallback_parts.append(f"본문이 비어 있어 상세 내용은 공지 링크를 확인하세요: {url}")
-            if not fallback_parts:
-                continue
-            text_content = "\n".join(fallback_parts)
-
-        if not text_content.strip():
-            continue
+            text_content = "\n".join(fallback_parts) if fallback_parts else "공지 내용 확인 필요"
         
         topic_type = row.get(column["topic"], "")
         department = clean_department(row.get("department") or row.get("학과"))
@@ -1063,6 +1070,7 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
             if attachments_str.strip().lower() in ("nan", "none", ""):
                 attachments_str = "[]"
 
+        has_substantive_body = has_body or _has_notice_attachments(attachments_str)
         docs.append(
             {
                 "doc_id": doc_id,
@@ -1080,7 +1088,8 @@ def build_notice_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 "url": url,
                 "attachments": attachments_str,
                 # 첨부가 있으면 링크로 안내할 수 있으므로 근거로서 값이 남는다.
-                "has_substantive_body": "1" if (has_body or attachments_str not in ("[]", "")) else "0",
+                "has_substantive_body": "1" if has_substantive_body else "0",
+                "low_value": "0" if has_substantive_body else "1",
                 "source": "notices",
                 "source_type": row.get("source_type", "html_notice"),
                 "notice_id": row.get("db_id"),
@@ -1228,6 +1237,10 @@ def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
             fallback_positions,
         )
         source_document = source_documents_by_key.get(doc_id)
+        has_substantive_body = bool(
+            (notice.content or "").strip()
+            or _has_notice_attachments(notice.attachments)
+        )
         notice_rows.append(
             {
                 "chunk_id": chunk.chunk_id,
@@ -1248,11 +1261,8 @@ def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
                 "url": notice_source_url,
                 "attachments": notice.attachments,
                 # 본문·첨부가 모두 없으면 근거로 쓸 수 없다(공지의 25.6%가 본문 0자).
-                "has_substantive_body": (
-                    "1"
-                    if ((notice.content or "").strip() or (notice.attachments or "[]") not in ("[]", ""))
-                    else "0"
-                ),
+                "has_substantive_body": "1" if has_substantive_body else "0",
+                "low_value": "0" if has_substantive_body else "1",
                 "source": "notices",
                 "source_type": (
                     source_document.source_type if source_document is not None else "html_notice"
@@ -1300,6 +1310,7 @@ def build_notice_index_frame_from_session(session: Session) -> pd.DataFrame:
                 "attachments": "[]",
                 # 승인된 지식은 답 본문 자체이므로 항상 근거로 쓸 수 있다.
                 "has_substantive_body": "1",
+                "low_value": "0",
                 "source": "custom_knowledge",
                 "notice_id": None,
                 "category": ck.category,
@@ -1523,9 +1534,6 @@ def build_schedule_chunks(df: pd.DataFrame) -> pd.DataFrame:
         department = str(department or "").strip()
         content = str(content or "").strip()
         academic_year = _first_nonempty(row, ["학년도", "academic_year"])
-        if not title and not content:
-            continue
-
         doc_id = (
             str(row.get("document_key") or "").strip()
             or make_doc_id(
@@ -1540,14 +1548,21 @@ def build_schedule_chunks(df: pd.DataFrame) -> pd.DataFrame:
             )
         )
         
-        # 학사일정 키워드와 날짜 정보를 텍스트에 포함
+        # 짧은 일정도 각 필드를 분리한다. 단일 줄바꿈은 정규화 중 접힐 수 있다.
         date_str = f"{start_date}"
         if end_date and end_date != start_date:
             date_str += f" ~ {end_date}"
-        
-        rich_text = f"학사일정: {title}\n\n{content}\n\n기간: {date_str}"
+
+        lines = [f"일정: {title}"] if title else []
+        if content and content != title:
+            lines.append(f"내용: {content}")
+        if date_str:
+            lines.append(f"기간: {date_str}")
+        if category:
+            lines.append(f"구분: {category}")
         if department:
-            rich_text += f"\n\n주관부서: {department}"
+            lines.append(f"주관부서: {department}")
+        rich_text = "\n\n".join(lines) or "학사일정 정보 확인 필요"
 
         docs.append(
             {
@@ -1569,8 +1584,7 @@ def build_schedule_chunks(df: pd.DataFrame) -> pd.DataFrame:
     enrich_documents_with_campus_scope(docs)
     chunks = to_chunks(
         docs,
-        chunk_size=STRUCTURED_CHUNK_SIZE // 2,
-        chunk_overlap=CHUNK_OVERLAP // 2,
+        chunk_size=None,
         include_title=True,
     )
     return pd.DataFrame(chunks)
@@ -2055,52 +2069,100 @@ def ingest_courses(*, refresh_from_csv: bool = False) -> Tuple[pd.DataFrame, obj
 
 # --- Staff ---
 
+def _legacy_staff_doc_id(row: pd.Series, columns: pd.Index) -> str:
+    """Keep HEAD's content-hash identity for rows without a canonical key."""
+    dept = row.get("조직(트리)", "")
+    exclude_cols = {"조직(트리)", "db_id", "raw_data", "document_key"}
+    info_parts = []
+    phone_number = ""
+    if "전화번호" in columns:
+        phone_number = str(row.get("전화번호", "")).strip()
+        if phone_number.lower() == "nan":
+            phone_number = ""
+
+    for col in columns:
+        if col in exclude_cols or col == "전화번호" or col.startswith("Unnamed"):
+            continue
+        val = str(row.get(col, "")).strip()
+        if not val or val.lower() == "nan":
+            continue
+        if not phone_number and re.match(r'^\d{2,4}[-.]?\d{3,4}([-.]?\d{4})?$', val):
+            phone_number = val
+        else:
+            info_parts.append(val)
+
+    full_text = f"소속: {dept}\n\n정보: {' '.join(info_parts)}"
+    if phone_number:
+        full_text += f"\n\n전화번호: {phone_number}"
+    return make_doc_id("staff", dept, full_text)
+
+
 def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
     docs = []
-    exclude_cols = {"조직(트리)", "db_id", "raw_data", "document_key"}
-    
     for _, row in df.iterrows():
-        # row는 명명 컬럼([조직(트리), 성명, 직위, 담당업무, 전화번호]) 또는
-        # 구버전([조직(트리), Data_0, Data_1, ...]) 형태 모두 지원
-
-        # 1. 조직(트리) 정보
-        dept = row.get("조직(트리)", "")
-
-        # 2. 나머지 데이터
-        info_parts = []
-        phone_number = ""
-
-        # 명명 컬럼이 있으면 전화번호는 해당 컬럼을 우선 사용("770-2773" 같은 내선형 포함)
-        if "전화번호" in df.columns:
-            phone_number = str(row.get("전화번호", "")).strip()
-            if phone_number.lower() == "nan":
-                phone_number = ""
-
-        for col in df.columns:
-            if col in exclude_cols or col == "전화번호" or col.startswith("Unnamed"): continue
-            val = str(row.get(col, "")).strip()
-            if not val or val.lower() == "nan":
-                continue
-
-            # 전화번호 감지 (간단한 패턴 — 내선형 'NNN-NNNN'도 인식)
-            if not phone_number and re.match(r'^\d{2,4}[-.]?\d{3,4}([-.]?\d{4})?$', val):
-                phone_number = val
+        # 정본 payload의 명명된 내용 필드만 투영한다. 이전 Data_* 형식은
+        # 위치별 값에서 연락처를 분리한 뒤 이름·직위·업무로 해석한다.
+        dept = _first_nonempty(row, ["조직(트리)", "department"])
+        path = _first_nonempty(row, ["부서경로"])
+        legacy = [
+            _first_nonempty(row, [col])
+            for col in df.columns
+            if col.startswith("Data_")
+        ]
+        legacy = [value for value in legacy if value]
+        phone_number = _first_nonempty(row, ["전화번호", "phone"])
+        email = _first_nonempty(row, ["이메일", "email"])
+        legacy_content = []
+        for value in legacy:
+            if re.fullmatch(r"\d{2,4}[).\-]?\d{3,4}(?:[-.]?\d{4})?", value):
+                if not phone_number:
+                    phone_number = value
+            elif "@" in value:
+                if not email:
+                    email = value
             else:
-                info_parts.append(val)
-        
-        content = " ".join(info_parts)
-        
-        # 제목: 부서명 - (첫 번째 데이터: 보통 이름/직위)
-        name_candidate = info_parts[0] if info_parts else "교직원"
-        title = f"{dept} - {name_candidate}"
-        
-        full_text = f"소속: {dept}\n\n정보: {content}"
+                legacy_content.append(value)
+
+        name_candidate = _first_nonempty(row, ["성명", "이름", "name"])
+        if not name_candidate and legacy_content:
+            name_candidate = legacy_content.pop(0)
+        legacy_content = [value for value in legacy_content if value != name_candidate]
+        position = _first_nonempty(row, ["직위", "position"])
+        if not position and legacy_content:
+            position = legacy_content.pop(0)
+        legacy_content = [value for value in legacy_content if value != position]
+        job_title = _first_nonempty(row, ["직책"])
+        role = _first_nonempty(row, ["담당업무", "role"])
+        if not role and legacy_content:
+            role = legacy_content.pop(0)
+
+        # 이름은 제목에 있고, 조직 경로가 소속과 같으면 다시 싣지 않는다.
+        lines = [f"소속: {dept}"] if dept else []
+        if path and path != dept:
+            lines.append(f"부서경로: {path}")
+        if position and position != name_candidate:
+            lines.append(f"직위: {position}")
+        if job_title and job_title not in {name_candidate, position}:
+            lines.append(f"직책: {job_title}")
+        if role and role not in {name_candidate, position, job_title}:
+            lines.append(f"담당업무: {role}")
+        seen = {dept, path, name_candidate, position, job_title, role}
+        for value in legacy_content:
+            if value not in seen:
+                lines.append(f"기타: {value}")
+                seen.add(value)
         if phone_number:
-            full_text += f"\n\n전화번호: {phone_number}"
+            lines.append(f"전화번호: {phone_number}")
+        if email:
+            lines.append(f"이메일: {email}")
+        full_text = "\n\n".join(lines) or "교직원 정보 확인 필요"
+
+        name_candidate = name_candidate or "교직원"
+        title = f"{dept} - {name_candidate}"
         
         doc_id = (
             str(row.get("document_key") or "").strip()
-            or make_doc_id("staff", dept, full_text)
+            or _legacy_staff_doc_id(row, df.columns)
         )
         
         docs.append({
@@ -2114,8 +2176,8 @@ def build_staff_chunks(df: pd.DataFrame) -> pd.DataFrame:
             "published_at": "",
             # 연락처 질의 순위에 쓰려면 본문에 녹아든 값이 아니라 별도 필드가 필요하다.
             # "사무실 번호"를 물었는데 번호가 없는 교수 행이 1순위로 나오던 문제를 여기서 막는다.
-            "staff_position": str(row.get("직위", "") or "").strip(),
-            "staff_role": str(row.get("담당업무", "") or "").strip(),
+            "staff_position": position,
+            "staff_role": role,
             "staff_phone": phone_number,
         })
         

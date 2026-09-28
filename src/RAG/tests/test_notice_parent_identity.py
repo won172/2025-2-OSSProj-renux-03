@@ -116,6 +116,37 @@ def test_notice_db_index_frame_backfills_legacy_chunk_identity_from_source_docum
     assert frame["position"].tolist() == [0, 1]
 
 
+def test_notice_db_index_frame_marks_empty_notice_low_value():
+    session = _session()
+    try:
+        notice = Notice(
+            board="학사공지",
+            title="본문 없는 안내",
+            category="학사공지",
+            detail_url="https://example.test/empty",
+            content="",
+            attachments=" [ ] ",
+        )
+        session.add(notice)
+        session.flush()
+        session.add(Chunk(
+            chunk_id="notice-empty-0",
+            chunk_text="[본문 없는 안내]\n\n공지 내용 확인 필요",
+            notice_id=notice.id,
+            doc_id="notices:empty",
+            position=0,
+        ))
+        session.commit()
+        frame = build_notice_index_frame_from_session(session)
+    finally:
+        session.close()
+
+    assert frame["chunk_id"].tolist() == ["notice-empty-0"]
+    assert frame["doc_id"].tolist() == ["notices:empty"]
+    assert frame["has_substantive_body"].tolist() == ["0"]
+    assert frame["low_value"].tolist() == ["1"]
+
+
 def test_manual_notice_without_url_uses_canonical_source_document_identity():
     session = _session()
     try:
