@@ -17,8 +17,8 @@ const defaultHeaders = {
 }
 
 const configuredApiBaseUrl =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)
-  || (import.meta.env.VITE_DEV_SERVER_PROXY_TARGET as string | undefined)
+  (import.meta.env?.VITE_API_BASE_URL as string | undefined)
+  || (import.meta.env?.VITE_DEV_SERVER_PROXY_TARGET as string | undefined)
   || ''
 
 const buildRequestUrl = (input: RequestInfo) => {
@@ -87,6 +87,33 @@ const throwApiError = (status: number, details: unknown): never => {
   throw error
 }
 
+const abortError = () => new DOMException('The operation was aborted.', 'AbortError')
+
+// CapacitorHttp does not cancel its native request. Stop awaiting it as soon as
+// the caller aborts, and detach the listener when either side settles.
+const awaitWithAbort = <T>(request: Promise<T>, signal?: AbortSignal): Promise<T> => {
+  if (!signal) return request
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort)
+      reject(abortError())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) onAbort()
+    request.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
 export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options: ApiRequestOptions = {}) => {
   const { json, headers, ...rest } = options
   const requestUrl = buildRequestUrl(input)
@@ -114,13 +141,14 @@ export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options:
   }
 
   if (canUseNativeHttp(requestUrl, init.body)) {
-    const nativeResponse = await CapacitorHttp.request({
+    if (init.signal?.aborted) throw abortError()
+    const nativeResponse = await awaitWithAbort(CapacitorHttp.request({
       url: requestUrl as string,
       method: String(rest.method ?? 'GET').toUpperCase(),
       headers: resolvedHeaders,
       ...(init.body !== undefined ? { data: init.body } : {}),
       responseType: 'json',
-    })
+    }), init.signal ?? undefined)
 
     if (nativeResponse.status < 200 || nativeResponse.status >= 300) {
       throwApiError(nativeResponse.status, nativeResponse.data)
@@ -135,6 +163,9 @@ export const apiFetch = async <TResponse = unknown>(input: RequestInfo, options:
   try {
     parsedBody = await parseJson(response)
   } catch (error) {
+    if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
+      throw error
+    }
     console.error('Error parsing response body', error)
   }
 

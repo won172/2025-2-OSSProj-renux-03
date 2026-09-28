@@ -5,18 +5,8 @@ import ChatMarkdown from './ChatMarkdown'
 import SourceCards from './SourceCards'
 import SuggestedQuestions from './SuggestedQuestions'
 import type { ChatViewMessage } from '../../chat/chatState'
+import { getFallbackLabel } from '../../chat/fallbackLabels'
 import { canShareAnswer, shareAnswer } from '../../native/nativeFeatures'
-
-const FALLBACK_LABELS: Record<string, string> = {
-  date_filter_eliminated_all: '날짜 범위 재확인',
-  score_below_threshold: '근거 약함',
-  dataset_unavailable: '일시적 조회 실패',
-}
-
-const getFallbackLabel = (reason?: string | null) => {
-  if (!reason) return '근거 부족'
-  return FALLBACK_LABELS[reason] ?? '근거 부족'
-}
 
 const FEEDBACK_REASONS = [
   { value: 'inaccurate', label: '부정확함' },
