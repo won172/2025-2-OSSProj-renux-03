@@ -96,7 +96,9 @@ def test_both_endpoints_use_the_shared_revision_checked_retrieval_plan():
     for endpoint in (rag_service.ask, rag_service.ask_stream):
         source = inspect.getsource(endpoint)
         assert "await _plan_query(" in source
-        assert "structured_document_keys_by_dataset=structured_document_keys_by_dataset" in source
+        assert "execute_query(" in source
+    execution = inspect.getsource(rag_service._execute_retrieval_steps)
+    assert "structured_document_keys_by_dataset=structured_document_keys_by_dataset" in execution
 
 
 def test_retrieval_plan_respects_structured_flag_and_returns_exact_rule_keys(monkeypatch):

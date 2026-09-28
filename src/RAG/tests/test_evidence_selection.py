@@ -76,8 +76,9 @@ def test_intent_scoped_route_is_used_by_both_endpoints(monkeypatch):
     assert "_resolve_retrieval_route(" in plan_source
     assert "_routerless_retrieval_route()" not in ask_source
     assert "_routerless_retrieval_route()" not in stream_source
-    assert "_select_answer_evidence" in ask_source
-    assert "_select_answer_evidence" in stream_source
+    assert "execute_query(" in ask_source
+    assert "execute_query(" in stream_source
+    assert "_select_answer_evidence" in inspect.getsource(rag_service._execute_retrieval_steps)
 
 
 def test_full_corpus_route_requires_explicit_override(monkeypatch):
@@ -498,7 +499,8 @@ def test_staff_contact_enrichment_uses_departments_from_first_hop_evidence():
 
 def test_both_endpoints_apply_staff_contact_enrichment():
     for endpoint in (rag_service.ask, rag_service.ask_stream):
-        assert "_enrich_staff_lookup_frames" in inspect.getsource(endpoint)
+        assert "execute_query(" in inspect.getsource(endpoint)
+    assert "_enrich_staff_lookup_frames" in inspect.getsource(rag_service._execute_retrieval_steps)
 
 
 def test_irrelevant_documents_are_excluded_by_structured_decision():
@@ -749,8 +751,9 @@ def test_source_metadata_excludes_evidence_selection_bookkeeping():
     assert metadata["url"] == "https://example.edu/document"
     assert internal_fields.isdisjoint(metadata)
     assert "metadata=_source_metadata(row)" in inspect.getsource(rag_service._source_chunk_from_row)
-    assert "_source_chunk_from_row" in inspect.getsource(rag_service.ask)
-    assert "_source_chunk_from_row" in inspect.getsource(rag_service.ask_stream)
+    for endpoint in (rag_service.ask, rag_service.ask_stream):
+        assert "execute_query(" in inspect.getsource(endpoint)
+    assert "_source_chunk_from_row" in inspect.getsource(rag_service._execute_retrieval_steps)
 
 
 def test_new_accuracy_path_contains_no_domain_specific_exception_terms():

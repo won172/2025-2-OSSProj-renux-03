@@ -1,4 +1,5 @@
 """Pre-retrieval decisions and endpoint transport parity, without network calls."""
+import asyncio
 import json
 from dataclasses import FrozenInstanceError
 from datetime import date
@@ -384,3 +385,326 @@ async def test_source_bearing_retrieval_has_full_transport_parity(monkeypatch, g
         assert [event["type"] for event in events] == [
             "metadata", "grounding", "text", "completion", "done",
         ]
+
+@pytest.mark.asyncio
+async def test_execute_query_emits_typed_events_then_one_direct_outcome(monkeypatch):
+    configure(monkeypatch, "crisis_support")
+    monkeypatch.setattr(service, "_save_rag_evaluation_log", lambda *_a, **_kw: None)
+    monkeypatch.setattr(service, "append_manual_history", lambda *_a: None)
+    req = service.AskRequest(question=QUESTION, session_id="typed-session")
+    temporal_context = service.TemporalContext(
+        as_of=AS_OF, academic_year=2026, semester=2, phase="학기중",
+    )
+    stages = {}
+    plan = await service._plan_query(
+        req=req, raw_query=QUESTION, temporal_context=temporal_context,
+        request_id="typed-request", session_id="typed-session",
+        stage_timings=stages, llm_usage=[], mode="ask",
+    )
+    steps = [step async for step in service.execute_query(
+        plan, "ask", req=req, raw_query=QUESTION,
+        temporal_context=temporal_context, request_id="typed-request",
+        session_id="typed-session", stage_timings=stages, llm_usage=[],
+        request_started_at=service.time.perf_counter(),
+    )]
+    assert [step.payload["type"] for step in steps[:-1]] == [
+        "metadata", "text", "completion",
+    ]
+    assert all(isinstance(step, service.QueryEvent) for step in steps[:-1])
+    assert isinstance(steps[-1], service.QueryOutcome)
+    assert steps[-1].response().answer == "위기 지원 안내"
+    assert steps[-1].route == ["crisis_support"]
+    assert steps[-1].verification_status == service.VERIFICATION_NOT_REQUIRED
+
+
+# These fixed outputs were recorded against b74145e before execute_query was added.
+# HEAD's default unbuffered replace policy exposes the candidate in SSE before
+# grounding, while JSON returns only the guard. Distress support notes also have
+# mode-specific ordering at HEAD; preserve those differences explicitly.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["generated", "fallback", "grounding_failed", "grounding_unavailable", "active_notice", "cache_hit", "cache_store", "grounding_failed_unbuffered", "grounding_failed_unbuffered_append", "distress_replace", "distress_append"])
+async def test_head_execution_snapshots_and_single_writes(monkeypatch, case):
+    configure(monkeypatch, "semantic_cache" if case == "cache_hit" else None)
+    question = "번아웃이 왔는데 휴학 절차 알려주세요" if case.startswith("distress_") else QUESTION
+    failed_cases = {"grounding_failed", "grounding_failed_unbuffered", "grounding_failed_unbuffered_append", "distress_replace", "distress_append"}
+    temporal_context = service.TemporalContext(as_of=AS_OF, academic_year=2026, semester=2, phase="학기중")
+    monkeypatch.setattr(service, "_request_temporal_context", lambda _req: temporal_context)
+    monkeypatch.setattr(service, "RAG_GROUNDING_CHECK_ENABLED", case in failed_cases | {"grounding_unavailable", "active_notice", "cache_store"})
+    # Active notices must buffer on their own, even with global buffering off.
+    monkeypatch.setattr(service, "RAG_STREAM_BUFFER_UNTIL_GROUNDED", case in {"grounding_failed", "distress_replace", "distress_append"})
+    monkeypatch.setattr(service, "RAG_GROUNDING_FAILURE_POLICY", "append" if case in {"grounding_failed_unbuffered_append", "distress_append"} else "replace")
+    if case == "cache_store":
+        monkeypatch.setattr(service, "RAG_SEMANTIC_CACHE_ENABLED", True)
+        monkeypatch.setattr(service.semantic_cache, "get", lambda *_a: None)
+    monkeypatch.setattr(service, "_is_active_notice_state_query", lambda *_a: case == "active_notice")
+    monkeypatch.setattr(service, "_filter_active_notice_frames", lambda frames, _as_of: (frames, service.ActiveNoticeFilterStats()))
+    monkeypatch.setattr(service, "_enforce_active_notice_answer_contract", lambda _q, answer, _rows, _as_of: answer)
+    monkeypatch.setattr(service, "append_manual_history", lambda *_a: None)
+    monkeypatch.setattr(service, "_update_observability_log", lambda *_a: None)
+    writes = {"log": 0, "cache": 0, "ground": 0}
+    log_calls = []
+    cache_calls = []
+    def log(*args, **kwargs):
+        writes["log"] += 1
+        log_calls.append((args, kwargs))
+    def cache(*args, **kwargs):
+        writes["cache"] += 1
+        cache_calls.append((args, kwargs))
+    def ground_log(*_a, **_kw):
+        writes["ground"] += 1
+    monkeypatch.setattr(service, "_save_rag_evaluation_log", log)
+    monkeypatch.setattr(service.semantic_cache, "put", cache)
+    monkeypatch.setattr(service, "_update_grounding_log", ground_log)
+    frame = pd.DataFrame([{
+        "dataset": "rules", "source": "rules", "chunk_id": "rules:1",
+        "chunk_text": "공식 규정 내용", "title": "공식 규정", "url": "https://www.dongguk.edu/rules/1",
+        "published_at": "2026-09-01", "campus_scope": "seoul", "hybrid_score": 0.95,
+        "structured_match": 1, "evidence_group": 1, "citation_number": 1,
+        "matched_query": question,
+    }])
+    async def retrieve(**_kw):
+        return ([] if case == "fallback" else [frame.copy()]), False, []
+    async def enrich(**kw):
+        return kw["frames"], []
+    async def select(_q, rows, _usage, **_kw):
+        return rows, False
+    async def generate(**_kw):
+        return "공식 답변 [문서1]"
+    async def generate_stream(**_kw):
+        yield "공식 "
+        yield "답변 [문서1]"
+    checked_answers = []
+    grounding_entered = asyncio.Event()
+    release_grounding = asyncio.Event()
+    hold_stream_grounding = False
+    async def ground(_question, candidate, *_a, **_kw):
+        checked_answers.append(candidate)
+        if hold_stream_grounding:
+            grounding_entered.set()
+            await release_grounding.wait()
+        return GroundingResult(
+            checked=case != "grounding_unavailable", grounded=case in {"active_notice", "cache_store"},
+            score=0.2 if case in failed_cases else 0.9,
+            relevance_score=0.3 if case in failed_cases else 0.9,
+            reason="source conflicts with answer" if case in failed_cases else "source supports answer",
+        )
+    monkeypatch.setattr(service, "_retrieve_frames_for_queries", retrieve)
+    monkeypatch.setattr(service, "_enrich_staff_lookup_frames", enrich)
+    monkeypatch.setattr(service, "_build_balanced_shortlist", lambda *_a, **_kw: frame.copy() if case != "fallback" else pd.DataFrame())
+    monkeypatch.setattr(service, "_apply_cross_encoder_rerank", lambda rows, _q: rows)
+    monkeypatch.setattr(service, "_select_answer_evidence", select)
+    monkeypatch.setattr(service, "generate_langchain_answer", generate)
+    monkeypatch.setattr(service, "generate_langchain_answer_stream", generate_stream)
+    monkeypatch.setattr(service, "check_answer_grounding", ground)
+    monkeypatch.setattr(service, "_try_direct_answer", lambda *_a: None)
+    expected = {
+        "generated": (["rules"], False, None, "unavailable", None, ["metadata", "text", "text", "completion", "done"]),
+        "fallback": (["rules"], True, "no_results", "not_required", None, ["metadata", "text", "completion", "done"]),
+        "grounding_failed": (["rules"], False, None, "failed", False, ["metadata", "grounding", "text", "completion", "done"]),
+        "grounding_unavailable": (["rules"], False, None, "unavailable", None, ["metadata", "text", "text", "completion", "done"]),
+        "grounding_failed_unbuffered": (["rules"], False, None, "failed", False, ["metadata", "text", "text", "grounding", "text", "completion", "done"]),
+        "grounding_failed_unbuffered_append": (["rules"], False, None, "failed", False, ["metadata", "text", "text", "grounding", "text", "completion", "done"]),
+        "distress_replace": (["rules"], False, None, "failed", False, ["metadata", "grounding", "text", "completion", "done"]),
+        "distress_append": (["rules"], False, None, "failed", False, ["metadata", "grounding", "text", "completion", "done"]),
+        "active_notice": (["rules"], False, None, "passed", True, ["metadata", "text", "completion", "done"]),
+        "cache_hit": (["rules"], False, None, "passed", True, ["metadata", "text", "suggestions", "completion", "done"]),
+        "cache_store": (["rules"], False, None, "passed", True, ["metadata", "text", "text", "completion", "done"]),
+    }[case]
+    candidate = "공식 답변 [문서1]"
+    guard = (
+        "확인 필요: 검색된 공식 자료만으로는 생성 후보 답변을 충분히 뒷받침하기 어렵습니다. "
+        "근거 일치도는 약 20%입니다. 아래 출처에서 원문을 확인한 뒤 판단해 주세요.\n\n"
+        "검토 사유: source conflicts with answer\n\n확인할 공식 출처:\n"
+        "- [문서1] 공식 규정: https://www.dongguk.edu/rules/1"
+    )
+    support_note = (
+        "---\n\n"
+        "혹시 지금 많이 지쳐 있다면, 학사 절차와 별개로 이야기 나눌 곳이 있어요.\n"
+        "**동국대 카운슬링센터** 02-2260-3933 (재학생 심리상담) · "
+        "**정신건강 위기상담전화** 1577-0199 (24시간)"
+    )
+    fallback = (
+        "제공된 동국대학교 자료에서 질문과 충분히 관련 있는 정보를 찾지 못했습니다.\n\n"
+        "정확하지 않은 정보를 추측해서 답변하는 대신, 다음과 같은 방법을 권장합니다:\n"
+        "- **질문 구체화**: 학과명, 날짜, 정확한 공지 제목 등을 포함해 주시면 더 나은 결과를 얻을 수 있습니다.\n"
+        "- **공식 채널 이용**: 긴급한 사안은 해당 학과 사무실이나 행정 부서에 직접 유선으로 문의하시기 바랍니다."
+    )
+    head_answers = {
+        "generated": (candidate, candidate),
+        "fallback": (fallback, fallback),
+        "grounding_failed": (guard, guard),
+        "grounding_unavailable": (candidate, candidate),
+        # HEAD default: the stream already emitted the candidate before a
+        # failed grounding check, so replace cannot retract its text.
+        "grounding_failed_unbuffered": (guard, candidate + "\n\n" + guard),
+        "grounding_failed_unbuffered_append": (candidate + "\n\n" + guard,) * 2,
+        "distress_replace": (guard, guard + "\n\n" + support_note),
+        "distress_append": (
+            candidate + "\n\n" + support_note + "\n\n" + guard,
+            candidate + "\n\n" + guard + "\n\n" + support_note,
+        ),
+        "active_notice": (candidate, candidate),
+        "cache_hit": ("캐시 답변", "캐시 답변"),
+        "cache_store": (candidate, candidate),
+    }[case]
+    head_source = {
+        "chunk_id": "rules:1",
+        "citation_number": 1,
+        "final_score": None,
+        "hybrid_score": 0.95,
+        "metadata": {
+            "campus_scope": "seoul", "chunk_id": "rules:1",
+            "matched_query": question, "published_at": "2026-09-01",
+            "source": "rules", "title": "공식 규정",
+            "url": "https://www.dongguk.edu/rules/1",
+        },
+        "published_at": "2026-09-01",
+        "recency_score": None,
+        "snippet": "공식 규정 내용",
+        "sort_date": None,
+        "source": "rules",
+        "source_ref": "sha256:058267b1a261dae2748f36d3310bc85acfbc146f4e72848e415e8933c52e4809",
+        "sparse_score": None,
+        "url": "https://www.dongguk.edu/rules/1",
+        "title": "공식 규정",
+        "vector_score": None,
+    }
+    head_sources = [] if case in {"fallback", "cache_hit"} else [head_source]
+    head_citations = "" if case in {"fallback", "cache_hit"} else "- 공식 규정 내용 (2026-09-01) — https://www.dongguk.edu/rules/1"
+    head_suggestions = ["관련 규정은 어디서 확인해?"] if case == "cache_hit" else []
+    head_resolved_intents = [] if case == "fallback" else ["rules"]
+    head_grounding_score = 0.2 if case in failed_cases else (0.9 if case in {"active_notice", "cache_store"} else None)
+    head_relevance_score = 0.3 if case in failed_cases else (0.9 if case in {"active_notice", "cache_store"} else None)
+    head_response_fields = {
+        "citations": head_citations,
+        "route": expected[0],
+        "resolved_intents": head_resolved_intents,
+        "sources": head_sources,
+        "suggested_questions": head_suggestions,
+        "suggested_question_details": [],
+        "grounded": expected[4],
+        "grounding_score": head_grounding_score,
+        "relevance_score": head_relevance_score,
+        "verification_status": expected[3],
+        "fallback_triggered": expected[1],
+        "fallback_reason": expected[2],
+    }
+    head_text_chunks = {
+        "generated": ["공식 ", "답변 [문서1]"],
+        "fallback": [fallback],
+        "grounding_failed": [guard],
+        "grounding_unavailable": ["공식 ", "답변 [문서1]"],
+        "grounding_failed_unbuffered": ["공식 ", "답변 [문서1]", "\n\n" + guard],
+        "grounding_failed_unbuffered_append": ["공식 ", "답변 [문서1]", "\n\n" + guard],
+        "distress_replace": [guard + "\n\n" + support_note],
+        "distress_append": [candidate + "\n\n" + guard + "\n\n" + support_note],
+        "active_notice": [candidate],
+        "cache_hit": ["캐시 답변"],
+        "cache_store": ["공식 ", "답변 [문서1]"],
+    }[case]
+    head_metadata = {
+        "type": "metadata", "sources": head_sources, "citations": head_citations,
+        "route": expected[0], "fallback_triggered": expected[1],
+    }
+    if case == "fallback":
+        head_metadata["fallback_reason"] = "no_results"
+    head_completion = {
+        "type": "completion", "grounded": expected[4],
+        "grounding_score": head_grounding_score,
+        "relevance_score": head_relevance_score,
+        "verification_status": expected[3],
+        "suggested_questions": head_suggestions,
+        "suggested_question_details": [],
+        "resolved_intents": head_resolved_intents,
+        "fallback_reason": expected[2],
+        "sources": head_sources,
+    }
+    head_events = [head_metadata]
+    if case in failed_cases and case not in {"grounding_failed_unbuffered", "grounding_failed_unbuffered_append"}:
+        head_events.append({"type": "grounding", "grounded": False, "score": 0.2, "reason": "source conflicts with answer"})
+    for chunk in head_text_chunks:
+        head_events.append({"type": "text", "content": chunk})
+        if case in {"grounding_failed_unbuffered", "grounding_failed_unbuffered_append"} and chunk == "답변 [문서1]":
+            head_events.append({"type": "grounding", "grounded": False, "score": 0.2, "reason": "source conflicts with answer"})
+    if case == "cache_hit":
+        head_events.append({"type": "suggestions", "questions": head_suggestions})
+    head_events += [head_completion, {"type": "done"}]
+    req = service.AskRequest(question=question, session_id="snapshot-session")
+    request = SimpleNamespace(state=SimpleNamespace(request_id="snapshot-request"))
+    for mode, expected_answer in zip(("ask", "stream"), head_answers):
+        before = writes.copy()
+        if mode == "ask":
+            response = (await service.ask(req, request)).model_dump(exclude={"request_id"})
+            json_response = response
+        else:
+            stream = await service.ask_stream(req, request)
+            grounding_checks_before_stream = len(checked_answers)
+            body_parts = []
+            if case == "active_notice":
+                hold_stream_grounding = True
+                seen_events = asyncio.Queue()
+
+                async def consume_stream():
+                    async for item in stream.body_iterator:
+                        body_parts.append(item)
+                        for line in item.splitlines():
+                            if line.startswith("data: "):
+                                seen_events.put_nowait(json.loads(line[6:]))
+
+                consumer = asyncio.create_task(consume_stream())
+                try:
+                    metadata = await asyncio.wait_for(seen_events.get(), timeout=10)
+                    assert metadata["type"] == "metadata"
+                    await asyncio.wait_for(grounding_entered.wait(), timeout=10)
+                    assert len(checked_answers) == grounding_checks_before_stream + 1
+                    # With global buffering off, active notices still must not
+                    # emit answer text while grounding is pending.
+                    with pytest.raises(asyncio.TimeoutError):
+                        await asyncio.wait_for(seen_events.get(), timeout=0.05)
+                    assert not consumer.done()
+                finally:
+                    release_grounding.set()
+                    await asyncio.wait_for(consumer, timeout=10)
+            else:
+                async for item in stream.body_iterator:
+                    body_parts.append(item)
+            body = "".join(body_parts)
+            events = [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")]
+            response = response_from_events(
+                events, json_response | {"answer": expected_answer},
+                expected_grounding_reason="source conflicts with answer" if case in failed_cases else None,
+            )
+            assert [{key: value for key, value in event.items() if key != "request_id"} for event in events] == head_events
+            assert [event["type"] for event in events] == expected[5]
+        assert (response["route"], response["fallback_triggered"], response["fallback_reason"],
+                response["verification_status"], response["grounded"]) == expected[:5]
+        assert response == {"answer": expected_answer, **head_response_fields}
+        assert response["answer"] == expected_answer
+        assert response["sources"] == head_sources
+        assert response["citations"] == head_citations
+        assert response["suggested_questions"] == head_suggestions
+        assert response["suggested_question_details"] == []
+        assert writes["log"] - before["log"] == (0 if case == "cache_hit" else 1)
+        assert writes["cache"] - before["cache"] == (1 if case == "cache_store" else 0)
+        assert writes["ground"] - before["ground"] == (1 if case in failed_cases | {"active_notice", "cache_store"} else 0)
+        if case != "cache_hit":
+            args, kwargs = log_calls[-1]
+            assert (args[0], args[1], args[2], args[4], args[5], args[6], args[7]) == (
+                "snapshot-request", "snapshot-session", question,
+                response["route"], response["answer"],
+                response["fallback_triggered"], response["fallback_reason"],
+            )
+            assert args[18] == (
+                None if mode == "stream" and case == "fallback"
+                else json.dumps([], ensure_ascii=False)
+            )
+            assert kwargs == {}
+        if case == "cache_store":
+            args, kwargs = cache_calls[-1]
+            assert args[0] == question
+            assert args[1] == service._semantic_cache_namespace(req.major)
+            assert args[2]["answer"] == response["answer"]
+            assert args[2]["verification_status"] == response["verification_status"]
+            assert kwargs == {}
+    if case.startswith("distress_"):
+        assert checked_answers == [candidate + "\n\n" + support_note, candidate]
