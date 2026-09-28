@@ -61,7 +61,7 @@ const SignUpPage = () => {
     try {
       const data = await apiFetch<MajorOption[]>('/req/major', { method: 'GET' })
       if (Array.isArray(data)) {
-        setMajors(data)
+        setMajors(data.filter((major) => major.majorname?.trim() !== '관리자'))
       }
     } catch (error) {
       console.error('전공 데이터 로드 실패', error)
