@@ -1,4 +1,4 @@
-import type { ChatVerificationStatus } from './chatState'
+import type { ChatRetrievalMode, ChatVerificationStatus } from './chatState'
 import type { ChatSource } from '../components/chat/SourceCards'
 
 export interface ChatStreamEvent {
@@ -15,6 +15,8 @@ export interface ChatStreamEvent {
   grounding_score?: number | null
   relevance_score?: number | null
   verification_status?: string | null
+  retrieval_mode?: string | null
+  degraded_datasets?: unknown
   suggested_questions?: string[]
 }
 
@@ -48,4 +50,20 @@ export const getCompletionVerification = (data: ChatStreamEvent) => ({
   relevanceScore: typeof data.relevance_score === 'number' || data.relevance_score === null
     ? data.relevance_score
     : undefined,
+})
+
+export const isChatRetrievalMode = (value: unknown): value is ChatRetrievalMode =>
+  value === 'hybrid' || value === 'sparse_degraded' || value === 'sparse_only'
+
+export const normalizeDegradedDatasets = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined
+  return [...new Set(value.filter((name): name is string =>
+    typeof name === 'string'
+    && /^[a-z][a-z0-9_-]{0,31}$/.test(name),
+  ))].slice(0, 10)
+}
+
+export const getCompletionRetrieval = (data: ChatStreamEvent) => ({
+  retrievalMode: isChatRetrievalMode(data.retrieval_mode) ? data.retrieval_mode : undefined,
+  degradedDatasets: normalizeDegradedDatasets(data.degraded_datasets),
 })

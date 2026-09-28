@@ -33,6 +33,10 @@ namespace RenuxServer.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_time");
 
+                    b.Property<string>("DegradedDatasetsJson")
+                        .HasColumnType("text")
+                        .HasColumnName("degraded_datasets_json");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
@@ -122,6 +126,10 @@ namespace RenuxServer.Migrations
                     b.Property<string>("RequestId")
                         .HasColumnType("text")
                         .HasColumnName("request_id");
+
+                    b.Property<string>("RetrievalMode")
+                        .HasColumnType("text")
+                        .HasColumnName("retrieval_mode");
 
                     b.Property<string>("SourcesJson")
                         .HasColumnType("text")

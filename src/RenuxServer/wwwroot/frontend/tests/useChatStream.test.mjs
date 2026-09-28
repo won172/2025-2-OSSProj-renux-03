@@ -23,10 +23,10 @@ test('훅이 completion 검증 상태를 전달하고 누락된 grounded를 성�
 
     const payload = { id: 'q-1', chatId: 'chat-1', content: '질문', createdTime: '2026-09-28T00:00:00Z' }
     const cases = [
-      { completion: { verification_status: 'passed', grounded: true, relevance_score: 0.8 }, expectedGrounded: true, expectedUpdates: [true] },
+      { completion: { verification_status: 'passed', grounded: true, relevance_score: 0.8, retrieval_mode: 'hybrid', degraded_datasets: [] }, expectedGrounded: true, expectedUpdates: [true] },
       { completion: { verification_status: 'failed', grounded: false, relevance_score: 0.2 }, expectedGrounded: false, expectedUpdates: [false] },
-      { completion: { verification_status: 'unavailable', grounded: null, relevance_score: null }, expectedGrounded: undefined, expectedUpdates: [] },
-      { completion: { verification_status: 'not_required', grounded: null, relevance_score: null }, expectedGrounded: undefined, expectedUpdates: [] },
+      { completion: { verification_status: 'unavailable', grounded: null, relevance_score: null, retrieval_mode: 'sparse_degraded', degraded_datasets: ['courses'] }, expectedGrounded: undefined, expectedUpdates: [] },
+      { completion: { verification_status: 'not_required', grounded: null, relevance_score: null, retrieval_mode: 'sparse_only', degraded_datasets: [] }, expectedGrounded: undefined, expectedUpdates: [] },
       { completion: { grounded: false }, expectedGrounded: false, expectedUpdates: [false] },
       { completion: {}, expectedGrounded: undefined, expectedUpdates: [] },
       { completion: {}, priorGrounded: false, expectedGrounded: false, expectedUpdates: [false] },
@@ -64,6 +64,8 @@ test('훅이 completion 검증 상태를 전달하고 누락된 grounded를 성�
       assert.deepEqual(groundings.map((grounding) => grounding.grounded), expectedUpdates)
       assert.equal(metadata.at(-1).verificationStatus, completion.verification_status)
       assert.equal(metadata.at(-1).relevanceScore, completion.relevance_score)
+      assert.equal(metadata.at(-1).retrievalMode, completion.retrieval_mode)
+      assert.deepEqual(metadata.at(-1).degradedDatasets, completion.degraded_datasets)
     }
   } finally {
     globalThis.fetch = originalFetch

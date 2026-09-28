@@ -50,6 +50,19 @@ test('답변 카드가 검증 실패·불가를 구분하고 이전 기록의 �
       const clean = render(fields)
       assert.doesNotMatch(clean, /근거 확인을 완료하지 못한 답변입니다|충분히 확인되지 않은 내용/)
     }
+
+    const degraded = render({ retrievalMode: 'sparse_degraded', degradedDatasets: ['courses'] })
+    assert.match(degraded, /role="note"[^>]*>일부 검색 기능이 제한된 상태에서 만든 답변입니다/)
+    assert.doesNotMatch(degraded, /aria-live=/)
+    const combined = render({ retrievalMode: 'sparse_degraded', isFallback: true,
+      fallbackReason: 'stale_data', verificationStatus: 'unavailable' })
+    assert.match(combined, /일부 검색 기능이 제한된 상태에서 만든 답변입니다/)
+    assert.match(combined, /근거 확인을 완료하지 못한 답변입니다/)
+    assert.match(combined, /오래된|최신/)
+    for (const fields of [{ retrievalMode: 'hybrid' }, { retrievalMode: 'sparse_only' }, {}]) {
+      const markup = render(fields)
+      assert.doesNotMatch(markup, /일부 검색 기능이 제한된 상태에서 만든 답변입니다/)
+    }
   } finally {
     await server.close()
   }

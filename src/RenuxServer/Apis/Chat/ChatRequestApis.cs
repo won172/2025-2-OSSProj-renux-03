@@ -51,6 +51,8 @@ public sealed record RagStreamRelayResult(
     double? GroundingScore,
     string? VerificationStatus,
     double? RelevanceScore,
+    string? RetrievalMode,
+    IReadOnlyList<string>? DegradedDatasets,
     bool CompletedVersionReady);
 
 static public class ChatRequestApis
@@ -147,6 +149,8 @@ static public class ChatRequestApis
         double? groundingScore = null;
         string? verificationStatus = null;
         double? relevanceScore = null;
+        string? retrievalMode = null;
+        List<string>? degradedDatasets = null;
         // Keep both terminal frames, including their blank separators, until
         // EOF proves that the upstream completed without a transport failure.
         var pendingTerminalLines = new List<string>(4);
@@ -274,6 +278,8 @@ static public class ChatRequestApis
                                 groundingScore = ReadGroundingScore(chunk, "grounding_score") ?? groundingScore;
                                 verificationStatus = ReadVerificationStatus(chunk);
                                 relevanceScore = ReadGroundingScore(chunk, "relevance_score");
+                                retrievalMode = ReadRetrievalMode(chunk);
+                                degradedDatasets = ReadDegradedDatasets(chunk);
                                 if (chunk.TryGetProperty("sources", out var completionSourcesProp))
                                 {
                                     var completionSources = JsonSerializer.Deserialize<List<RagSource>>(completionSourcesProp.GetRawText(), JsonOptions);
@@ -390,6 +396,8 @@ static public class ChatRequestApis
             groundingScore = null;
             verificationStatus = null;
             relevanceScore = null;
+            retrievalMode = null;
+            degradedDatasets = null;
             fullAnswer.Append(DefaultRagFailureMessage);
             using var fallbackDelivery = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
             fallbackDelivery.CancelAfter(relaySettings.Inactivity);
@@ -415,6 +423,7 @@ static public class ChatRequestApis
         var result = new RagStreamRelayResult(
             backendRequestId, fullAnswer.ToString(), sources, fallbackTriggered, fallbackReason,
             suggestedQuestions, grounded, groundingScore, verificationStatus, relevanceScore,
+            retrievalMode, degradedDatasets,
             CompletedVersionReady: false);
         // Only a successful upstream terminal contract can create an answer
         // version and its completion telemetry.
@@ -1306,6 +1315,9 @@ static public class ChatRequestApis
             GroundingScore = result.GroundingScore,
             VerificationStatus = result.VerificationStatus,
             RelevanceScore = result.RelevanceScore,
+            RetrievalMode = result.RetrievalMode,
+            DegradedDatasetsJson = result.DegradedDatasets is null
+                ? null : JsonSerializer.Serialize(result.DegradedDatasets, JsonOptions),
             IsFallback = result.FallbackTriggered,
             FallbackReason = result.FallbackReason
         };
@@ -1353,6 +1365,8 @@ static public class ChatRequestApis
             GroundingScore = message.GroundingScore,
             VerificationStatus = message.VerificationStatus,
             RelevanceScore = message.RelevanceScore,
+            RetrievalMode = message.RetrievalMode,
+            DegradedDatasets = DeserializeDegradedDatasets(message.DegradedDatasetsJson),
             IsFallback = message.IsFallback,
             FallbackReason = message.FallbackReason
         };
@@ -1384,6 +1398,19 @@ static public class ChatRequestApis
         try
         {
             return JsonSerializer.Deserialize<List<string>>(questionsJson, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    static private List<string>? DeserializeDegradedDatasets(string? datasetsJson)
+    {
+        if (datasetsJson is null) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(datasetsJson, JsonOptions);
         }
         catch (JsonException)
         {
@@ -1479,6 +1506,38 @@ static public class ChatRequestApis
         return status is "passed" or "failed" or "unavailable" or "not_required"
             ? status
             : null;
+    }
+
+    static private string? ReadRetrievalMode(JsonElement element)
+    {
+        if (!element.TryGetProperty("retrieval_mode", out var property)
+            || property.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        string? mode = property.GetString();
+        return mode is "hybrid" or "sparse_degraded" or "sparse_only" ? mode : null;
+    }
+
+    static private List<string>? ReadDegradedDatasets(JsonElement element)
+    {
+        if (!element.TryGetProperty("degraded_datasets", out var property)
+            || property.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return property.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString())
+            .Where(name => name is { Length: > 0 and <= 32 }
+                && name[0] is >= 'a' and <= 'z'
+                && name.All(character => character is >= 'a' and <= 'z'
+                    or >= '0' and <= '9' or '_' or '-'))
+            .Select(name => name!)
+            .Distinct(StringComparer.Ordinal)
+            .Take(10)
+            .ToList();
     }
 
     static private List<string> ReadSuggestedQuestions(

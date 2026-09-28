@@ -280,6 +280,20 @@ Check(verificationOperations.Count == 2 && verificationColumns.Length == 2
       && verificationColumns.Any(column => column.Name == "verification_status" && column.ColumnType == "text")
       && verificationColumns.Any(column => column.Name == "relevance_score" && column.ColumnType == "double precision"),
     "Chat verification migration must add exactly two nullable answer columns.");
+Check(messageEntity?.FindProperty(nameof(ChatMessage.RetrievalMode))?.IsNullable == true
+      && messageEntity.FindProperty(nameof(ChatMessage.DegradedDatasetsJson))?.IsNullable == true,
+    "Chat retrieval metadata must map as nullable columns.");
+Check(db.Database.GetMigrations().Contains("20260928010000_AddChatRetrievalModeAndDegradedDatasets"),
+    "The additive chat retrieval migration must be discoverable by EF Core.");
+var retrievalOperations = new RenuxServer.Migrations.AddChatRetrievalModeAndDegradedDatasets()
+    .UpOperations;
+var retrievalColumns = retrievalOperations.OfType<AddColumnOperation>().ToArray();
+Check(retrievalOperations.Count == 2 && retrievalColumns.Length == 2
+      && retrievalColumns.All(column => column.Table == "chat_messages"
+          && column.IsNullable && column.ColumnType == "text")
+      && retrievalColumns.Any(column => column.Name == "retrieval_mode")
+      && retrievalColumns.Any(column => column.Name == "degraded_datasets_json"),
+    "Chat retrieval migration must add exactly two nullable text columns.");
 
 var answerWithVerification = new ChatMessage
 {
@@ -289,6 +303,8 @@ var answerWithVerification = new ChatMessage
     Content = "answer",
     VerificationStatus = "unavailable",
     RelevanceScore = 0.4,
+    RetrievalMode = "sparse_degraded",
+    DegradedDatasetsJson = "[\"notices\",\"courses\"]",
 };
 var toChatDto = typeof(ChatRequestApis).GetMethod("ToDto",
     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
@@ -299,13 +315,20 @@ var historyJson = historyDto is null
 Check(historyDto?.VerificationStatus == "unavailable"
       && historyDto.RelevanceScore == 0.4
       && historyJson.GetProperty("verificationStatus").GetString() == "unavailable"
-      && historyJson.GetProperty("relevanceScore").GetDouble() == 0.4,
-    "Chat history DTO must return persisted verification status and relevance score.");
+      && historyJson.GetProperty("relevanceScore").GetDouble() == 0.4
+      && historyDto.RetrievalMode == "sparse_degraded"
+      && historyDto.DegradedDatasets?.SequenceEqual(["notices", "courses"]) == true
+      && historyJson.GetProperty("retrievalMode").GetString() == "sparse_degraded"
+      && historyJson.GetProperty("degradedDatasets").GetArrayLength() == 2,
+    "Chat history DTO must return persisted verification and retrieval metadata.");
 answerWithVerification.VerificationStatus = null;
 answerWithVerification.RelevanceScore = null;
+answerWithVerification.RetrievalMode = null;
+answerWithVerification.DegradedDatasetsJson = null;
 var legacyHistoryDto = toChatDto?.Invoke(null, [answerWithVerification]) as ChatMessageDto;
-Check(legacyHistoryDto?.VerificationStatus is null && legacyHistoryDto?.RelevanceScore is null,
-    "Older answer rows must retain nullable verification fields in chat history.");
+Check(legacyHistoryDto?.VerificationStatus is null && legacyHistoryDto?.RelevanceScore is null
+      && legacyHistoryDto?.RetrievalMode is null && legacyHistoryDto?.DegradedDatasets is null,
+    "Older answer rows must retain nullable completion fields in chat history.");
 
 DateTime cohortFrom = new(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
 DateTime cohortTo = new(2026, 7, 20, 0, 0, 0, DateTimeKind.Utc);

@@ -47,6 +47,10 @@ public class ChatMessage
 
     public double? RelevanceScore { get; set; }
 
+    public string? RetrievalMode { get; set; }
+
+    public string? DegradedDatasetsJson { get; set; }
+
     [Required]
     public bool IsFallback { get; set; } = false;
 

@@ -4,6 +4,7 @@ import type { ActiveChat } from '../types/chat'
 export const GUEST_CHAT_STORAGE_KEY = 'renux-guest-chats'
 
 export type ChatVerificationStatus = 'passed' | 'failed' | 'unavailable' | 'not_required'
+export type ChatRetrievalMode = 'hybrid' | 'sparse_degraded' | 'sparse_only'
 
 export interface ChatViewMessage {
   id: string
@@ -20,6 +21,8 @@ export interface ChatViewMessage {
   groundingScore?: number
   verificationStatus?: ChatVerificationStatus
   relevanceScore?: number | null
+  retrievalMode?: ChatRetrievalMode
+  degradedDatasets?: string[]
   /** Client-only terminal state. Stopped attempts are never persisted as completed answers. */
   streamState?: 'stopped'
 }
@@ -250,6 +253,8 @@ export const prepareRegeneration = (
     groundingScore: undefined,
     verificationStatus: undefined,
     relevanceScore: undefined,
+    retrievalMode: undefined,
+    degradedDatasets: undefined,
     streamState: undefined,
   }
 
@@ -283,6 +288,8 @@ export const finalizeStoppedAssistant = (
     groundingScore: undefined,
     verificationStatus: undefined,
     relevanceScore: undefined,
+    retrievalMode: undefined,
+    degradedDatasets: undefined,
     streamState: 'stopped',
   }
 })

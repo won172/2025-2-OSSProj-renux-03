@@ -653,6 +653,8 @@ const HomePage = () => {
                       fallbackReason: meta.fallbackReason,
                       verificationStatus: meta.verificationStatus,
                       relevanceScore: meta.relevanceScore,
+                      retrievalMode: meta.retrievalMode,
+                      degradedDatasets: meta.degradedDatasets,
                     }
                   : message,
               ),

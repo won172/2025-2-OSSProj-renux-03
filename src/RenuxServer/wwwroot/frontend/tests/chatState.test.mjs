@@ -168,14 +168,19 @@ test('검증 상태에 따른 안내는 신규 상태를 우선하고 이전 기
   assert.equal(getVerificationNoteKind({}), null)
 })
 
-test('재생성·중단 시 이전 답변의 검증 상태를 지운다', () => {
-  const verified = { ...latestAnswer, verificationStatus: 'unavailable', relevanceScore: 0.4 }
+test('재생성·중단 시 이전 답변의 완료 상태를 지운다', () => {
+  const verified = { ...latestAnswer, verificationStatus: 'unavailable', relevanceScore: 0.4,
+    retrievalMode: 'sparse_degraded', degradedDatasets: ['courses'] }
   const regenerated = prepareRegeneration([question, verified], verified.id)
   assert.equal(regenerated.assistant.verificationStatus, undefined)
   assert.equal(regenerated.assistant.relevanceScore, undefined)
+  assert.equal(regenerated.assistant.retrievalMode, undefined)
+  assert.equal(regenerated.assistant.degradedDatasets, undefined)
   const stopped = finalizeStoppedAssistant([question, verified], verified.id)[1]
   assert.equal(stopped.verificationStatus, undefined)
   assert.equal(stopped.relevanceScore, undefined)
+  assert.equal(stopped.retrievalMode, undefined)
+  assert.equal(stopped.degradedDatasets, undefined)
 })
 
 test('스트림 중단은 임시 상태로 표시하되 완료 답변 메타데이터를 제거한다', () => {
