@@ -26,6 +26,7 @@ import {
   startChat,
   syncNotifications,
 } from '../../chat/chatApi'
+import { createFollowupRequestTracker, loadFollowups } from '../../chat/followups'
 import {
   finalizeStoppedAssistant,
   isAbortError,
@@ -306,7 +307,14 @@ const HomePage = () => {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [closeSidebar, isMobileLayout, isSidebarOpen])
 
+  // 추천 질문 요청은 새 질문 시작, 대화 전환, 화면 이탈 시 취소한다.
+  const followupRequestsRef = useRef(createFollowupRequestTracker())
+
   useEffect(() => () => stopStream(), [routeChatId, stopStream])
+  useEffect(() => {
+    const followupRequests = followupRequestsRef.current
+    return () => followupRequests.cancel()
+  }, [routeChatId])
 
   useEffect(() => {
     const load = async () => {
@@ -603,6 +611,8 @@ const HomePage = () => {
     restoreInputOnError: boolean,
     guestToken = selectedGuestToken,
   ) => {
+    // 이전 답변의 추천 질문 요청이 남아 있으면 새 질문을 시작하기 전에 취소한다.
+    followupRequestsRef.current.cancel()
     setChatSending(true)
     setChatError(null)
     scrollToBottom()
@@ -671,18 +681,21 @@ const HomePage = () => {
       // 본 답변의 completion/done을 받은 뒤 별도 요청으로 추천을 만든다.
       // await하지 않으므로 입력창 로딩 상태와 답변 완료 시점에는 영향을 주지 않는다.
       if (requestId && grounded === true) {
-        void fetchFollowups(
-          requestId,
-          authStatus === 'guest' ? guestToken : undefined,
-        ).then(({ questions }) => {
-          setChatMessages((previous) => previous.map((message) => (
-            message.id === assistantId && message.requestId === requestId
-              ? { ...message, suggestedQuestions: questions }
-              : message
-          )))
-        }).catch((error) => {
-          // 추천 실패는 이미 완료된 답변을 오류 상태로 바꾸지 않는다.
-          console.warn('Failed to load follow-up suggestions', error)
+        const followupGuestToken = authStatus === 'guest' ? guestToken : undefined
+        void loadFollowups({
+          signal: followupRequestsRef.current.begin(),
+          fetchQuestions: (signal) => fetchFollowups(requestId, followupGuestToken, signal),
+          onQuestions: (questions) => {
+            setChatMessages((previous) => previous.map((message) => (
+              message.id === assistantId && message.requestId === requestId
+                ? { ...message, suggestedQuestions: questions }
+                : message
+            )))
+          },
+          onError: (error) => {
+            // 추천 실패는 이미 완료된 답변을 오류 상태로 바꾸지 않는다.
+            console.warn('Failed to load follow-up suggestions', error)
+          },
         })
       }
     } catch (error) {
@@ -772,6 +785,8 @@ const HomePage = () => {
       return
     }
 
+    // 새 방 생성이 필요한 경우에도 이전 추천 요청을 질문 제출 즉시 취소한다.
+    followupRequestsRef.current.cancel()
     let currentChatId = selectedChatId
     let currentGuestToken = selectedGuestToken
 
