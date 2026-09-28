@@ -945,8 +945,8 @@ def refresh_notice_artifacts() -> None:
 
     if aligned:
         # Chroma는 이미 증분 유지됨 → 임베딩 없이 parquet/TF-IDF만 전체 재생성.
-        persist_dataset_artifacts_only("notices", frame)
-        update_collection_metadata_from_frame("notices", frame)
+        stamped_frame, _, _ = persist_dataset_artifacts_only("notices", frame)
+        update_collection_metadata_from_frame("notices", stamped_frame)
     else:
         # 토글 OFF 또는 Chroma 불일치(자가복구): 기존 벡터를 보존한 채
         # 새 corpus를 올리고 검증한 뒤 stale ID만 제거한다.
