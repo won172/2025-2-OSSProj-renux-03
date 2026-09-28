@@ -48,6 +48,8 @@ import ChatComposer, { CHAT_INPUT_MAX_LENGTH } from '../../components/chat/ChatC
 import ChatHeader from '../../components/chat/ChatHeader'
 import ChatMessageItem from '../../components/chat/ChatMessageItem'
 import ChatSidebar from '../../components/chat/ChatSidebar'
+import ChatStreamAnnouncement from '../../components/chat/ChatStreamAnnouncement'
+import { createChatStreamAnnouncementTracker, type ChatStreamStatus } from '../../chat/streamAnnouncement'
 import ChatToasts, { type ChatToast, type ChatToastTone } from '../../components/chat/ChatToasts'
 import ConfirmDialog from '../../components/chat/ConfirmDialog'
 import HomeBriefing from '../../components/chat/HomeBriefing'
@@ -134,6 +136,7 @@ const HomePage = () => {
 
   const [chatInput, setChatInput] = useState('')
   const [chatSending, setChatSending] = useState(false)
+  const [streamStatus, setStreamStatus] = useState<ChatStreamStatus>(null)
   const [activeCitation, setActiveCitation] = useState<{ messageId: string; citationNumber: number } | null>(null)
 
   const [briefing, setBriefing] = useState<HomeBriefingData | null>(null)
@@ -177,6 +180,7 @@ const HomePage = () => {
   const toastSeq = useRef(0)
   /** 폴링 콜백이 낡은 authStatus를 붙잡지 않도록 최신 값을 ref로 둔다. */
   const authStatusRef = useRef<AuthStatus>('checking')
+  const streamAnnouncementRef = useRef(createChatStreamAnnouncementTracker())
 
   const { streamMessage, stopStream } = useChatStream()
   const { canInstall, install, dismiss: dismissInstall } = useInstallPrompt()
@@ -611,9 +615,11 @@ const HomePage = () => {
     restoreInputOnError: boolean,
     guestToken = selectedGuestToken,
   ) => {
+    const request = streamAnnouncementRef.current.beginRequest()
     // 이전 답변의 추천 질문 요청이 남아 있으면 새 질문을 시작하기 전에 취소한다.
     followupRequestsRef.current.cancel()
     setChatSending(true)
+    setStreamStatus(null)
     setChatError(null)
     scrollToBottom()
 
@@ -678,6 +684,9 @@ const HomePage = () => {
       if (receivedAny) {
         void signalAnswerCompleted()
       }
+      if (streamAnnouncementRef.current.isCurrent(request)) {
+        setStreamStatus(streamAnnouncementRef.current.terminal(request, 'completed'))
+      }
       followIfAtBottom()
 
       // 본 답변의 completion/done을 받은 뒤 별도 요청으로 추천을 만든다.
@@ -702,11 +711,18 @@ const HomePage = () => {
       }
     } catch (error) {
       if (isAbortError(error)) {
-        setChatError(null)
+        if (streamAnnouncementRef.current.isCurrent(request)) {
+          const status = streamAnnouncementRef.current.terminal(request, 'stopped')
+          if (status) setStreamStatus(status)
+          setChatError(null)
+        }
         setChatMessages((previous) => finalizeStoppedAssistant(previous, assistantId))
       } else {
+        if (streamAnnouncementRef.current.isCurrent(request)) {
+          streamAnnouncementRef.current.terminal(request, 'error')
+        }
         console.error('Failed to send message', error)
-        setChatError('메시지를 전송하지 못했습니다.')
+        if (streamAnnouncementRef.current.isCurrent(request)) setChatError('메시지를 전송하지 못했습니다.')
         setChatMessages((previous) =>
           previous.map((message) =>
             message.id === assistantId
@@ -714,11 +730,16 @@ const HomePage = () => {
               : message,
           ),
         )
-        if (restoreInputOnError) setChatInput(question.content)
+        if (restoreInputOnError && streamAnnouncementRef.current.isCurrent(request)) setChatInput(question.content)
       }
     } finally {
-      setChatSending(false)
+      if (streamAnnouncementRef.current.isCurrent(request)) setChatSending(false)
     }
+  }
+
+  const stopCurrentStream = () => {
+    streamAnnouncementRef.current.markUserStop()
+    stopStream()
   }
 
   const newId = (prefix: string) =>
@@ -1165,7 +1186,7 @@ const HomePage = () => {
             ) : chatMessages.length === 0 ? (
               <p className="ch-status">아직 메시지가 없습니다. 첫 질문을 보내보세요.</p>
             ) : (
-              <ul className="ch-thread" role="log" aria-live="polite" aria-busy={chatSending} aria-label="채팅 메시지">
+              <ul className="ch-thread" aria-busy={chatSending} aria-label="채팅 메시지">
                 {isLoadingMore && (
                   <li className="ch-status" role="status"><small>이전 대화 불러오는 중...</small></li>
                 )}
@@ -1214,12 +1235,13 @@ const HomePage = () => {
           )}
         </div>
 
+        <ChatStreamAnnouncement status={streamStatus} />
         <ChatComposer
           inputRef={chatInputRef}
           value={chatInput}
           onChange={setChatInput}
           onSubmit={() => { void submitQuestion(chatInput) }}
-          onStop={stopStream}
+          onStop={stopCurrentStream}
           sending={chatSending}
           disabled={composerDisabled}
           placeholder={
