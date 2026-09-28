@@ -4055,6 +4055,11 @@ async def _plan_query(
 
     def planned(handler: str | None, routes: List[str], reason: str, **values) -> QueryPlan:
         stage_timings["query_plan"] = {"reason": reason, "direct_handler": handler}
+        if "query_analysis_decision" not in stage_timings:
+            stage_timings["query_analysis_decision"] = {
+                "skipped": True,
+                "reason": "direct_handler" if handler is not None else "disabled",
+            }
         analysis_meta = values.get("analysis_meta")
         analysis = None if analysis_meta is None else analysis_meta.result
         sensitivity = (
@@ -4133,7 +4138,18 @@ async def _plan_query(
 
     analysis_query = _query_for_analysis(raw_query)
     analysis_meta = QueryAnalysisMeta(result=None, used=False, failed=False)
-    if USE_QUERY_ANALYSIS and not _can_skip_query_analysis(raw_query, analysis_query, history_text):
+    skip_analysis = (
+        _can_skip_query_analysis(raw_query, analysis_query, history_text)
+        if USE_QUERY_ANALYSIS else False
+    )
+    stage_timings["query_analysis_decision"] = {
+        "skipped": not USE_QUERY_ANALYSIS or skip_analysis,
+        "reason": (
+            "disabled" if not USE_QUERY_ANALYSIS
+            else "single_explicit_route" if skip_analysis else "llm_required"
+        ),
+    }
+    if USE_QUERY_ANALYSIS and not skip_analysis:
         started_at = time.perf_counter()
         result = await analyze_query(
             analysis_query, history_text, temporal_context, usage_collector=llm_usage,
@@ -5652,6 +5668,43 @@ def _deterministic_evidence_fallback(
     return fallback
 
 
+def _evidence_document_key(row: pd.Series) -> str:
+    for column in ("document_key", "doc_id", "ontology_document_key"):
+        value = row.get(column)
+        if value is not None and pd.notna(value) and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _selector_bypass_reason(
+    shortlist: pd.DataFrame,
+    *,
+    strategy: RetrievalStrategy | None,
+    structured_keys_by_dataset: Dict[str, tuple[str, ...]] | None,
+) -> str | None:
+    """Bypass only one document pinned to revision-checked SQL evidence."""
+    if (
+        shortlist.empty or "dataset" not in shortlist.columns
+        or strategy is None or strategy.mode != "structured"
+    ):
+        return None
+    resolved = set((structured_keys_by_dataset or {}).get(strategy.dataset or "", ()))
+    if not resolved or "structured_match" not in shortlist.columns:
+        return None
+    document_keys = shortlist.apply(_evidence_document_key, axis=1)
+    if (
+        document_keys.eq("").any()
+        or document_keys.nunique() != 1
+        or not shortlist["structured_match"].fillna(0).eq(1).all()
+        or not shortlist["dataset"].astype(str).eq(strategy.dataset).all()
+        or not document_keys.isin(resolved).all()
+    ):
+        return None
+    # Max-normalized lexical scores are not absolute confidence; a single
+    # high-scoring hybrid document still needs the selector pending human qrels.
+    return "structured_sql_document"
+
+
 async def _select_evidence_for_answer(
     question: str,
     shortlist: pd.DataFrame,
@@ -5849,14 +5902,38 @@ async def _select_answer_evidence(
     recent_notice_query: bool,
     active_notice_query: bool = False,
     date_bound_schedule_query: bool = False,
+    strategy: RetrievalStrategy | None = None,
+    structured_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
+    selection_metadata: dict | None = None,
 ) -> tuple[pd.DataFrame, bool]:
     """Select answer evidence while preserving chronological latest notices."""
+    def record(reason: str | None) -> None:
+        if selection_metadata is not None:
+            selection_metadata.update({
+                "skipped": reason is not None,
+                "reason": reason or "llm_required",
+            })
+
     if active_notice_query:
+        record("active_notice")
         return _select_active_notice_evidence(shortlist), False
     if recent_notice_query:
+        record("recent_notice")
         return _select_latest_notice_evidence(shortlist), False
     if date_bound_schedule_query:
+        record("date_bound_schedule")
         return _select_date_bound_schedule_evidence(shortlist), False
+    reason = _selector_bypass_reason(
+        shortlist, strategy=strategy,
+        structured_keys_by_dataset=structured_keys_by_dataset,
+    )
+    if reason is not None:
+        refined = _refine_final_candidate_scope(question, shortlist)
+        selected = _deterministic_evidence_fallback(question, refined)
+        if not selected.empty:
+            record(reason)
+            return selected, False
+    record(None)
     return await _select_evidence_for_answer(question, shortlist, usage_collector)
 
 
@@ -9313,6 +9390,7 @@ async def _execute_retrieval_steps(
     selector_fallback = False
     if fallback_reason is None:
         stage_started_at = time.perf_counter()
+        selection_metadata: dict[str, Any] = {}
         merged, selector_fallback = await _select_answer_evidence(
             semantic_query,
             merged,
@@ -9320,7 +9398,12 @@ async def _execute_retrieval_steps(
             recent_notice_query=recent_notice_query,
             active_notice_query=active_notice_query,
             date_bound_schedule_query=(date_filter is not None and "schedule" in route),
+            strategy=plan.strategy,
+            structured_keys_by_dataset=structured_document_keys_by_dataset,
+            selection_metadata=selection_metadata,
         )
+        if selection_metadata:
+            stage_timings["evidence_selection_decision"] = selection_metadata
         _mark_stage(stage_timings, "evidence_selection", stage_started_at)
         _log_event(
             logging.WARNING if selector_fallback else logging.INFO,
@@ -9336,6 +9419,11 @@ async def _execute_retrieval_steps(
                 if merged.attrs.get("selector_refused")
                 else FALLBACK_REASON_NO_RESULTS
             )
+    else:
+        stage_timings["evidence_selection_decision"] = {
+            "skipped": True,
+            "reason": "retrieval_fallback",
+        }
 
     if fallback_reason is not None:
         # 검색이 비었더라도 학사일정·식단 표에 답이 있는 시점 질문이면 직접 조회해 답한다.

@@ -24,6 +24,40 @@ from src.pipelines.ingest import (  # noqa: E402
 )
 
 
+def test_aligned_notice_refresh_updates_chroma_with_artifact_revision(monkeypatch, tmp_path):
+    from src.pipelines import ingest
+
+    source = pd.DataFrame([{"chunk_id": "notice:1:0", "doc_id": "notices:1", "chunk_text": "official"}])
+    metadata = {}
+
+    monkeypatch.setattr(notices_sync, "RAG_NOTICES_INCREMENTAL_EMBED", True)
+    monkeypatch.setattr(notices_sync, "build_notice_index_frame_from_db", lambda: source)
+    monkeypatch.setattr(notices_sync, "get_all_ids", lambda _collection: ["notice:1:0"])
+    monkeypatch.setitem(
+        ingest.DATASET_ARTIFACTS,
+        "notices",
+        ingest.DatasetArtifacts("notices", "dongguk_notices", tmp_path / "notices.parquet"),
+    )
+    monkeypatch.setattr(ingest, "_train_lexical_indices", lambda *_args, **_kwargs: (None, None))
+
+    def update(dataset, frame):
+        metadata["dataset"] = dataset
+        metadata["revision"] = set(frame["corpus_revision"])
+
+    monkeypatch.setattr(notices_sync, "update_collection_metadata_from_frame", update)
+    monkeypatch.setattr(
+        notices_sync,
+        "_persist_replacing_collection",
+        lambda *_args: pytest.fail("aligned corpus unexpectedly re-embedded"),
+    )
+
+    notices_sync.refresh_notice_artifacts()
+
+    artifact_revision = set(pd.read_parquet(tmp_path / "notices.parquet")["corpus_revision"])
+    assert len(artifact_revision) == 1
+    assert metadata == {"dataset": "notices", "revision": artifact_revision}
+
+
 def test_collect_board_continues_past_known_articles(monkeypatch):
     """기존 글이 연속으로 있어도 같은 페이지 뒤쪽 신규 글을 확인해야 한다."""
     list_rows = [
