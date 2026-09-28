@@ -20,7 +20,7 @@ from contextvars import ContextVar
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass, replace
-from typing import AsyncIterator, Dict, List, Tuple
+from typing import Any, AsyncIterator, Dict, List, Tuple
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -8488,7 +8488,7 @@ async def _stream_with_terminal_event(
         )
 
 
-def _completion_stream_event(
+def _completion_payload(
     *,
     request_id: str,
     grounded: bool | None,
@@ -8500,8 +8500,8 @@ def _completion_stream_event(
     resolved_intents: list[str] | None = None,
     verification_status: str = VERIFICATION_UNAVAILABLE,
     relevance_score: float | None = None,
-) -> str:
-    """Build final persistence metadata; callers emit it immediately before ``done``."""
+) -> dict[str, Any]:
+    """Build completion metadata; the stream adapter emits it before ``done``."""
     serialized_sources = [
         source.model_dump() if hasattr(source, "model_dump") else source
         for source in sources
@@ -8522,894 +8522,135 @@ def _completion_stream_event(
         "fallback_reason": fallback_reason,
         "sources": serialized_sources,
     }
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    return payload
 
 
-@app.post("/ask/stream")
-async def ask_stream(req: AskRequest, request: Request):
-    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    raw_query = req.question.strip()
-    if not raw_query:
-        raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
+def _completion_stream_event(**kwargs) -> str:
+    return _query_event_sse(QueryEvent(_completion_payload(**kwargs)))
 
-    temporal_context = _request_temporal_context(req)
-    session_id = req.session_id or str(uuid.uuid4())
-    stage_timings: dict[str, float] = {}
-    llm_usage: list[dict] = []
-    request_started_at = time.perf_counter()
 
-    async def _stream_body():
-        _request_as_of.set(temporal_context.as_of.isoformat())
+@dataclass(frozen=True)
+class QueryEvent:
+    payload: dict[str, Any]
 
-        plan = await _plan_query(
-            req=req, raw_query=raw_query, temporal_context=temporal_context,
-            request_id=request_id, session_id=session_id,
-            stage_timings=stage_timings, llm_usage=llm_usage, mode="stream",
-        )
-        crisis = plan.crisis
-        if plan.direct_handler == "crisis_support":
-            _mark_stage(stage_timings, "total", request_started_at)
-            yield "data: " + json.dumps(
-                {
-                    "type": "metadata",
-                    "request_id": request_id,
-                    "sources": [],
-                    "citations": "",
-                    "route": ["crisis_support"],
-                    "fallback_triggered": False,
-                },
-                ensure_ascii=False,
-            ) + "\n\n"
-            yield "data: " + json.dumps(
-                {"type": "text", "content": crisis.answer},
-                ensure_ascii=False,
-            ) + "\n\n"
-            await run_in_threadpool(
-                _save_rag_evaluation_log,
-                request_id, session_id, raw_query, raw_query,
-                ["crisis_support"], crisis.answer,
-                False, None, False, False,
-                "crisis_support", None, None, None, False, None,
-                False, False, None, None, [], stage_timings, llm_usage,
-            )
-            await run_in_threadpool(
-                append_manual_history, session_id, raw_query, crisis.answer
-            )
-            # 발화 원문은 남기지 않는다 — 운영 로그로 흘러도 되는 정보가 아니다.
-            _log_event(
-                logging.WARNING,
-                "crisis_support_answered",
-                request_id=request_id,
-                kind=crisis.kind,
-            )
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=None,
-                grounding_score=None,
-                verification_status=VERIFICATION_NOT_REQUIRED,
-                suggested_questions=[],
-                fallback_reason=None,
-                sources=[],
-                resolved_intents=["crisis_support"],
-            )
-            return
 
-        allow_wise = plan.allow_wise
-        semantic_cache_ns = plan.semantic_cache_ns
-        if plan.direct_handler == "campus_out_of_scope":
-            answer = out_of_domain_reply(raw_query)
-            _mark_stage(stage_timings, "total", request_started_at)
-            yield "data: " + json.dumps(
-                {
-                    "type": "metadata",
-                    "request_id": request_id,
-                    "sources": [],
-                    "citations": "",
-                    "route": ["unknown"],
-                    "fallback_triggered": True,
-                    "fallback_reason": FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
-                },
-                ensure_ascii=False,
-            ) + "\n\n"
-            yield "data: " + json.dumps(
-                {"type": "text", "content": answer},
-                ensure_ascii=False,
-            ) + "\n\n"
-            await run_in_threadpool(
-                _save_rag_evaluation_log,
-                request_id,
-                session_id,
-                raw_query,
-                raw_query,
-                ["unknown"],
-                answer,
-                True,
-                FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
-                False,
-                False,
-                "unknown",
-                None,
-                None,
-                None,
-                False,
-                None,
-                False,
-                False,
-                None,
-                None,
-                [],
-                stage_timings,
-                llm_usage,
-            )
-            await run_in_threadpool(append_manual_history, session_id, raw_query, answer)
-            _log_event(
-                logging.INFO,
-                "campus_out_of_scope_answered",
-                request_id=request_id,
-                question=raw_query[:80],
-                campus="wise",
-            )
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=None,
-                grounding_score=None,
-                verification_status=VERIFICATION_NOT_REQUIRED,
-                suggested_questions=[],
-                fallback_reason=FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
-                sources=[],
-                resolved_intents=["unknown"],
-            )
-            return
+@dataclass(frozen=True)
+class QueryOutcome:
+    answer: str
+    sources: list[SourceChunk]
+    citations: str
+    route: list[str]
+    fallback_triggered: bool
+    fallback_reason: str | None
+    verification_status: str
+    grounded: bool | None
+    grounding_score: float | None
+    relevance_score: float | None
+    suggested_questions: list[str]
+    suggested_question_details: list[SuggestedQuestionDetail]
+    resolved_intents: list[str]
+    stage_timings: dict[str, Any]
+    request_id: str
 
-        course_recommendation = plan.recommendation
-        if plan.direct_handler == "course_recommendation":
-            answer, recommendation_sources, missing_fields = course_recommendation
-            serialized_sources = [source.model_dump() for source in recommendation_sources]
-            yield "data: " + json.dumps(
-                {
-                    "type": "metadata",
-                    "request_id": request_id,
-                    "sources": serialized_sources,
-                    "citations": "",
-                    "route": ["courses"],
-                    "fallback_triggered": False,
-                },
-                ensure_ascii=False,
-            ) + "\n\n"
-            yield "data: " + json.dumps(
-                {"type": "text", "content": answer},
-                ensure_ascii=False,
-            ) + "\n\n"
-            await run_in_threadpool(append_manual_history, session_id, raw_query, answer)
-            _mark_stage(stage_timings, "total", request_started_at)
-            _log_event(
-                logging.INFO,
-                "course_recommendation_completed",
-                request_id=request_id,
-                source_count=len(recommendation_sources),
-                missing_fields=list(missing_fields),
-            )
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=True if recommendation_sources else None,
-                grounding_score=1.0 if recommendation_sources else None,
-                verification_status=VERIFICATION_NOT_REQUIRED,
-                suggested_questions=[],
-                fallback_reason=None,
-                sources=recommendation_sources,
-                resolved_intents=["courses"],
-            )
-            return
-
-        if plan.direct_handler == "semantic_cache":
-            hit = plan.cache_hit
-            _mark_stage(stage_timings, "total", request_started_at)
-            yield "data: " + json.dumps({"type": "metadata", "request_id": request_id, "sources": hit.get("sources", []), "citations": hit.get("citations", ""), "route": hit.get("route", []), "fallback_triggered": False}, ensure_ascii=False) + "\n\n"
-            yield "data: " + json.dumps({"type": "text", "content": hit["answer"]}, ensure_ascii=False) + "\n\n"
-            if hit.get("suggested_questions"):
-                yield "data: " + json.dumps({"type": "suggestions", "questions": hit["suggested_questions"]}, ensure_ascii=False) + "\n\n"
-            if hit.get("grounded") is False:
-                yield "data: " + json.dumps({"type": "grounding", "grounded": False, "score": hit.get("grounding_score"), "reason": None}, ensure_ascii=False) + "\n\n"
-            await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"])
-            _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=hit.get("grounded"),
-                grounding_score=hit.get("grounding_score"),
-                relevance_score=hit.get("relevance_score"),
-                verification_status=_cached_verification_status(hit),
-                suggested_questions=hit.get("suggested_questions", []),
-                fallback_reason=None,
-                sources=hit.get("sources", []),
-                suggested_question_details=hit.get("suggested_question_details", []),
-                resolved_intents=hit.get("resolved_intents", hit.get("route", [])),
-            )
-            return
-
-        # 인사·감사·정체성 발화는 검색이 필요 없다. RAG로 보내면 "자료를 찾지 못했습니다"로
-        # 답하게 되는데(로그에서 "안녕" 34회가 그랬다), 첫인사에 실패 메시지를 주는 셈이다.
-        smalltalk = plan.smalltalk
-        if plan.direct_handler == "smalltalk":
-            _mark_stage(stage_timings, "total", request_started_at)
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['smalltalk'], 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'text', 'content': smalltalk.answer}, ensure_ascii=False)}\n\n"
-            await run_in_threadpool(
-                _save_rag_evaluation_log,
-                request_id, session_id, raw_query, raw_query, ["smalltalk"], smalltalk.answer,
-                False, None, False, False,
-                "smalltalk", None, None, None, False, None,
-                False, False, None, None, [], stage_timings, llm_usage,
-            )
-            await run_in_threadpool(append_manual_history, session_id, raw_query, smalltalk.answer)
-            _log_event(logging.INFO, "smalltalk_answered", request_id=request_id, kind=smalltalk.kind)
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=None,
-                grounding_score=None,
-                verification_status=VERIFICATION_NOT_REQUIRED,
-                suggested_questions=[],
-                fallback_reason=None,
-                sources=[],
-                resolved_intents=["smalltalk"],
-            )
-            return
-
-        future_unannounced = plan.future_unannounced
-        if plan.direct_handler == "future_unannounced":
-            answer = future_unannounced.answer
-            route = ["notices"]
-            _mark_stage(stage_timings, "total", request_started_at)
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': route, 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_FUTURE_UNANNOUNCED}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'text', 'content': answer}, ensure_ascii=False)}\n\n"
-            await run_in_threadpool(
-                _save_rag_evaluation_log,
-                request_id, session_id, raw_query, raw_query, route, answer,
-                True, FALLBACK_REASON_FUTURE_UNANNOUNCED, False, False,
-                "future_unannounced", None, None,
-                json.dumps([raw_query], ensure_ascii=False), False, None,
-                False, False, json.dumps([raw_query], ensure_ascii=False), None,
-                [], stage_timings, llm_usage,
-            )
-            await run_in_threadpool(append_manual_history, session_id, raw_query, answer)
-            _log_event(
-                logging.INFO,
-                "future_publication_not_announced",
-                request_id=request_id,
-                as_of=temporal_context.as_of.isoformat(),
-            )
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=None,
-                grounding_score=None,
-                verification_status=VERIFICATION_NOT_REQUIRED,
-                suggested_questions=[],
-                fallback_reason=FALLBACK_REASON_FUTURE_UNANNOUNCED,
-                sources=[],
-                resolved_intents=route,
-            )
-            return
-
-        # 날짜·기간형 질문은 정형 표를 먼저 조회한다. 검색 결과가 잘못된 답을 자신 있게
-        # 고른 뒤에는 폴백이 발동하지 않으므로, 이 순서가 정확성 보장의 핵심이다.
-        direct = plan.direct_answer
-        if plan.direct_handler == "structured_direct":
-            direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
-            direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
-            direct_fallback_reason = _direct_answer_fallback_reason(direct)
-            direct_suggestion_details = _direct_answer_suggestions(direct, direct_sources)
-            direct_suggestions = [
-                detail.question for detail in direct_suggestion_details
-            ]
-            serialized_sources = [source.model_dump() for source in direct_sources]
-            direct_route = ["meals"] if direct.kind.startswith("meal") else ["schedule"]
-            _mark_stage(stage_timings, "total", request_started_at)
-            direct_fallback_metadata = {"fallback_reason": direct_fallback_reason} if direct_fallback_reason else {}
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': serialized_sources, 'citations': direct_citations, 'route': direct_route, 'fallback_triggered': direct_fallback_reason is not None, **direct_fallback_metadata}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'text', 'content': direct_answer}, ensure_ascii=False)}\n\n"
-            if direct_suggestions:
-                yield f"data: {json.dumps({'type': 'suggestions', 'questions': direct_suggestions}, ensure_ascii=False)}\n\n"
-            await run_in_threadpool(
-                _save_rag_evaluation_log,
-                request_id, session_id, raw_query, raw_query, direct_route, direct_answer,
-                direct_fallback_reason is not None, direct_fallback_reason, False, False,
-                direct_route[0], None, None, None, False, None,
-                False, False, json.dumps([raw_query], ensure_ascii=False), 1.0,
-                direct_sources, stage_timings, llm_usage,
-                deterministically_grounded=direct_grounded is True,
-            )
-            await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer)
-            _log_event(
-                logging.INFO,
-                "direct_answer_completed",
-                request_id=request_id,
-                kind=direct.kind,
-                as_of=temporal_context.as_of.isoformat(),
-                source_count=len(direct_sources),
-            )
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=direct_grounded,
-                grounding_score=direct_grounding_score,
-                verification_status=VERIFICATION_NOT_REQUIRED,
-                suggested_questions=direct_suggestions,
-                suggested_question_details=direct_suggestion_details,
-                fallback_reason=direct_fallback_reason,
-                sources=direct_sources,
-                resolved_intents=direct_route,
-            )
-            return
-
-        analysis_meta = plan.analysis_meta
-        clarification_fields = plan.clarification_fields
-        if plan.direct_handler == "clarification":
-            clarification_answer = _build_clarification_answer(clarification_fields)
-            _mark_stage(stage_timings, "total", request_started_at)
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_CLARIFICATION_NEEDED}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'text', 'content': clarification_answer}, ensure_ascii=False)}\n\n"
-            await run_in_threadpool(
-                _save_rag_evaluation_log,
-                request_id, session_id, raw_query, raw_query, ["unknown"], clarification_answer,
-                True, FALLBACK_REASON_CLARIFICATION_NEEDED, False, False,
-                None if analysis_meta.result is None else analysis_meta.result.intent,
-                None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
-                None if analysis_meta.result is None else analysis_meta.result.time_focus,
-                None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
-                True,
-                ", ".join(clarification_fields),
-                analysis_meta.used, analysis_meta.failed, None, None, [], stage_timings, llm_usage,
-            )
-            await run_in_threadpool(append_manual_history, session_id, raw_query, clarification_answer)
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=None,
-                grounding_score=None,
-                verification_status=VERIFICATION_NOT_REQUIRED,
-                suggested_questions=[],
-                fallback_reason=FALLBACK_REASON_CLARIFICATION_NEEDED,
-                sources=[],
-                resolved_intents=["unknown"],
-            )
-            return
-
-        # 1. 일반 대화 처리 (검색 불필요한 경우)
-        if plan.direct_handler == "out_of_domain":
-            # 근거가 하나도 없는 상태로 생성하지 않는다. 예전에는 여기서 LLM에게
-            # "자연스럽고 짧게 답하세요"라고만 일러 보내서, 학교와 무관한 질문에
-            # 모델이 자기 지식으로 답했다("샤갈은 프랑스의 화가이자 …").
-            domain_reply = out_of_domain_reply(raw_query)
-
-            # 메타데이터 전송 (소스 없음)
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_OUT_OF_DOMAIN}, ensure_ascii=False)}\n\n"
-
-            full_answer = [domain_reply]
-            yield f"data: {json.dumps({'type': 'text', 'content': domain_reply}, ensure_ascii=False)}\n\n"
-            _log_event(
-                logging.INFO,
-                "out_of_domain_answered",
-                request_id=request_id,
-                question=raw_query[:80],
-            )
-            _mark_stage(stage_timings, "total", request_started_at)
-            
-            # 로깅은 스트림 종료 후 수행 (별도 태스크로 처리하거나 여기서 대략 수행)
-            await run_in_threadpool(
-                _save_rag_evaluation_log,
-                request_id, session_id, raw_query, raw_query, ["unknown"], "".join(full_answer),
-                True, FALLBACK_REASON_OUT_OF_DOMAIN, False, False, analysis_meta.result.intent,
-                json.dumps(analysis_meta.result.entities, ensure_ascii=False),
-                analysis_meta.result.time_focus,
-                json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
-                analysis_meta.result.needs_clarification, analysis_meta.result.clarification_reason,
-                analysis_meta.used, analysis_meta.failed, None, None, [],
-                stage_timings, llm_usage,
-            )
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=None,
-                grounding_score=None,
-                verification_status=VERIFICATION_NOT_REQUIRED,
-                suggested_questions=[],
-                fallback_reason=FALLBACK_REASON_OUT_OF_DOMAIN,
-                sources=[],
-                resolved_intents=["unknown"],
-            )
-            return
-
-        query_for_retrieval = plan.query_for_retrieval
-        expanded_query = plan.expanded_query
-        retrieval_queries = list(plan.retrieval_queries)
-        semantic_query = plan.semantic_query
-        final_where_filter = plan.filters["where"]
-        notice_visibility_filter = plan.filters["notice_visibility"]
-        route = plan.route
-        ontology_document_keys_by_dataset = plan.ontology_document_keys_by_dataset
-        structured_document_keys_by_dataset = plan.structured_document_keys_by_dataset
-        entry_year = plan.entry_year
-        date_filter = plan.filters["date"]
-        date_filter_applied = date_filter is not None
-        date_filter_relaxed = False
-        recent_notice_query = plan.recent_notice_query
-        notice_board_filter = plan.notice_board_filter
-        retrieval_policy = plan.retrieval_policy
-        active_notice_query = plan.active_notice_query
-        current_operational_notice_terms = plan.current_operational_notice_terms
-        stage_started_at = time.perf_counter()
-        frames, date_filter_eliminated_any, unavailable_datasets = await _retrieve_frames_for_queries(
-            route=route, queries=retrieval_queries, final_where_filter=final_where_filter,
-            notice_board_filter=notice_board_filter, date_filter=date_filter, entry_year=entry_year,
-            request_id=request_id, notice_visibility_filter=notice_visibility_filter,
-            recent_notice_query=recent_notice_query,
-            active_notice_query=active_notice_query,
-            active_notice_as_of=temporal_context.as_of if active_notice_query else None,
-            current_operational_notice_terms=current_operational_notice_terms,
-            allow_wise=allow_wise,
-            ontology_document_keys_by_dataset=ontology_document_keys_by_dataset,
-            structured_document_keys_by_dataset=structured_document_keys_by_dataset,
-            as_of=temporal_context.as_of,
+    def response(self) -> AskResponse:
+        return AskResponse(
+            request_id=self.request_id, answer=self.answer, citations=self.citations,
+            route=self.route, sources=self.sources, resolved_intents=self.resolved_intents,
+            suggested_questions=self.suggested_questions,
+            suggested_question_details=self.suggested_question_details,
+            grounded=self.grounded, grounding_score=self.grounding_score,
+            relevance_score=self.relevance_score,
+            verification_status=self.verification_status,
+            fallback_triggered=self.fallback_triggered, fallback_reason=self.fallback_reason,
         )
 
-        if not frames and date_filter is not None and date_filter.relaxed_start and date_filter.relaxed_end:
-            date_filter_relaxed = True
-            relaxed_filter = QueryDateFilter(
-                start=date_filter.relaxed_start, end=date_filter.relaxed_end,
-                label=f"{date_filter.label}_relaxed", is_relative=date_filter.is_relative,
-                kind=getattr(date_filter, "kind", "published"),
-            )
-            relaxed_frames, _, relaxed_unavailable = await _retrieve_frames_for_queries(
-                route=route, queries=retrieval_queries, final_where_filter=final_where_filter,
-                notice_board_filter=notice_board_filter, date_filter=relaxed_filter, entry_year=entry_year,
-                request_id=request_id, notice_visibility_filter=notice_visibility_filter,
-                recent_notice_query=recent_notice_query,
-                active_notice_query=active_notice_query,
-                active_notice_as_of=temporal_context.as_of if active_notice_query else None,
-                current_operational_notice_terms=current_operational_notice_terms,
-                allow_wise=allow_wise,
-                ontology_document_keys_by_dataset=ontology_document_keys_by_dataset,
-                structured_document_keys_by_dataset=structured_document_keys_by_dataset,
-                as_of=temporal_context.as_of,
-            )
-            if relaxed_frames:
-                frames = relaxed_frames
-            unavailable_datasets = list(dict.fromkeys(unavailable_datasets + relaxed_unavailable))
 
-        frames, staff_unavailable = await _enrich_staff_lookup_frames(
-            question=raw_query,
-            frames=frames,
-            final_where_filter=final_where_filter,
-            entry_year=entry_year,
-            request_id=request_id,
-            allow_wise=allow_wise,
+def _query_event_sse(event: QueryEvent) -> str:
+    return f"data: {json.dumps(event.payload, ensure_ascii=False)}\n\n"
+
+
+async def execute_query(
+    plan: QueryPlan,
+    mode: str,
+    *,
+    req: AskRequest,
+    raw_query: str,
+    temporal_context: TemporalContext,
+    request_id: str,
+    session_id: str,
+    stage_timings: dict[str, Any],
+    llm_usage: list[dict],
+    request_started_at: float,
+) -> AsyncIterator[QueryEvent | QueryOutcome]:
+    """Run one planned path and emit transport-neutral events plus its outcome."""
+    if mode not in {"ask", "stream"}:
+        raise ValueError(f"Unsupported query mode: {mode}")
+    if plan.direct_handler is None:
+        steps = _execute_retrieval_steps(
+            plan, mode, req=req, raw_query=raw_query,
+            temporal_context=temporal_context, request_id=request_id,
+            session_id=session_id, stage_timings=stage_timings,
+            llm_usage=llm_usage, request_started_at=request_started_at,
         )
-        unavailable_datasets = list(dict.fromkeys(unavailable_datasets + staff_unavailable))
-
-        active_notice_filter_stats = ActiveNoticeFilterStats()
-        if active_notice_query:
-            frames, active_notice_filter_stats = _filter_active_notice_frames(
-                frames,
-                temporal_context.as_of,
-            )
-            _log_event(
-                logging.INFO,
-                "active_notice_deadline_filter_applied",
-                request_id=request_id,
-                as_of=temporal_context.as_of.isoformat(),
-                **active_notice_filter_stats.__dict__,
-            )
-
-        merged = _build_balanced_shortlist(
-            frames,
-            per_dataset=(DEFAULT_TOP_K * 2 if date_filter is not None and "schedule" in route else RAG_EVIDENCE_CANDIDATES_PER_DATASET),
-            query=raw_query,
-            as_of=temporal_context.as_of,
+    else:
+        steps = _execute_direct_steps(
+            plan, req=req, raw_query=raw_query,
+            temporal_context=temporal_context, request_id=request_id,
+            session_id=session_id, stage_timings=stage_timings,
+            llm_usage=llm_usage, request_started_at=request_started_at,
         )
-        merged = _apply_cross_encoder_rerank(merged, raw_query)
-        _mark_stage(stage_timings, "retrieval_and_fusion", stage_started_at)
-
-        # 3. Fallback 체크
-        top_hybrid_score = None
-        if not merged.empty and "hybrid_score" in merged.columns:
-            top_hybrid_score = _clean_response_float(merged["hybrid_score"].max())
-
-        topic_aligned = False
-        min_score = retrieval_policy.min_score
-        structured_scoped = (
-            not merged.empty
-            and "structured_match" in merged.columns
-            and merged["structured_match"].fillna(0).eq(1).any()
-        )
-
-        fallback_reason = None
-        if merged.empty:
-            if unavailable_datasets and len(unavailable_datasets) == len(route):
-                fallback_reason = FALLBACK_REASON_DATASET_UNAVAILABLE
-            elif active_notice_query and (
-                active_notice_filter_stats.removed
-                or date_filter_eliminated_any
-            ):
-                fallback_reason = (
-                    FALLBACK_REASON_ACTIVE_DEADLINE_ELIMINATED_ALL
-                )
-            elif date_filter_eliminated_any:
-                fallback_reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
-            else:
-                fallback_reason = FALLBACK_REASON_NO_RESULTS
-        elif structured_scoped:
-            # Revision-checked SQL relation evidence already established the
-            # document scope. A zero dense score is expected on this path.
-            topic_aligned = True
-        # RRF는 순위 합의도이므로 RRF 점수 자체가 아니라 원 dense/BM25 신호의
-        # 하한을 본다. 최신/진행중/날짜표 조회는 결정적 구조화 경로라 제외한다.
-        elif rag_config.HYBRID_FUSION_MODE == "rrf" and not (
-            recent_notice_query
-            or active_notice_query
-            or (date_filter is not None and "schedule" in route)
-        ):
-            passed_floor, topic_aligned, min_score = _rrf_relevance_floor(
-                raw_query,
-                merged,
-                retrieval_policy,
+    metadata = None
+    text_parts: list[str] = []
+    async for event in steps:
+        payload = event.payload
+        if payload["type"] == "metadata":
+            metadata = payload
+        elif payload["type"] == "text":
+            text_parts.append(payload["content"])
+        yield event
+        if payload["type"] == "completion":
+            assert metadata is not None
+            yield QueryOutcome(
+                answer="".join(text_parts),
+                sources=[SourceChunk(**source) for source in payload["sources"]],
+                citations=metadata["citations"], route=metadata["route"],
+                fallback_triggered=metadata["fallback_triggered"],
+                fallback_reason=payload["fallback_reason"],
+                verification_status=payload["verification_status"],
+                grounded=payload["grounded"], grounding_score=payload["grounding_score"],
+                relevance_score=payload["relevance_score"],
+                suggested_questions=payload["suggested_questions"],
+                suggested_question_details=[SuggestedQuestionDetail(**detail) for detail in payload["suggested_question_details"]],
+                resolved_intents=payload["resolved_intents"],
+                stage_timings=stage_timings.copy(), request_id=request_id,
             )
-            if not passed_floor:
-                fallback_reason = FALLBACK_REASON_SCORE_BELOW_THRESHOLD
-        # 가중합 모드는 기존 절대 hybrid 점수 하한을 그대로 사용한다.
-        elif (
-            top_hybrid_score is not None
-            and top_hybrid_score < min_score
-        ):
-            fallback_reason = FALLBACK_REASON_SCORE_BELOW_THRESHOLD
 
-        selector_fallback = False
-        if fallback_reason is None:
-            stage_started_at = time.perf_counter()
-            merged, selector_fallback = await _select_answer_evidence(
-                semantic_query,
-                merged,
-                llm_usage,
-                recent_notice_query=recent_notice_query,
-                active_notice_query=active_notice_query,
-                date_bound_schedule_query=(date_filter is not None and "schedule" in route),
-            )
-            _mark_stage(stage_timings, "evidence_selection", stage_started_at)
-            _log_event(
-                logging.WARNING if selector_fallback else logging.INFO,
-                "evidence_selection_completed",
-                request_id=request_id,
-                fallback=selector_fallback,
-                group_count=0 if merged.empty else int(merged["evidence_group"].nunique()),
-                document_count=len(merged),
-            )
-            if merged.empty:
-                fallback_reason = (
-                    FALLBACK_REASON_SELECTOR_REFUSED
-                    if merged.attrs.get("selector_refused")
-                    else FALLBACK_REASON_NO_RESULTS
-                )
 
-        if fallback_reason is not None:
-            # 검색이 비었더라도 학사일정·식단 표에 답이 있는 시점 질문이면 직접 조회해 답한다.
-            # (폴백 로그의 절반이 이 유형이었다.)
-            direct = await run_in_threadpool(
-                _try_direct_answer,
-                raw_query,
-                temporal_context.as_of,
-            )
-            if direct is not None:
-                direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
-                direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
-                direct_fallback_reason = _direct_answer_fallback_reason(direct)
-                direct_suggestion_details = _direct_answer_suggestions(
-                    direct,
-                    direct_sources,
-                )
-                direct_suggestions = [
-                    detail.question for detail in direct_suggestion_details
-                ]
-                serialized_direct_sources = [
-                    source.model_dump() for source in direct_sources
-                ]
-                _mark_stage(stage_timings, "total", request_started_at)
-                direct_fallback_metadata = {"fallback_reason": direct_fallback_reason} if direct_fallback_reason else {}
-                yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': serialized_direct_sources, 'citations': direct_citations, 'route': route, 'fallback_triggered': direct_fallback_reason is not None, **direct_fallback_metadata}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'text', 'content': direct_answer}, ensure_ascii=False)}\n\n"
-                if direct_suggestions:
-                    yield f"data: {json.dumps({'type': 'suggestions', 'questions': direct_suggestions}, ensure_ascii=False)}\n\n"
-                await run_in_threadpool(
-                    _save_rag_evaluation_log,
-                    request_id, session_id, raw_query, expanded_query, route, direct_answer,
-                    direct_fallback_reason is not None, direct_fallback_reason, date_filter_applied, date_filter_relaxed,
-                    None if analysis_meta.result is None else analysis_meta.result.intent,
-                    None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
-                    None if analysis_meta.result is None else analysis_meta.result.time_focus,
-                    None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
-                    False, None,
-                    analysis_meta.used, analysis_meta.failed, None, top_hybrid_score,
-                    direct_sources,
-                    stage_timings, llm_usage,
-                    deterministically_grounded=direct_grounded is True,
-                )
-                await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer)
-                _log_event(
-                    logging.INFO,
-                    "direct_answer_rescued",
-                    request_id=request_id,
-                    kind=direct.kind,
-                    original_fallback_reason=fallback_reason,
-                )
-                yield _completion_stream_event(
-                    request_id=request_id,
-                    grounded=direct_grounded,
-                    grounding_score=direct_grounding_score,
-                    verification_status=VERIFICATION_NOT_REQUIRED,
-                    suggested_questions=direct_suggestions,
-                    suggested_question_details=direct_suggestion_details,
-                    fallback_reason=direct_fallback_reason,
-                    sources=direct_sources,
-                    resolved_intents=route,
-                )
-                return
-
-            fallback_answer = _build_retrieval_fallback_answer(
-                route=route, reason=fallback_reason, date_filter_relaxed=date_filter_relaxed,
-                policy_name=retrieval_policy.name, clarification_reason=(
-                    analysis_meta.result.clarification_reason if analysis_meta.result and analysis_meta.result.needs_clarification else None
-                ),
-                query=raw_query,
-            )
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': route, 'fallback_triggered': True, 'fallback_reason': fallback_reason}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'text', 'content': fallback_answer}, ensure_ascii=False)}\n\n"
-            
-            await run_in_threadpool(
-                _save_rag_evaluation_log,
-                request_id, session_id, raw_query, expanded_query, route, fallback_answer,
-                True, fallback_reason, date_filter_applied, date_filter_relaxed,
-                None if analysis_meta.result is None else analysis_meta.result.intent,
-                None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
-                None if analysis_meta.result is None else analysis_meta.result.time_focus,
-                None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
-                False if analysis_meta.result is None else analysis_meta.result.needs_clarification,
-                None if analysis_meta.result is None else analysis_meta.result.clarification_reason,
-                analysis_meta.used, analysis_meta.failed, None, top_hybrid_score, [],
-                {**stage_timings, "total": round((time.perf_counter() - request_started_at) * 1000, 2)},
-                llm_usage,
-            )
-            await run_in_threadpool(append_manual_history, session_id, raw_query, fallback_answer)
-            yield _completion_stream_event(
-                request_id=request_id,
-                grounded=None,
-                grounding_score=None,
-                verification_status=VERIFICATION_NOT_REQUIRED,
-                suggested_questions=[],
-                fallback_reason=fallback_reason,
-                sources=[],
-                resolved_intents=(
-                    [analysis_meta.result.intent]
-                    if analysis_meta.result is not None
-                    else []
-                ),
-            )
-            return
-
-        # 4. 컨텍스트 구성 및 스트리밍 시작
-        stage_started_at = time.perf_counter()
-        group_count = int(pd.to_numeric(merged["evidence_group"], errors="coerce").max())
-        context_text = _build_selected_evidence_context(
-        merged,
-        prefix=_user_profile_prefix(req.major),
-        as_of=temporal_context.as_of,
-    )
-        response_instructions = "\n".join(
-            instruction
-            for instruction in (
-                _multiple_evidence_response_instructions(group_count),
-                _period_bound_response_instruction(raw_query, merged),
-                _active_notice_response_instruction(
-                    raw_query,
-                    merged,
-                    temporal_context.as_of,
-                ),
-                _staff_contact_response_instruction(raw_query, merged),
-            )
-            if instruction
-        ) or None
-        selected_route = list(dict.fromkeys(merged["dataset"].astype(str).tolist()))
-        _mark_stage(stage_timings, "context_build", stage_started_at)
-        current_date = _get_current_kst_string(temporal_context)
-
-        # 소스 데이터 정리
-        sources = [_source_chunk_from_row(row).model_dump() for _, row in merged.iterrows()]
-        
-        citations_raw = await run_in_threadpool(format_citations, merged)
-        citations = re.sub(r'<[^>]+>', '', citations_raw)
-
-        # 메타데이터 먼저 전송
-        yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': sources, 'citations': citations, 'route': route, 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
-
-        # 답변 스트리밍 시작
-        full_answer = []
-        stage_started_at = time.perf_counter()
-        async for chunk in generate_langchain_answer_stream(
-            question=semantic_query,
-            context=context_text,
-            session_id=session_id,
-            current_date=current_date,
-            usage_collector=llm_usage,
-            response_instructions=response_instructions,
-        ):
-            full_answer.append(chunk)
-            if not active_notice_query and not (
-                RAG_GROUNDING_CHECK_ENABLED
-                and RAG_STREAM_BUFFER_UNTIL_GROUNDED
-            ):
-                yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
-        _mark_stage(stage_timings, "generation_stream", stage_started_at)
-
-        # 최종 로깅
-        final_answer = "".join(full_answer)
-        final_answer = _enforce_active_notice_answer_contract(
-            raw_query,
-            final_answer,
-            merged,
-            temporal_context.as_of,
-        )
-        full_answer = [final_answer]
-        suggested_questions: list[str] = []
-        suggested_question_details: list[dict[str, Any]] = []
-        grounding_result = None
-        grounded_flag: bool | None = None
-        grounding_score: float | None = None
-        relevance_score: float | None = None
-        if RAG_GROUNDING_CHECK_ENABLED and len(sources) > 0:
-            try:
-                stage_started_at = time.perf_counter()
-                grounding_result = await check_answer_grounding(
-                    raw_query,
-                    final_answer,
-                    context_text,
-                    min_score=RAG_GROUNDING_MIN_SCORE,
-                    usage_collector=llm_usage,
-                )
-                _mark_stage(stage_timings, "grounding_check", stage_started_at)
-                if grounding_result.checked:
-                    grounded_flag = grounding_result.grounded
-                    grounding_score = grounding_result.score
-                    relevance_score = grounding_result.relevance_score
-                if grounding_result.checked and not grounding_result.grounded:
-                    yield f"data: {json.dumps({'type': 'grounding', 'grounded': False, 'score': grounding_result.score, 'reason': grounding_result.reason}, ensure_ascii=False)}\n\n"
-                    guard_text = _build_grounding_confirmation_answer(
-                        grounding_result,
-                        [SourceChunk(**s) for s in sources],
-                    )
-                    guarded_answer = _apply_grounding_failure_policy(
-                        "".join(full_answer),
-                        guard_text,
-                        stream_already_emitted=not RAG_STREAM_BUFFER_UNTIL_GROUNDED,
-                    )
-                    full_answer = [guarded_answer]
-                    suggested_questions = []
-                    suggested_question_details = []
-                    if not RAG_STREAM_BUFFER_UNTIL_GROUNDED:
-                        guard_chunk = "\n\n" + guard_text
-                        yield f"data: {json.dumps({'type': 'text', 'content': guard_chunk}, ensure_ascii=False)}\n\n"
-            except Exception as exc:  # noqa: BLE001
-                _log_event(
-                    logging.WARNING,
-                    "grounding_check_failed",
-                    request_id=request_id,
-                    error=str(exc),
-                )
-        verification_status = _verification_status_from_grounding(grounding_result)
-        final_answer = "".join(full_answer)
-        # 정서적 고통이 함께 나타난 학사 질문은 절차를 그대로 답하고 상담 창구만
-        # 덧붙인다. 자퇴 절차는 학생이 실제로 필요로 하는 정보라 막으면 안 된다.
-        support_note_needed = needs_support_note(raw_query)
-        if support_note_needed:
-            final_answer = append_support_note(final_answer)
-            full_answer = [final_answer]
-        if active_notice_query or (
-            RAG_GROUNDING_CHECK_ENABLED
-            and RAG_STREAM_BUFFER_UNTIL_GROUNDED
-        ):
-            yield f"data: {json.dumps({'type': 'text', 'content': final_answer}, ensure_ascii=False)}\n\n"
-        elif support_note_needed:
-            # 본문은 이미 흘러갔으므로 덧붙인 안내만 따로 보낸다.
-            support_chunk = "\n\n" + SUPPORT_NOTE
-            yield f"data: {json.dumps({'type': 'text', 'content': support_chunk}, ensure_ascii=False)}\n\n"
-        # 후속질문은 /followups가 완료된 응답 로그를 다시 검증한 뒤 생성한다.
-        # 본 스트림에서는 비워 두어 LLM 호출이 completion/done을 지연시키지 않게 한다.
-        resolved_intents = list(
-            dict.fromkeys(
-                ([analysis_meta.result.intent] if analysis_meta.result is not None else [])
-                + selected_route
-            )
-        )
-        _mark_stage(stage_timings, "total", request_started_at)
-        await run_in_threadpool(
-            _save_rag_evaluation_log,
-            request_id, session_id, raw_query, expanded_query, route, final_answer,
-            False, None, date_filter_applied, date_filter_relaxed,
-            None if analysis_meta.result is None else analysis_meta.result.intent,
-            None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
-            None if analysis_meta.result is None else analysis_meta.result.time_focus,
-            None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
-            False if analysis_meta.result is None else analysis_meta.result.needs_clarification,
-            None if analysis_meta.result is None else analysis_meta.result.clarification_reason,
-            analysis_meta.used, analysis_meta.failed, 
-            json.dumps(_collect_matched_queries(merged), ensure_ascii=False),
-            top_hybrid_score, 
-            [SourceChunk(**s) for s in sources],
-            stage_timings,
-            llm_usage,
-        )
-        if grounding_result is not None and grounding_result.checked:
-            await run_in_threadpool(_update_grounding_log, request_id, grounding_result)
-        if RAG_SEMANTIC_CACHE_ENABLED and req.as_of is None and _should_cache_answer(
-            selected_route,
-            False,
-            date_filter_applied,
-            grounded_flag,
-            final_answer,
-            recent_notice_query=recent_notice_query,
-            active_notice_query=active_notice_query,
-            verification_status=verification_status,
-        ):
-            await run_in_threadpool(
-                semantic_cache.put,
-                raw_query,
-                semantic_cache_ns,
-                {
-                    "answer": final_answer,
-                    "citations": citations,
-                    "route": route,
-                    "sources": sources,
-                    "suggested_questions": suggested_questions,
-                    "suggested_question_details": suggested_question_details,
-                    "resolved_intents": resolved_intents,
-                    "grounded": grounded_flag,
-                    "grounding_score": grounding_score,
-                    "relevance_score": relevance_score,
-                    "verification_status": verification_status,
-                },
-            )
-        yield _completion_stream_event(
-            request_id=request_id,
-            grounded=grounded_flag,
-            grounding_score=grounding_score,
-            relevance_score=relevance_score,
-            verification_status=verification_status,
-            suggested_questions=suggested_questions,
-            fallback_reason=None,
-            sources=sources,
-            suggested_question_details=suggested_question_details,
-            resolved_intents=resolved_intents,
-        )
-
-    return StreamingResponse(
-        _stream_with_terminal_event(_stream_body(), request_id),
-        media_type="text/event-stream",
-    )
-
-@app.post("/ask", response_model=AskResponse)
-async def ask(req: AskRequest, request: Request) -> AskResponse:
-    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    raw_query = req.question.strip()
-    if not raw_query:
-        raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
-
-    temporal_context = _request_temporal_context(req)
-    _request_as_of.set(temporal_context.as_of.isoformat())
-    session_id = req.session_id or str(uuid.uuid4())
-    stage_timings: dict[str, float] = {}
-    llm_usage: list[dict] = []
-    request_started_at = time.perf_counter()
-
-    plan = await _plan_query(
-        req=req, raw_query=raw_query, temporal_context=temporal_context,
-        request_id=request_id, session_id=session_id,
-        stage_timings=stage_timings, llm_usage=llm_usage, mode="ask",
-    )
+async def _execute_direct_steps(
+    plan: QueryPlan,
+    *,
+    req: AskRequest,
+    raw_query: str,
+    temporal_context: TemporalContext,
+    request_id: str,
+    session_id: str,
+    stage_timings: dict[str, Any],
+    llm_usage: list[dict],
+    request_started_at: float,
+) -> AsyncIterator[QueryEvent]:
+    semantic_cache_ns = plan.semantic_cache_ns
     crisis = plan.crisis
     if plan.direct_handler == "crisis_support":
         _mark_stage(stage_timings, "total", request_started_at)
+        yield QueryEvent({
+                "type": "metadata",
+                "request_id": request_id,
+                "sources": [],
+                "citations": "",
+                "route": ["crisis_support"],
+                "fallback_triggered": False,
+            })
+        yield QueryEvent({"type": "text", "content": crisis.answer})
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id, session_id, raw_query, raw_query,
@@ -9418,7 +8659,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             "crisis_support", None, None, None, False, None,
             False, False, None, None, [], stage_timings, llm_usage,
         )
-        await run_in_threadpool(append_manual_history, session_id, raw_query, crisis.answer)
+        await run_in_threadpool(
+            append_manual_history, session_id, raw_query, crisis.answer
+        )
         # 발화 원문은 남기지 않는다 — 운영 로그로 흘러도 되는 정보가 아니다.
         _log_event(
             logging.WARNING,
@@ -9426,23 +8669,33 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             request_id=request_id,
             kind=crisis.kind,
         )
-        return AskResponse(
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=crisis.answer,
-            citations="",
-            route=["crisis_support"],
+            grounded=None,
+            grounding_score=None,
+            verification_status=VERIFICATION_NOT_REQUIRED,
+            suggested_questions=[],
+            fallback_reason=None,
             sources=[],
             resolved_intents=["crisis_support"],
-            verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=False,
-            fallback_reason=None,
-        )
+        ))
+        return
 
     allow_wise = plan.allow_wise
     semantic_cache_ns = plan.semantic_cache_ns
     if plan.direct_handler == "campus_out_of_scope":
         answer = out_of_domain_reply(raw_query)
         _mark_stage(stage_timings, "total", request_started_at)
+        yield QueryEvent({
+                "type": "metadata",
+                "request_id": request_id,
+                "sources": [],
+                "citations": "",
+                "route": ["unknown"],
+                "fallback_triggered": True,
+                "fallback_reason": FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
+            })
+        yield QueryEvent({"type": "text", "content": answer})
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id,
@@ -9477,23 +8730,31 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             question=raw_query[:80],
             campus="wise",
         )
-        return AskResponse(
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=answer,
-            citations="",
-            route=["unknown"],
-            sources=[],
-            resolved_intents=["unknown"],
             grounded=None,
             grounding_score=None,
             verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=True,
+            suggested_questions=[],
             fallback_reason=FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE,
-        )
+            sources=[],
+            resolved_intents=["unknown"],
+        ))
+        return
 
     course_recommendation = plan.recommendation
     if plan.direct_handler == "course_recommendation":
         answer, recommendation_sources, missing_fields = course_recommendation
+        serialized_sources = [source.model_dump() for source in recommendation_sources]
+        yield QueryEvent({
+                "type": "metadata",
+                "request_id": request_id,
+                "sources": serialized_sources,
+                "citations": "",
+                "route": ["courses"],
+                "fallback_triggered": False,
+            })
+        yield QueryEvent({"type": "text", "content": answer})
         await run_in_threadpool(append_manual_history, session_id, raw_query, answer)
         _mark_stage(stage_timings, "total", request_started_at)
         _log_event(
@@ -9503,49 +8764,50 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             source_count=len(recommendation_sources),
             missing_fields=list(missing_fields),
         )
-        return AskResponse(
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=answer,
-            citations="",
-            route=["courses"],
-            resolved_intents=["courses"],
-            sources=recommendation_sources,
             grounded=True if recommendation_sources else None,
             grounding_score=1.0 if recommendation_sources else None,
             verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=False,
+            suggested_questions=[],
             fallback_reason=None,
-        )
+            sources=recommendation_sources,
+            resolved_intents=["courses"],
+        ))
+        return
 
     if plan.direct_handler == "semantic_cache":
         hit = plan.cache_hit
         _mark_stage(stage_timings, "total", request_started_at)
-        _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
+        yield QueryEvent({"type": "metadata", "request_id": request_id, "sources": hit.get("sources", []), "citations": hit.get("citations", ""), "route": hit.get("route", []), "fallback_triggered": False})
+        yield QueryEvent({"type": "text", "content": hit["answer"]})
+        if hit.get("suggested_questions"):
+            yield QueryEvent({"type": "suggestions", "questions": hit["suggested_questions"]})
+        if hit.get("grounded") is False:
+            yield QueryEvent({"type": "grounding", "grounded": False, "score": hit.get("grounding_score"), "reason": None})
         await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"])
-        return AskResponse(
+        _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=hit["answer"],
-            citations=hit.get("citations", ""),
-            route=hit.get("route", []),
-            resolved_intents=hit.get("resolved_intents", hit.get("route", [])),
-            sources=[SourceChunk(**s) for s in hit.get("sources", [])],
-            suggested_questions=hit.get("suggested_questions", []),
-            suggested_question_details=[
-                SuggestedQuestionDetail(**detail)
-                for detail in hit.get("suggested_question_details", [])
-            ],
             grounded=hit.get("grounded"),
             grounding_score=hit.get("grounding_score"),
             relevance_score=hit.get("relevance_score"),
             verification_status=_cached_verification_status(hit),
-            fallback_triggered=False,
+            suggested_questions=hit.get("suggested_questions", []),
             fallback_reason=None,
-        )
+            sources=hit.get("sources", []),
+            suggested_question_details=hit.get("suggested_question_details", []),
+            resolved_intents=hit.get("resolved_intents", hit.get("route", [])),
+        ))
+        return
 
-    # 스트리밍 경로와 동일하게 스몰톡은 검색 전에 처리한다.
+    # 인사·감사·정체성 발화는 검색이 필요 없다. RAG로 보내면 "자료를 찾지 못했습니다"로
+    # 답하게 되는데(로그에서 "안녕" 34회가 그랬다), 첫인사에 실패 메시지를 주는 셈이다.
     smalltalk = plan.smalltalk
     if plan.direct_handler == "smalltalk":
         _mark_stage(stage_timings, "total", request_started_at)
+        yield QueryEvent({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['smalltalk'], 'fallback_triggered': False})
+        yield QueryEvent({'type': 'text', 'content': smalltalk.answer})
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id, session_id, raw_query, raw_query, ["smalltalk"], smalltalk.answer,
@@ -9555,23 +8817,25 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         )
         await run_in_threadpool(append_manual_history, session_id, raw_query, smalltalk.answer)
         _log_event(logging.INFO, "smalltalk_answered", request_id=request_id, kind=smalltalk.kind)
-        return AskResponse(
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=smalltalk.answer,
-            citations="",
-            route=["smalltalk"],
+            grounded=None,
+            grounding_score=None,
+            verification_status=VERIFICATION_NOT_REQUIRED,
+            suggested_questions=[],
+            fallback_reason=None,
             sources=[],
             resolved_intents=["smalltalk"],
-            verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=False,
-            fallback_reason=None,
-        )
+        ))
+        return
 
     future_unannounced = plan.future_unannounced
     if plan.direct_handler == "future_unannounced":
         answer = future_unannounced.answer
         route = ["notices"]
         _mark_stage(stage_timings, "total", request_started_at)
+        yield QueryEvent({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': route, 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_FUTURE_UNANNOUNCED})
+        yield QueryEvent({'type': 'text', 'content': answer})
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id, session_id, raw_query, raw_query, route, answer,
@@ -9588,20 +8852,20 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             request_id=request_id,
             as_of=temporal_context.as_of.isoformat(),
         )
-        return AskResponse(
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=answer,
-            citations="",
-            route=route,
-            sources=[],
-            resolved_intents=route,
             grounded=None,
             grounding_score=None,
             verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=True,
+            suggested_questions=[],
             fallback_reason=FALLBACK_REASON_FUTURE_UNANNOUNCED,
-        )
+            sources=[],
+            resolved_intents=route,
+        ))
+        return
 
+    # 날짜·기간형 질문은 정형 표를 먼저 조회한다. 검색 결과가 잘못된 답을 자신 있게
+    # 고른 뒤에는 폴백이 발동하지 않으므로, 이 순서가 정확성 보장의 핵심이다.
     direct = plan.direct_answer
     if plan.direct_handler == "structured_direct":
         direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
@@ -9611,8 +8875,14 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         direct_suggestions = [
             detail.question for detail in direct_suggestion_details
         ]
+        serialized_sources = [source.model_dump() for source in direct_sources]
         direct_route = ["meals"] if direct.kind.startswith("meal") else ["schedule"]
         _mark_stage(stage_timings, "total", request_started_at)
+        direct_fallback_metadata = {"fallback_reason": direct_fallback_reason} if direct_fallback_reason else {}
+        yield QueryEvent({'type': 'metadata', 'request_id': request_id, 'sources': serialized_sources, 'citations': direct_citations, 'route': direct_route, 'fallback_triggered': direct_fallback_reason is not None, **direct_fallback_metadata})
+        yield QueryEvent({'type': 'text', 'content': direct_answer})
+        if direct_suggestions:
+            yield QueryEvent({'type': 'suggestions', 'questions': direct_suggestions})
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id, session_id, raw_query, raw_query, direct_route, direct_answer,
@@ -9631,69 +8901,63 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             as_of=temporal_context.as_of.isoformat(),
             source_count=len(direct_sources),
         )
-        return AskResponse(
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=direct_answer,
-            citations=direct_citations,
-            route=direct_route,
-            sources=direct_sources,
-            resolved_intents=direct_route,
-            suggested_questions=direct_suggestions,
-            suggested_question_details=direct_suggestion_details,
             grounded=direct_grounded,
             grounding_score=direct_grounding_score,
             verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=direct_fallback_reason is not None,
+            suggested_questions=direct_suggestions,
+            suggested_question_details=direct_suggestion_details,
             fallback_reason=direct_fallback_reason,
-        )
+            sources=direct_sources,
+            resolved_intents=direct_route,
+        ))
+        return
 
     analysis_meta = plan.analysis_meta
     clarification_fields = plan.clarification_fields
     if plan.direct_handler == "clarification":
         clarification_answer = _build_clarification_answer(clarification_fields)
         _mark_stage(stage_timings, "total", request_started_at)
+        yield QueryEvent({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_CLARIFICATION_NEEDED})
+        yield QueryEvent({'type': 'text', 'content': clarification_answer})
         await run_in_threadpool(
             _save_rag_evaluation_log,
-            request_id,
-            session_id,
-            raw_query,
-            raw_query,
-            ["unknown"],
-            clarification_answer,
-            True,
-            FALLBACK_REASON_CLARIFICATION_NEEDED,
-            False,
-            False,
+            request_id, session_id, raw_query, raw_query, ["unknown"], clarification_answer,
+            True, FALLBACK_REASON_CLARIFICATION_NEEDED, False, False,
             None if analysis_meta.result is None else analysis_meta.result.intent,
             None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
             None if analysis_meta.result is None else analysis_meta.result.time_focus,
             None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
             True,
             ", ".join(clarification_fields),
-            analysis_meta.used,
-            analysis_meta.failed,
-            None,
-            None,
-            [],
-            stage_timings,
-            llm_usage,
+            analysis_meta.used, analysis_meta.failed, None, None, [], stage_timings, llm_usage,
         )
         await run_in_threadpool(append_manual_history, session_id, raw_query, clarification_answer)
-        return AskResponse(
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=clarification_answer,
-            citations="",
-            route=["unknown"],
+            grounded=None,
+            grounding_score=None,
+            verification_status=VERIFICATION_NOT_REQUIRED,
+            suggested_questions=[],
+            fallback_reason=FALLBACK_REASON_CLARIFICATION_NEEDED,
             sources=[],
             resolved_intents=["unknown"],
-            verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=True,
-            fallback_reason=FALLBACK_REASON_CLARIFICATION_NEEDED,
-        )
+        ))
+        return
 
+    # 1. 일반 대화 처리 (검색 불필요한 경우)
     if plan.direct_handler == "out_of_domain":
-        # 스트리밍 경로와 같은 규칙 — 근거 없이 생성하지 않는다.
-        answer = out_of_domain_reply(raw_query)
+        # 근거가 하나도 없는 상태로 생성하지 않는다. 예전에는 여기서 LLM에게
+        # "자연스럽고 짧게 답하세요"라고만 일러 보내서, 학교와 무관한 질문에
+        # 모델이 자기 지식으로 답했다("샤갈은 프랑스의 화가이자 …").
+        domain_reply = out_of_domain_reply(raw_query)
+
+        # 메타데이터 전송 (소스 없음)
+        yield QueryEvent({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_OUT_OF_DOMAIN})
+
+        full_answer = [domain_reply]
+        yield QueryEvent({'type': 'text', 'content': domain_reply})
         _log_event(
             logging.INFO,
             "out_of_domain_answered",
@@ -9702,44 +8966,46 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         )
         _mark_stage(stage_timings, "total", request_started_at)
 
+        # 로깅은 스트림 종료 후 수행 (별도 태스크로 처리하거나 여기서 대략 수행)
         await run_in_threadpool(
             _save_rag_evaluation_log,
-            request_id,
-            session_id,
-            raw_query,
-            raw_query,
-            ["unknown"],
-            answer,
-            True,
-            FALLBACK_REASON_OUT_OF_DOMAIN,
-            False,
-            False,
-            analysis_meta.result.intent,
+            request_id, session_id, raw_query, raw_query, ["unknown"], "".join(full_answer),
+            True, FALLBACK_REASON_OUT_OF_DOMAIN, False, False, analysis_meta.result.intent,
             json.dumps(analysis_meta.result.entities, ensure_ascii=False),
             analysis_meta.result.time_focus,
             json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
-            analysis_meta.result.needs_clarification,
-            analysis_meta.result.clarification_reason,
-            analysis_meta.used,
-            analysis_meta.failed,
-            None,
-            None,
-            [],
-            stage_timings,
-            llm_usage,
+            analysis_meta.result.needs_clarification, analysis_meta.result.clarification_reason,
+            analysis_meta.used, analysis_meta.failed, None, None, [],
+            stage_timings, llm_usage,
         )
-        return AskResponse(
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=answer,
-            citations="",
-            route=["unknown"],
+            grounded=None,
+            grounding_score=None,
+            verification_status=VERIFICATION_NOT_REQUIRED,
+            suggested_questions=[],
+            fallback_reason=FALLBACK_REASON_OUT_OF_DOMAIN,
             sources=[],
             resolved_intents=["unknown"],
-            verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=True,
-            fallback_reason=FALLBACK_REASON_OUT_OF_DOMAIN,
-        )
+        ))
+        return
 
+async def _execute_retrieval_steps(
+    plan: QueryPlan,
+    mode: str,
+    *,
+    req: AskRequest,
+    raw_query: str,
+    temporal_context: TemporalContext,
+    request_id: str,
+    session_id: str,
+    stage_timings: dict[str, Any],
+    llm_usage: list[dict],
+    request_started_at: float,
+) -> AsyncIterator[QueryEvent]:
+    allow_wise = plan.allow_wise
+    semantic_cache_ns = plan.semantic_cache_ns
+    analysis_meta = plan.analysis_meta
     query_for_retrieval = plan.query_for_retrieval
     expanded_query = plan.expanded_query
     retrieval_queries = list(plan.retrieval_queries)
@@ -9760,14 +9026,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     current_operational_notice_terms = plan.current_operational_notice_terms
     stage_started_at = time.perf_counter()
     frames, date_filter_eliminated_any, unavailable_datasets = await _retrieve_frames_for_queries(
-        route=route,
-        queries=retrieval_queries,
-        final_where_filter=final_where_filter,
-        notice_board_filter=notice_board_filter,
-        date_filter=date_filter,
-        entry_year=entry_year,
-        request_id=request_id,
-        notice_visibility_filter=notice_visibility_filter,
+        route=route, queries=retrieval_queries, final_where_filter=final_where_filter,
+        notice_board_filter=notice_board_filter, date_filter=date_filter, entry_year=entry_year,
+        request_id=request_id, notice_visibility_filter=notice_visibility_filter,
         recent_notice_query=recent_notice_query,
         active_notice_query=active_notice_query,
         active_notice_as_of=temporal_context.as_of if active_notice_query else None,
@@ -9781,21 +9042,14 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     if not frames and date_filter is not None and date_filter.relaxed_start and date_filter.relaxed_end:
         date_filter_relaxed = True
         relaxed_filter = QueryDateFilter(
-            start=date_filter.relaxed_start,
-            end=date_filter.relaxed_end,
-            label=f"{date_filter.label}_relaxed",
-            is_relative=date_filter.is_relative,
+            start=date_filter.relaxed_start, end=date_filter.relaxed_end,
+            label=f"{date_filter.label}_relaxed", is_relative=date_filter.is_relative,
             kind=getattr(date_filter, "kind", "published"),
         )
         relaxed_frames, _, relaxed_unavailable = await _retrieve_frames_for_queries(
-            route=route,
-            queries=retrieval_queries,
-            final_where_filter=final_where_filter,
-            notice_board_filter=notice_board_filter,
-            date_filter=relaxed_filter,
-            entry_year=entry_year,
-            request_id=request_id,
-            notice_visibility_filter=notice_visibility_filter,
+            route=route, queries=retrieval_queries, final_where_filter=final_where_filter,
+            notice_board_filter=notice_board_filter, date_filter=relaxed_filter, entry_year=entry_year,
+            request_id=request_id, notice_visibility_filter=notice_visibility_filter,
             recent_notice_query=recent_notice_query,
             active_notice_query=active_notice_query,
             active_notice_as_of=temporal_context.as_of if active_notice_query else None,
@@ -9840,57 +9094,66 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         as_of=temporal_context.as_of,
     )
     merged = _apply_cross_encoder_rerank(merged, raw_query)
-    if merged.empty:
+    if mode == "ask" and merged.empty:
         _log_event(logging.INFO, "retrieval_no_results", request_id=request_id, route=route)
+    if mode == "stream":
+        _mark_stage(stage_timings, "retrieval_and_fusion", stage_started_at)
 
-    def _evaluate_fallback(current_merged: pd.DataFrame) -> tuple[float | None, bool, float, str | None]:
-        top_score = None
-        if not current_merged.empty and "hybrid_score" in current_merged.columns:
-            top_score = _clean_response_float(current_merged["hybrid_score"].max())
+    # 3. Fallback 체크
+    top_hybrid_score = None
+    if not merged.empty and "hybrid_score" in merged.columns:
+        top_hybrid_score = _clean_response_float(merged["hybrid_score"].max())
 
-        topic_aligned = False
-        min_score = retrieval_policy.min_score
-        structured_scoped = (
-            not current_merged.empty
-            and "structured_match" in current_merged.columns
-            and current_merged["structured_match"].fillna(0).eq(1).any()
-        )
+    topic_aligned = False
+    min_score = retrieval_policy.min_score
+    structured_scoped = (
+        not merged.empty
+        and "structured_match" in merged.columns
+        and merged["structured_match"].fillna(0).eq(1).any()
+    )
 
-        reason = None
-        if current_merged.empty:
-            if unavailable_datasets and len(unavailable_datasets) == len(route):
-                reason = FALLBACK_REASON_DATASET_UNAVAILABLE
-            elif active_notice_query and (
-                active_notice_filter_stats.removed
-                or date_filter_eliminated_any
-            ):
-                reason = FALLBACK_REASON_ACTIVE_DEADLINE_ELIMINATED_ALL
-            elif date_filter_eliminated_any:
-                reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
-            else:
-                reason = FALLBACK_REASON_NO_RESULTS
-        elif structured_scoped:
-            # SQL relation evidence has no dense score by design.
-            topic_aligned = True
-        elif rag_config.HYBRID_FUSION_MODE == "rrf" and not (
-            recent_notice_query
-            or active_notice_query
-            or (date_filter is not None and "schedule" in route)
+    fallback_reason = None
+    if merged.empty:
+        if unavailable_datasets and len(unavailable_datasets) == len(route):
+            fallback_reason = FALLBACK_REASON_DATASET_UNAVAILABLE
+        elif active_notice_query and (
+            active_notice_filter_stats.removed
+            or date_filter_eliminated_any
         ):
-            passed_floor, topic_aligned, min_score = _rrf_relevance_floor(
-                raw_query,
-                current_merged,
-                retrieval_policy,
+            fallback_reason = (
+                FALLBACK_REASON_ACTIVE_DEADLINE_ELIMINATED_ALL
             )
-            if not passed_floor:
-                reason = FALLBACK_REASON_SCORE_BELOW_THRESHOLD
-        elif top_score is not None and top_score < min_score:
-            reason = FALLBACK_REASON_SCORE_BELOW_THRESHOLD
-        return top_score, topic_aligned, min_score, reason
+        elif date_filter_eliminated_any:
+            fallback_reason = FALLBACK_REASON_DATE_FILTER_ELIMINATED_ALL
+        else:
+            fallback_reason = FALLBACK_REASON_NO_RESULTS
+    elif structured_scoped:
+        # Revision-checked SQL relation evidence already established the
+        # document scope. A zero dense score is expected on this path.
+        topic_aligned = True
+    # RRF는 순위 합의도이므로 RRF 점수 자체가 아니라 원 dense/BM25 신호의
+    # 하한을 본다. 최신/진행중/날짜표 조회는 결정적 구조화 경로라 제외한다.
+    elif rag_config.HYBRID_FUSION_MODE == "rrf" and not (
+        recent_notice_query
+        or active_notice_query
+        or (date_filter is not None and "schedule" in route)
+    ):
+        passed_floor, topic_aligned, min_score = _rrf_relevance_floor(
+            raw_query,
+            merged,
+            retrieval_policy,
+        )
+        if not passed_floor:
+            fallback_reason = FALLBACK_REASON_SCORE_BELOW_THRESHOLD
+    # 가중합 모드는 기존 절대 hybrid 점수 하한을 그대로 사용한다.
+    elif (
+        top_hybrid_score is not None
+        and top_hybrid_score < min_score
+    ):
+        fallback_reason = FALLBACK_REASON_SCORE_BELOW_THRESHOLD
 
-    top_hybrid_score, notice_topic_aligned, effective_min_score, fallback_reason = _evaluate_fallback(merged)
-
-    _mark_stage(stage_timings, "retrieval_and_fusion", stage_started_at)
+    if mode == "ask":
+        _mark_stage(stage_timings, "retrieval_and_fusion", stage_started_at)
 
     selector_fallback = False
     if fallback_reason is None:
@@ -9919,11 +9182,9 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 else FALLBACK_REASON_NO_RESULTS
             )
 
-    matched_queries = _collect_matched_queries(merged)
-
     if fallback_reason is not None:
-        # 스트리밍 경로와 동일하게, 정형 데이터로 답할 수 있는 시점 질문은 구제한다.
-        # 스트리밍 경로와 동일하게, 정형 데이터로 답할 수 있는 시점 질문은 구제한다.
+        # 검색이 비었더라도 학사일정·식단 표에 답이 있는 시점 질문이면 직접 조회해 답한다.
+        # (폴백 로그의 절반이 이 유형이었다.)
         direct = await run_in_threadpool(
             _try_direct_answer,
             raw_query,
@@ -9933,11 +9194,22 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
             direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
             direct_fallback_reason = _direct_answer_fallback_reason(direct)
-            direct_suggestion_details = _direct_answer_suggestions(direct, direct_sources)
+            direct_suggestion_details = _direct_answer_suggestions(
+                direct,
+                direct_sources,
+            )
             direct_suggestions = [
                 detail.question for detail in direct_suggestion_details
             ]
+            serialized_direct_sources = [
+                source.model_dump() for source in direct_sources
+            ]
             _mark_stage(stage_timings, "total", request_started_at)
+            direct_fallback_metadata = {"fallback_reason": direct_fallback_reason} if direct_fallback_reason else {}
+            yield QueryEvent({'type': 'metadata', 'request_id': request_id, 'sources': serialized_direct_sources, 'citations': direct_citations, 'route': route, 'fallback_triggered': direct_fallback_reason is not None, **direct_fallback_metadata})
+            yield QueryEvent({'type': 'text', 'content': direct_answer})
+            if direct_suggestions:
+                yield QueryEvent({'type': 'suggestions', 'questions': direct_suggestions})
             await run_in_threadpool(
                 _save_rag_evaluation_log,
                 request_id, session_id, raw_query, expanded_query, route, direct_answer,
@@ -9948,7 +9220,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
                 False, None,
                 analysis_meta.used, analysis_meta.failed,
-                json.dumps(matched_queries, ensure_ascii=False), top_hybrid_score,
+                json.dumps(_collect_matched_queries(merged), ensure_ascii=False) if mode == "ask" else None,
+                top_hybrid_score,
                 direct_sources,
                 stage_timings, llm_usage,
                 deterministically_grounded=direct_grounded is True,
@@ -9961,95 +9234,82 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 kind=direct.kind,
                 original_fallback_reason=fallback_reason,
             )
-            return AskResponse(
+            yield QueryEvent(_completion_payload(
                 request_id=request_id,
-                answer=direct_answer,
-                citations=direct_citations,
-                route=route,
-                sources=direct_sources,
-                resolved_intents=route,
-                suggested_questions=direct_suggestions,
-                suggested_question_details=direct_suggestion_details,
                 grounded=direct_grounded,
                 grounding_score=direct_grounding_score,
                 verification_status=VERIFICATION_NOT_REQUIRED,
-                fallback_triggered=direct_fallback_reason is not None,
+                suggested_questions=direct_suggestions,
+                suggested_question_details=direct_suggestion_details,
                 fallback_reason=direct_fallback_reason,
-            )
+                sources=direct_sources,
+                resolved_intents=route,
+            ))
+            return
 
         fallback_answer = _build_retrieval_fallback_answer(
-            route=route,
-            reason=fallback_reason,
-            date_filter_relaxed=date_filter_relaxed,
-            policy_name=retrieval_policy.name,
-            clarification_reason=(
-                analysis_meta.result.clarification_reason
-                if analysis_meta.result is not None and analysis_meta.result.needs_clarification
-                else None
+            route=route, reason=fallback_reason, date_filter_relaxed=date_filter_relaxed,
+            policy_name=retrieval_policy.name, clarification_reason=(
+                analysis_meta.result.clarification_reason if analysis_meta.result and analysis_meta.result.needs_clarification else None
             ),
             query=raw_query,
         )
-        _log_event(
-            logging.INFO,
-            "retrieval_fallback_triggered",
-            request_id=request_id,
-            route=route,
-            top_hybrid_score=top_hybrid_score,
-            threshold=effective_min_score,
-            retry=date_filter_relaxed,
-            fallback_reason=fallback_reason,
-            policy_name=retrieval_policy.name,
-            effective_min_score=effective_min_score,
-            recent_notice_query=recent_notice_query,
-            notice_topic_aligned=notice_topic_aligned,
-            date_filter_label=None if date_filter is None else date_filter.label,
-            analysis_used=analysis_meta.used,
-            analysis_failed=analysis_meta.failed,
-            notice_board_filter=notice_board_filter,
-        )
+        if mode == "ask":
+            _log_event(
+                logging.INFO,
+                "retrieval_fallback_triggered",
+                request_id=request_id,
+                route=route,
+                top_hybrid_score=top_hybrid_score,
+                threshold=min_score,
+                retry=date_filter_relaxed,
+                fallback_reason=fallback_reason,
+                policy_name=retrieval_policy.name,
+                effective_min_score=min_score,
+                recent_notice_query=recent_notice_query,
+                notice_topic_aligned=topic_aligned,
+                date_filter_label=None if date_filter is None else date_filter.label,
+                analysis_used=analysis_meta.used,
+                analysis_failed=analysis_meta.failed,
+                notice_board_filter=notice_board_filter,
+            )
+        yield QueryEvent({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': route, 'fallback_triggered': True, 'fallback_reason': fallback_reason})
+        yield QueryEvent({'type': 'text', 'content': fallback_answer})
+
         await run_in_threadpool(
             _save_rag_evaluation_log,
-            request_id,
-            session_id,
-            raw_query,
-            expanded_query,
-            route,
-            fallback_answer,
-            True,
-            fallback_reason,
-            date_filter_applied,
-            date_filter_relaxed,
+            request_id, session_id, raw_query, expanded_query, route, fallback_answer,
+            True, fallback_reason, date_filter_applied, date_filter_relaxed,
             None if analysis_meta.result is None else analysis_meta.result.intent,
             None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
             None if analysis_meta.result is None else analysis_meta.result.time_focus,
             None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
             False if analysis_meta.result is None else analysis_meta.result.needs_clarification,
             None if analysis_meta.result is None else analysis_meta.result.clarification_reason,
-            analysis_meta.used,
-            analysis_meta.failed,
-            json.dumps(matched_queries, ensure_ascii=False),
-            top_hybrid_score,
-            [],
+            analysis_meta.used, analysis_meta.failed,
+            json.dumps(_collect_matched_queries(merged), ensure_ascii=False) if mode == "ask" else None,
+            top_hybrid_score, [],
             {**stage_timings, "total": round((time.perf_counter() - request_started_at) * 1000, 2)},
             llm_usage,
         )
         await run_in_threadpool(append_manual_history, session_id, raw_query, fallback_answer)
-        return AskResponse(
+        yield QueryEvent(_completion_payload(
             request_id=request_id,
-            answer=fallback_answer,
-            citations="",
-            route=route,
+            grounded=None,
+            grounding_score=None,
+            verification_status=VERIFICATION_NOT_REQUIRED,
+            suggested_questions=[],
+            fallback_reason=fallback_reason,
             sources=[],
             resolved_intents=(
                 [analysis_meta.result.intent]
                 if analysis_meta.result is not None
                 else []
             ),
-            verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=True,
-            fallback_reason=fallback_reason,
-        )
+        ))
+        return
 
+    # 4. 컨텍스트 구성 및 스트리밍 시작
     stage_started_at = time.perf_counter()
     group_count = int(pd.to_numeric(merged["evidence_group"], errors="coerce").max())
     context_text = _build_selected_evidence_context(
@@ -10073,46 +9333,68 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     ) or None
     selected_route = list(dict.fromkeys(merged["dataset"].astype(str).tolist()))
     _mark_stage(stage_timings, "context_build", stage_started_at)
-    # LLM에게 현재 날짜를 전달하여 "오늘", "이번 학기" 등의 표현을 해석하도록 돕습니다.
     current_date = _get_current_kst_string(temporal_context)
 
-    try:
-        stage_started_at = time.perf_counter()
-        answer = await generate_langchain_answer(
+    # 소스 데이터 정리
+    sources = [_source_chunk_from_row(row).model_dump() for _, row in merged.iterrows()]
+
+    citations_raw = await run_in_threadpool(format_citations, merged)
+    citations = re.sub(r'<[^>]+>', '', citations_raw)
+
+    # 메타데이터 먼저 전송
+    yield QueryEvent({'type': 'metadata', 'request_id': request_id, 'sources': sources, 'citations': citations, 'route': route, 'fallback_triggered': False})
+
+    # Preserve each transport's original model invocation and stream timing.
+    full_answer = []
+    stage_started_at = time.perf_counter()
+    if mode == "stream":
+        async for chunk in generate_langchain_answer_stream(
             question=semantic_query,
             context=context_text,
             session_id=session_id,
             current_date=current_date,
             usage_collector=llm_usage,
             response_instructions=response_instructions,
-        )
-        _mark_stage(stage_timings, "generation", stage_started_at)
-    except Exception as e:
-        _log_event(logging.ERROR, "llm_generation_failed", exc_info=True, request_id=request_id)
-        answer = "죄송합니다. 답변을 생성하는 도중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+        ):
+            full_answer.append(chunk)
+            if not active_notice_query and not (
+                RAG_GROUNDING_CHECK_ENABLED and RAG_STREAM_BUFFER_UNTIL_GROUNDED
+            ):
+                yield QueryEvent({"type": "text", "content": chunk})
+        _mark_stage(stage_timings, "generation_stream", stage_started_at)
+    else:
+        try:
+            full_answer.append(await generate_langchain_answer(
+                question=semantic_query,
+                context=context_text,
+                session_id=session_id,
+                current_date=current_date,
+                usage_collector=llm_usage,
+                response_instructions=response_instructions,
+            ))
+            _mark_stage(stage_timings, "generation", stage_started_at)
+        except Exception:
+            _log_event(logging.ERROR, "llm_generation_failed", exc_info=True, request_id=request_id)
+            full_answer.append("죄송합니다. 답변을 생성하는 도중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
 
-    answer = _enforce_active_notice_answer_contract(
+    # 최종 로깅
+    final_answer = "".join(full_answer)
+    final_answer = _enforce_active_notice_answer_contract(
         raw_query,
-        answer,
+        final_answer,
         merged,
         temporal_context.as_of,
     )
-    # 스트리밍 경로와 동일 — 정서적 고통이 섞인 질문은 학사 답변 뒤에 상담 창구를 덧붙인다.
-    if needs_support_note(raw_query):
-        answer = append_support_note(answer)
-
-    # 후처리: 과도한 볼드체 제거 대신 가독성 유지 (필요 시 최소화)
-    # answer = answer.replace("**", "")
-
-    citations_raw = await run_in_threadpool(format_citations, merged)
-    citations = re.sub(r'<[^>]+>', '', citations_raw)
-
-    sources = [_source_chunk_from_row(row) for _, row in merged.iterrows()]
-
+    support_note_needed = needs_support_note(raw_query)
+    if mode == "ask" and support_note_needed:
+        # HEAD checks the JSON answer with its support note, then applies the
+        # grounding failure policy to that whole candidate.
+        final_answer = append_support_note(final_answer)
+    full_answer = [final_answer]
     suggested_questions: list[str] = []
     suggested_question_details: list[dict[str, Any]] = []
     grounding_result = None
-    grounded: bool | None = None
+    grounded_flag: bool | None = None
     grounding_score: float | None = None
     relevance_score: float | None = None
     if RAG_GROUNDING_CHECK_ENABLED and len(sources) > 0:
@@ -10120,27 +9402,33 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             stage_started_at = time.perf_counter()
             grounding_result = await check_answer_grounding(
                 raw_query,
-                answer,
+                final_answer,
                 context_text,
                 min_score=RAG_GROUNDING_MIN_SCORE,
                 usage_collector=llm_usage,
             )
             _mark_stage(stage_timings, "grounding_check", stage_started_at)
             if grounding_result.checked:
-                grounded = grounding_result.grounded
+                grounded_flag = grounding_result.grounded
                 grounding_score = grounding_result.score
                 relevance_score = grounding_result.relevance_score
-                if not grounding_result.grounded:
-                    guard_answer = _build_grounding_confirmation_answer(
-                        grounding_result,
-                        sources,
-                    )
-                    answer = _apply_grounding_failure_policy(
-                        answer,
-                        guard_answer,
-                    )
-                    suggested_questions = []
-                    suggested_question_details = []
+            if grounding_result.checked and not grounding_result.grounded:
+                yield QueryEvent({'type': 'grounding', 'grounded': False, 'score': grounding_result.score, 'reason': grounding_result.reason})
+                guard_text = _build_grounding_confirmation_answer(
+                    grounding_result,
+                    [SourceChunk(**s) for s in sources],
+                )
+                guarded_answer = _apply_grounding_failure_policy(
+                    "".join(full_answer),
+                    guard_text,
+                    stream_already_emitted=(mode == "stream" and not RAG_STREAM_BUFFER_UNTIL_GROUNDED),
+                )
+                full_answer = [guarded_answer]
+                suggested_questions = []
+                suggested_question_details = []
+                if mode == "stream" and not RAG_STREAM_BUFFER_UNTIL_GROUNDED:
+                    guard_chunk = "\n\n" + guard_text
+                    yield QueryEvent({'type': 'text', 'content': guard_chunk})
         except Exception as exc:  # noqa: BLE001
             _log_event(
                 logging.WARNING,
@@ -10149,8 +9437,23 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 error=str(exc),
             )
     verification_status = _verification_status_from_grounding(grounding_result)
-    # 비스트림도 본 응답과 추천 생성의 수명주기를 분리한다. 클라이언트가
-    # request_id로 /followups를 호출하므로 응답 지연에는 추천 LLM 시간이 포함되지 않는다.
+    final_answer = "".join(full_answer)
+    # 정서적 고통이 함께 나타난 학사 질문은 절차를 그대로 답하고 상담 창구만
+    # 덧붙인다. 자퇴 절차는 학생이 실제로 필요로 하는 정보라 막으면 안 된다.
+    if mode == "stream" and support_note_needed:
+        final_answer = append_support_note(final_answer)
+        full_answer = [final_answer]
+    if mode == "ask" or active_notice_query or (
+        RAG_GROUNDING_CHECK_ENABLED
+        and RAG_STREAM_BUFFER_UNTIL_GROUNDED
+    ):
+        yield QueryEvent({'type': 'text', 'content': final_answer})
+    elif mode == "stream" and support_note_needed:
+        # 본문은 이미 흘러갔으므로 덧붙인 안내만 따로 보낸다.
+        support_chunk = "\n\n" + SUPPORT_NOTE
+        yield QueryEvent({'type': 'text', 'content': support_chunk})
+    # 후속질문은 /followups가 완료된 응답 로그를 다시 검증한 뒤 생성한다.
+    # 본 스트림에서는 비워 두어 LLM 호출이 completion/done을 지연시키지 않게 한다.
     resolved_intents = list(
         dict.fromkeys(
             ([analysis_meta.result.intent] if analysis_meta.result is not None else [])
@@ -10160,57 +9463,47 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     _mark_stage(stage_timings, "total", request_started_at)
     await run_in_threadpool(
         _save_rag_evaluation_log,
-        request_id,
-        session_id,
-        raw_query,
-        expanded_query,
-        route,
-        answer,
-        False,
-        None,
-        date_filter_applied,
-        date_filter_relaxed,
+        request_id, session_id, raw_query, expanded_query, route, final_answer,
+        False, None, date_filter_applied, date_filter_relaxed,
         None if analysis_meta.result is None else analysis_meta.result.intent,
         None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
         None if analysis_meta.result is None else analysis_meta.result.time_focus,
         None if analysis_meta.result is None else json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
         False if analysis_meta.result is None else analysis_meta.result.needs_clarification,
         None if analysis_meta.result is None else analysis_meta.result.clarification_reason,
-        analysis_meta.used,
-        analysis_meta.failed,
-        json.dumps(matched_queries, ensure_ascii=False),
+        analysis_meta.used, analysis_meta.failed,
+        json.dumps(_collect_matched_queries(merged), ensure_ascii=False),
         top_hybrid_score,
-        sources,
+        [SourceChunk(**s) for s in sources],
         stage_timings,
         llm_usage,
     )
     if grounding_result is not None and grounding_result.checked:
         await run_in_threadpool(_update_grounding_log, request_id, grounding_result)
-    await run_in_threadpool(_update_observability_log, request_id, stage_timings, llm_usage)
-
-    _log_event(
-        logging.INFO,
-        "ask_completed",
-        request_id=request_id,
-        route=route,
-        source_count=len(sources),
-        top_hybrid_score=top_hybrid_score,
-        policy_name=retrieval_policy.name,
-        effective_min_score=effective_min_score,
-        recent_notice_query=recent_notice_query,
-        notice_topic_aligned=notice_topic_aligned,
-        date_filter_label=None if date_filter is None else date_filter.label,
-        analysis_used=analysis_meta.used,
-        analysis_failed=analysis_meta.failed,
-        notice_board_filter=notice_board_filter,
-    )
-
+    if mode == "ask":
+        await run_in_threadpool(_update_observability_log, request_id, stage_timings, llm_usage)
+        _log_event(
+            logging.INFO,
+            "ask_completed",
+            request_id=request_id,
+            route=route,
+            source_count=len(sources),
+            top_hybrid_score=top_hybrid_score,
+            policy_name=retrieval_policy.name,
+            effective_min_score=min_score,
+            recent_notice_query=recent_notice_query,
+            notice_topic_aligned=topic_aligned,
+            date_filter_label=None if date_filter is None else date_filter.label,
+            analysis_used=analysis_meta.used,
+            analysis_failed=analysis_meta.failed,
+            notice_board_filter=notice_board_filter,
+        )
     if RAG_SEMANTIC_CACHE_ENABLED and req.as_of is None and _should_cache_answer(
         selected_route,
         False,
         date_filter_applied,
-        grounded,
-        answer,
+        grounded_flag,
+        final_answer,
         recent_notice_query=recent_notice_query,
         active_notice_query=active_notice_query,
         verification_status=verification_status,
@@ -10220,39 +9513,98 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             raw_query,
             semantic_cache_ns,
             {
-                "answer": answer,
+                "answer": final_answer,
                 "citations": citations,
                 "route": route,
-                "sources": [
-                    s.model_dump() if hasattr(s, "model_dump") else s
-                    for s in sources
-                ],
+                "sources": sources,
                 "suggested_questions": suggested_questions,
                 "suggested_question_details": suggested_question_details,
                 "resolved_intents": resolved_intents,
-                "grounded": grounded,
+                "grounded": grounded_flag,
                 "grounding_score": grounding_score,
                 "relevance_score": relevance_score,
                 "verification_status": verification_status,
             },
         )
-
-    return AskResponse(
+    yield QueryEvent(_completion_payload(
         request_id=request_id,
-        answer=answer,
-        citations=citations,
-        route=route,
-        resolved_intents=resolved_intents,
-        sources=sources,
-        suggested_questions=suggested_questions,
-        suggested_question_details=[SuggestedQuestionDetail(**detail) for detail in suggested_question_details],
-        grounded=grounded,
+        grounded=grounded_flag,
         grounding_score=grounding_score,
         relevance_score=relevance_score,
         verification_status=verification_status,
-        fallback_triggered=False,
+        suggested_questions=suggested_questions,
         fallback_reason=None,
+        sources=sources,
+        suggested_question_details=suggested_question_details,
+        resolved_intents=resolved_intents,
+    ))
+
+
+@app.post("/ask/stream")
+async def ask_stream(req: AskRequest, request: Request):
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    raw_query = req.question.strip()
+    if not raw_query:
+        raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
+
+    temporal_context = _request_temporal_context(req)
+    session_id = req.session_id or str(uuid.uuid4())
+    stage_timings: dict[str, float] = {}
+    llm_usage: list[dict] = []
+    request_started_at = time.perf_counter()
+
+    async def _stream_body():
+        _request_as_of.set(temporal_context.as_of.isoformat())
+
+        plan = await _plan_query(
+            req=req, raw_query=raw_query, temporal_context=temporal_context,
+            request_id=request_id, session_id=session_id,
+            stage_timings=stage_timings, llm_usage=llm_usage, mode="stream",
+        )
+        async for step in execute_query(
+            plan, "stream", req=req, raw_query=raw_query,
+            temporal_context=temporal_context, request_id=request_id,
+            session_id=session_id, stage_timings=stage_timings,
+            llm_usage=llm_usage, request_started_at=request_started_at,
+        ):
+            if isinstance(step, QueryEvent):
+                yield _query_event_sse(step)
+
+    return StreamingResponse(
+        _stream_with_terminal_event(_stream_body(), request_id),
+        media_type="text/event-stream",
     )
+
+@app.post("/ask", response_model=AskResponse)
+async def ask(req: AskRequest, request: Request) -> AskResponse:
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    raw_query = req.question.strip()
+    if not raw_query:
+        raise HTTPException(status_code=400, detail="질문이 비어 있습니다.")
+
+    temporal_context = _request_temporal_context(req)
+    _request_as_of.set(temporal_context.as_of.isoformat())
+    session_id = req.session_id or str(uuid.uuid4())
+    stage_timings: dict[str, float] = {}
+    llm_usage: list[dict] = []
+    request_started_at = time.perf_counter()
+
+    plan = await _plan_query(
+        req=req, raw_query=raw_query, temporal_context=temporal_context,
+        request_id=request_id, session_id=session_id,
+        stage_timings=stage_timings, llm_usage=llm_usage, mode="ask",
+    )
+    outcome = None
+    async for step in execute_query(
+        plan, "ask", req=req, raw_query=raw_query,
+        temporal_context=temporal_context, request_id=request_id,
+        session_id=session_id, stage_timings=stage_timings,
+        llm_usage=llm_usage, request_started_at=request_started_at,
+    ):
+        if isinstance(step, QueryOutcome):
+            outcome = step
+    assert outcome is not None
+    return outcome.response()
 
 
 @app.post("/followups", response_model=FollowupResponse)
