@@ -330,9 +330,14 @@ def collect_board(
     delay: float = DEFAULT_REQUEST_DELAY,
     earliest_year: Optional[int] = 2023,
     known_ids: set[int] | None = None,
+    since: date | None = None,
     request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
     request_retries: int = DEFAULT_REQUEST_RETRIES,
 ) -> pd.DataFrame:
+    if since is not None and known_ids is not None:
+        raise ValueError("since crawl must revisit known article IDs")
+    if since is not None:
+        earliest_year = None
     records: List[Dict[str, Any]] = []
     seen_ids: set[int] = set()
     page = 1
@@ -341,6 +346,10 @@ def collect_board(
     list_pages_succeeded = 0
     list_pages_failed = 0
     list_rows_seen = 0
+    termination_reason = "page_cap"
+    coverage_error: str | None = None
+    previous_list_date: date | None = None
+    oldest_list_date: date | None = None
     # 목록이 대체로 날짜 역순이지만 중간에 섞인 글이 있을 수 있으므로,
     # 오래된 글이 연속으로 이 횟수만큼 나와야 수집을 중단한다(즉시 중단 시 누락 위험).
     OLD_STREAK_TO_STOP = 5
@@ -359,18 +368,45 @@ def collect_board(
             )
         except Exception as exc:  # noqa: BLE001 — 목록 한 페이지 실패가 게시판 전체를 중단시키지 않도록
             list_pages_failed += 1
+            termination_reason = "list_error"
             print(f"⚠️ [{board_name}] 목록 페이지 {page} 수집 실패: {exc}")
             break
         list_pages_succeeded += 1
         list_rows_seen += len(notice_list)
         if not notice_list:
+            termination_reason = "empty_page"
             break
+
+        boundary_page = False
+        if since is not None:
+            non_pinned_dates: list[date] = []
+            for meta in notice_list:
+                posted = meta.get("posted_at")
+                if not isinstance(posted, date):
+                    coverage_error = "undated_list_row"
+                    break
+                posted = posted.date() if isinstance(posted, datetime) else posted
+                if not meta.get("is_pinned"):
+                    if previous_list_date is not None and posted > previous_list_date:
+                        coverage_error = "non_monotonic_list_dates"
+                        break
+                    previous_list_date = posted
+                    non_pinned_dates.append(posted)
+                    oldest_list_date = min(oldest_list_date, posted) if oldest_list_date else posted
+            if coverage_error:
+                termination_reason = coverage_error
+                break
+            # A single old item on a mixed page does not establish coverage.
+            boundary_page = bool(non_pinned_dates) and all(day < since for day in non_pinned_dates)
 
         for meta in notice_list:
             article_id = meta["article_id"]
             if article_id in seen_ids:
                 continue
             seen_ids.add(article_id)
+
+            if since is not None and meta["posted_at"] < since:
+                continue
 
             if known_ids is not None and article_id in known_ids:
                 continue
@@ -394,6 +430,11 @@ def collect_board(
                     "content_text": "",
                     "attachments": [],
                 }
+
+            if since is not None and detail.get("posted_at") not in (None, meta["posted_at"]):
+                coverage_error = "detail_date_mismatch"
+                termination_reason = coverage_error
+                break
 
             record = {
                 "board_name": board_name,
@@ -431,6 +472,11 @@ def collect_board(
 
         if stop_collecting:
             break
+        if coverage_error:
+            break
+        if boundary_page:
+            termination_reason = "before_since_boundary"
+            break
         page += 1
 
     if failed_articles:
@@ -449,7 +495,7 @@ def collect_board(
 
     if list_pages_succeeded == 0 and list_pages_failed:
         crawl_status = "failed"
-    elif list_pages_failed or failed_articles:
+    elif list_pages_failed or failed_articles or coverage_error or (since is not None and termination_reason == "page_cap"):
         crawl_status = "partial"
     else:
         crawl_status = "success"
@@ -462,6 +508,15 @@ def collect_board(
         "list_rows_seen": list_rows_seen,
         "records_collected": len(selected),
         "detail_failures": failed_articles,
+        "termination_reason": termination_reason if since is not None else None,
+        "coverage_complete": (
+            termination_reason in {"empty_page", "before_since_boundary"}
+            and list_pages_succeeded > 0
+            and list_rows_seen > 0
+            and not (list_pages_failed or failed_articles or coverage_error)
+        ) if since is not None else None,
+        "oldest_list_date": oldest_list_date.isoformat() if oldest_list_date else None,
+        "since": since.isoformat() if since is not None else None,
     }
     return selected
 
@@ -472,6 +527,7 @@ def crawl_notices(
     delay: float = DEFAULT_REQUEST_DELAY,
     earliest_year: Optional[int] = 2023,
     known_ids_by_board: dict[str, set[int]] | None = None,
+    since: date | None = None,
     request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
     request_retries: int = DEFAULT_REQUEST_RETRIES,
 ) -> pd.DataFrame:
@@ -492,6 +548,7 @@ def crawl_notices(
             delay=delay,
             earliest_year=earliest_year,
             known_ids=known_ids,
+            since=since,
             request_timeout=request_timeout,
             request_retries=request_retries,
         )
