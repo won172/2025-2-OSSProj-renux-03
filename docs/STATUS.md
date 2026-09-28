@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-09-27
+Last Updated: 2026-09-28
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -25,7 +25,7 @@ Last Updated: 2026-09-27
 | Lexical Retrieval | Active | FTS5/BM25. SQL로 좁힌 규정 문서 내부 청크 재정렬에도 사용 |
 | Reranking | Rule-based Active / Model Disabled | 최신성·필터·후보 융합 적용. Cross-encoder는 `RERANKER_ENABLED=0`이 기본값 |
 | Ontology Retrieval | Scoped SQL Active / Broad Expansion Experimental | `RAG_STRUCTURED_RETRIEVAL_ENABLED=1`. 명시적 연락처·과목·학번 질문만 관계 근거 우선 조회. Shadow·광범위한 후보 보강은 기본 OFF |
-| Grounding | Implemented / Quality Evaluation Pending | 공식 출처 기반 생성·근거성 검사 구현. 전체 실제 후보 답변의 품질 통과를 의미하지 않음 |
+| Grounding | Implemented / Quality Evaluation Pending | 공식 출처 기반 생성·근거성 검사 구현. `verification_status`(passed/failed/unavailable/not_required)를 RAG completion에 노출(PR #15). C#·프런트 전달은 미적용. 전체 실제 후보 답변의 품질 통과를 의미하지 않음 |
 | iOS | In Progress | 인증 쿠키 전송 등 수정 반영. 실제 기기·인증·응답 전달 추가 검증 필요 |
 
 ## Current Priorities
@@ -75,32 +75,34 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| CI에서 프런트 `npm test`·백엔드 계약 테스트 실행 (pipeline-audit P0) | P0 | RAG/Backend (CI) | `chore/ci-contract-tests` | `ci-contract-tests` (제거됨) | Completed | 로컬 `npm test` 50/50, 계약 테스트 통과; PR #8 CI 4개 job 통과 | 계약 테스트는 product telemetry 계약만 다룸 | Recently Completed로 이동 |
-| RAG pytest 순서 독립성 검증·테스트 격리 (pipeline-audit P0) | P0 | QA + RAG/Backend | `test/rag-order-independence` | `rag-order-independence` (제거됨) | Completed | 순서 고정·역순·시드 8개·파일별·테스트별 실행 모두 977 passed (일반 DB·빈 DB). Orchestrator 재검증: 실제 Chroma 해시 불변, 시드 424242 통과 | 순서 의존 실패는 재현되지 않음. 테스트가 실제 `artifacts/db_chroma`·유지보수 잠금을 열던 문제를 conftest로 격리. `test_deadline_recall_baseline`은 `real_chroma`로 실제 인덱스 사용 유지. `vectorizers/manifest.lock`은 실제 경로 사용. `query_analysis.analysis_chain` 전역 싱글턴은 제품 코드에 남음 | PR #10 merge(`cffe3e3`). 후속: `chore/ci-random-order`, `refactor/query-analysis-chain` |
-| CI에 RAG 무작위 순서 pytest 단계 추가 | P0 후속 | RAG/Backend (CI) | `chore/ci-random-order` | `ci-random-order` | Review | 로컬: 순서 고정 2단계·무작위(seed 12345) 976 passed/1 skipped. Orchestrator 재검증: seed 987654 동일 | `pytest-randomly==5.0.0`은 `requirements-dev.txt`에만. 설치 시 로컬 기본 실행도 무작위가 되므로 `-p no:randomly` 필요. 재실행은 같은 seed 사용 | merge 승인 대기 |
-| 질의분석 체인 주입 지점 통일·싱글턴 초기화 (pipeline-audit 03 P0) | P0 | RAG/Backend | `refactor/query-analysis-chain` | `query-analysis-chain` | Review | 978 passed/1 skipped (일반·빈 DB, seed 1/2/3). 프롬프트·모델 설정·structured output kwargs가 origin/main과 동일함을 해시로 확인. Orchestrator 재검증: seed 555111·순서 고정 동일 | 공개 `analysis_chain` 제거, 주입 지점은 `_build_analysis_chain` 하나. `reset_analysis_chain()`은 공개 함수(현재 conftest만 호출) | merge 승인 대기. 다음: audit 03 공통 `QueryPlan` |
-| 공식 사이트에서 삭제된 공지 탐지 (pipeline-audit 10 P1) | P1 | RAG/Backend (crawling) | `feat/notice-deletion-detection` | `notice-deletion-detection` | Review | 로컬(2026-09-27): 신규 54개 포함 전체 RAG 1032 passed/1 skipped(순서 고정·빈 DB·무작위 seed 24601). Orchestrator 재검증: 순서 고정 동일, 무작위 seed 22360(빈 DB) 동일. 독립 QA: CHANGES REQUESTED(login/SSO redirect를 삭제로 판정, 기존 miss_count 공유로 1회 probe 삭제 가능 등) → APPROVE + 권고 1건(삭제 상태·기록 원자성) 반영 | 기본 `RAG_NOTICE_DELETION_CHECK_MODE=off`. 실제 사이트 삭제 redirect 대상 미검증(감사 문서 가정: 같은 게시판 /list). 실제 요청·DB 미사용. 재게시 중복 공지는 미처리. 초기 backlog 정리 시 cap 일시 상향 필요 가능 | merge 승인 대기 → 운영 `dry_run`으로 http_statuses·Location 확인 → human이 `enforce` 결정 |
-| 공식 규정관리시스템 전체 분류 수집 (pipeline-audit 10 P0) | P0 | RAG/Backend (crawling) | `feat/official-rules-coverage` | `official-rules-coverage` | Review | 로컬(2026-09-27): 신규 29개 포함 전체 RAG 1005 passed/1 skipped(순서 고정·빈 DB·무작위 seed 13579). Orchestrator 재검증: 순서 고정 동일, 무작위 seed 57721(빈 DB) 동일. 독립 QA 3회: CHANGES REQUESTED(pagination silent truncation, report 미노출, 동일 규정 현행 2개) → CHANGES REQUESTED(같은 번호 다른 규정 누락) → APPROVE. 추적 CSV 520행에서 `is_latest` 변화 0건 | 실제 전체 수집·sync·재색인 미실행(공개 목록 페이지 read-only GET 8회만). 첫 전체 실행 약 600+ 요청 후 rules 전체 재색인 필요. 폐지 후보 24건·이름 변경 22건은 보고만 하고 숨기지 않음(human 판정 필요). 번호만 같고 캠퍼스가 다른 규정이 한쪽에만 있을 때 번호 기준 대체 가능(`superseded_by_code`로 보고). `shared_codes`는 요약 로그에 미출력 | merge 승인 대기 → human 승인 `--dry-run`으로 목록 검토 → 실제 sync·재색인·골든/qrels 회귀 |
-| 청크 표현 P0: courses 내부 필드 제거, rules 조문 단위 분할 (pipeline-audit 09 P0-2/P0-3) | P0 | RAG/Backend | `fix/chunk-representation` | `chunk-representation` | Review | 로컬(2026-09-27): 계약 테스트 25개 포함 전체 RAG 1003 passed/1 skipped(순서 고정·빈 DB·무작위 seed 97531). Orchestrator 재검증: 순서 고정 동일, 무작위 seed 31415(빈 DB) 동일. 독립 QA: 1차 CHANGES REQUESTED(raw_text 내용 손실, 청크 없는 행의 lineage 위험) → 수정 후 APPROVE. QA가 추적 CSV 4,395행·학칙 520건에서 in-memory 확인: bookkeeping 누출 0, 모든 행 1개 이상 청크, rules 세그먼트 96%가 조/장/절 경계 시작 | 재색인 전에는 효과 없음. 실제 qrels·골든 전후 비교 미확인(데이터 사본 필요). rules 청크 수 증가로 top-k·BM25 통계 변화 가능. `트랙명`/`구 분` 16건은 라벨만 소실(값은 제목에 남음). 조문 판별 휴리스틱 edge case 잔존. 기존 문제(범위 밖): `제1조(목적) 이` 뒤 공백 제거, `_academic_period`가 학수번호를 연도로 읽음 | merge 승인 대기 → 데이터 사본 재색인 후 audit 09 지표·qrels 전후 비교 |
-| index build·rebuild 스크립트에 strict lineage gate 적용 (pipeline-audit 07 P0) | P0 | RAG/Backend | `chore/build-lineage-gate` | `build-lineage-gate` | Review | 로컬(2026-09-27): gate 테스트 28개 포함 전체 RAG 1006 passed/1 skipped(순서 고정·빈 DB·무작위 seed 86420). Orchestrator 재검증: 순서 고정 동일, 무작위 seed 99001(빈 DB) 동일, 4개 스크립트 직접 실행 `--help` import 정상. 독립 QA APPROVE(wiring·paused 75 테스트 보강 반영) | 실제 데이터로 스크립트 미실행. `build_indices.py`는 staging이 없어 게시 후 검사(실패 시 exit 1 + rollback 안내). lexical은 FTS/BM25 파일 자체는 검사하지 않음. notices activate 검사는 maintenance_lock 밖. 현재 lineage 실패 데이터셋은 build가 exit 1이 됨(`--skip-lineage-gate`로 우회 가능, 경고 기록) | merge 승인 대기 |
+| 메인 서버 RAG 중계 timeout 단계 분리 (audit 08 P1) | P1 | RAG/Backend (ASP.NET Core) | `fix/rag-relay-timeouts` | `rag-relay-timeouts` | Review | 2026-09-28 로컬: Release build 오류 0, 계약 테스트 통과(실제 relay 경로·SSE frame 파싱). QA codex2 7회 | 빈 upstream 뒤 fallback 쓰기는 total deadline 밖(저장 안 됨). 실 Kestrel·DB E2E 미실행. diff 큼(약 +390/-260) | PR #22 merge 승인 대기(리뷰 유의) |
+| PWA precache 축소·bundle budget 검사 (audit 08 성능) | P2 | Client | `fix/frontend-precache-budget` | `frontend-precache-budget` | Review | 2026-09-28 로컬: 50/50·lint·build·budget(precache 19개 1,184,847B, main JS 237,660B). QA codex2 APPROVE | main JS budget 여유 약 1%. 일부 공유 chunk는 오프라인 시 runtime cache 후 사용. 실제 오프라인 미검증 | PR #23 merge 승인 대기 |
+| `_academic_period`가 학수번호를 연도로 읽는 버그 수정 | P1 | RAG/Backend | `fix/academic-period-course-code` | `academic-period-course-code` | Review | 2026-09-28 로컬: 전체 RAG 1,223 passed/1 skipped(일반·빈 DB). 구현 codex 4회, QA codex2 3회. 핵심 사례 Orchestrator 직접 확인 | 재색인 후 반영. `2024.12.2` 같은 날짜에서 학기 추출 제거(의도된 차이). 실제 qrels 영향 미확인 | PR #26 merge 승인 대기 |
+| fallback 사유 세분화(미발표·stale·clarify·범위 밖·selector 거절) (audit 03 P1) | P1 | RAG/Backend | `feat/fallback-reasons` | `fallback-reasons` | Review | 2026-09-28 로컬: 관련 42개, 전체 RAG 1,184 passed/1 skipped(일반·빈 DB). 구현 codex, QA codex2 APPROVE | 새 reason 5개는 `fallback_triggered=true` → 메인 서버 IsFallback·fallback 비율 지표 상승. 프런트 전용 라벨은 #21 merge 후 후속 | PR #25 merge 승인 대기. 다음: 공통 QueryPlan(#25 merge 후) |
+| 청크 표현 P1: staff·schedule 라벨 템플릿, 빈 공지 low_value (audit 09 P1) | P1 | RAG/Backend | `fix/chunk-representation-p1` | `chunk-representation-p1` | Review | 2026-09-28 로컬: 전체 RAG 1,184 passed/1 skipped(일반·빈 DB). 구현 codex 3회, QA codex2 3회 → APPROVE | 재색인 후 반영. 제목 중복 제거는 retrieval_context.py(#26) 이후로 보류 | PR #27 merge 승인 대기 |
+| 프런트 verification_status 표시·새 fallback 사유 라벨 (audit 08 P0/04 P0) | P0 | Client | `feat/client-verification-status` | `client-verification-status` | Review | 2026-09-28 로컬: lint·66/66·tsc. QA codex2 2회 → APPROVE | C#가 verification_status를 저장·반환하지 않아 새로고침 이력은 grounded 기준. C# 후속은 #22 이후 | PR #28 merge 승인 대기 |
+| 공지 Chroma compactor 오류 진단·strict lineage 재통과 (P0) | P0 | RAG/Backend | - | - | Blocked | - | 실제 DB·artifacts 사본 필요. 에이전트의 사본 생성은 개인정보 처리로 권한 차단 | human이 읽기 전용 사본 경로 제공 또는 권한 허용 |
+| 실제 후보 골든 평가 190문항 (P0) | P0 | QA | - | - | Blocked | release gate는 fail-closed로 전환(PR #14) | 후보 endpoint·모델 비용 승인 필요 | human이 endpoint 제공 |
+| Orchestrator·Codex 실행 설정 후보 적용 | P1 | Orchestrator | `chore/agent-orchestration` | `agent-orchestration` | Blocked | runner 단위 테스트 22/22(2026-09-27 재실행) | staged 상태. 에이전트 권한 설정 commit이 auto mode에서 차단됨. base `cffe3e3`로 오래됨 | human이 commit·PR 여부 결정 |
 
 Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 완료된 행은 다음 갱신 때 Recently Completed로 옮긴다.
 
 ## Git State
 
-2026-09-27 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
+2026-09-28 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
 
 - Remote: `origin` = `github.com/won172/2025-2-OSSProj-renux-03` (fork, upstream `CSID-DGU/2025-2-OSSProj-renux-03`).
-- `origin/main`: branch protection 없음. 적용하려면 human이 설정해야 한다(agent 권한으로 차단됨).
-- 이후 merge: PR #7 멀티 agent 문서(`bf80760`), PR #8 CI 테스트 실행(`cc77463`).
-- `feature/ontology`(`4b62d12`)는 PR #6으로 `main`에 merge됐다(`cd9f7a2`, 트리 동일).
-  이 문서와 ARCHITECTURE.md는 이 코드 기준이다.
-- 새 task의 base branch는 `origin/main`이다.
+- `origin/main` = `02feb23` (PR #13~#21 merge). branch protection 없음(human 설정 필요).
+- 새 task의 base branch는 `origin/main`이다. PR #13 이후 task PR은 STATUS.md를 수정하지 않는다.
+- merge된 task의 worktree·local branch는 정리했다. remote branch(`chore/golden-release-gate`,
+  `fix/grounding-verification-status`, `chore/build-lineage-gate`, `fix/chunk-representation`,
+  `feat/official-rules-coverage`, `feat/notice-deletion-detection`, `docs/codex-executors`,
+  `docs/status-batch-update` 등) 삭제 여부는 human 결정 대기.
 - 규칙 도입 전 branch(`codex/*`, `auto/*`, `redesign/*`, `v2-agentic-graph-rag`,
   `docs/*-20260927`)는 정리하지 않고 유지한다.
-- `git worktree list`에 `/private/tmp/dongttok-release-eval.*` 가 `prunable`로 남아 있다
-  (디렉터리 없음, 메타데이터만 존재). 정리는 `git worktree prune`으로 가능하며 아직 실행하지 않았다.
+- 구현은 Codex 우선(`codex` Pro Lite 구현, `codex2` Plus 읽기 전용 QA, PR #20). 계약·보고는 git 밖
+  `../dongttok-worktrees/.codex-runs/`에 둔다.
 
 ## In Progress
 
@@ -193,6 +195,15 @@ Next Action:
 - 9월 27일 RAG 테스트 순서 독립성 검증 및 실제 Chroma·유지보수 잠금 격리 (PR #10).
 - 9월 27일 CI에 RAG 무작위 순서 pytest 단계 추가, `requirements-dev.txt` 도입 (PR #11).
 - 9월 27일 질의분석 체인 주입 지점 통일·싱글턴 초기화·동시 첫 생성 잠금 (PR #12).
+- 9월 27일 STATUS.md는 Orchestrator 일괄 PR로만 갱신 (PR #13).
+- 9월 27일 골든 후보 평가 release gate fail-closed: 수동 릴리스 실행에서 URL 없으면 실패, 불완전·부분 manifest 거부 (PR #14). 실제 평가는 미실행.
+- 9월 27일 grounding `verification_status` 4상태, 미검사를 통과로 표시하지 않음, stale 직접응답 grounded 제거, cache는 passed만 (PR #15).
+- 9월 27일 index build·rebuild 스크립트 strict lineage gate (PR #16). 실제 데이터 실행 미검증.
+- 9월 27일 청크 표현: courses 화이트리스트·raw_text 투영, rules 조문 단위 분할 (PR #17). **재색인 전에는 효과 없음.**
+- 9월 27일 공식 규정 전체 분류 수집(77개), fail-safe·보고 (PR #18). 실제 전체 sync·재색인 미실행.
+- 9월 27일 삭제 공지 탐지 opt-in(기본 off, 2회 probe 확인·cap) (PR #19). 운영 dry_run 미실행.
+- 9월 28일 Codex 우선 위임 규칙 (PR #20).
+- 9월 28일 프런트 fallback 사유 라벨 전체 매핑·추천 질문 요청 취소 (PR #21, codex 구현·codex2 QA).
 
 ## Agent Tasks
 
@@ -233,6 +244,11 @@ Next:
 - 품질·정합성 gate 통과 후 운영 배포 여부 승인. 현재 배포를 승인한 상태는 아니다.
 - GitHub `main` branch protection(직접 push·force push 차단, PR·CI 필수) 적용 여부.
   원격 저장소 설정 변경이므로 agent가 수행하지 않는다.
+- 골든 평가 threshold(현재 0.75/0.80/0.70/0.80, 감사 권고 0.85) 상향 여부.
+- PR #18 공식 규정 `--dry-run` 결과(폐지 후보 약 24건, 이름 변경 약 22건) 검토 후 실제 sync·rules 재색인 여부.
+- PR #19 삭제 공지 탐지 운영 `dry_run` 관찰 후 `enforce` 전환 여부.
+- PR #17·#18 반영을 위한 재색인과 전후 비교에 쓸 데이터 사본 제공(에이전트 사본 생성은 권한 차단).
+- merge된 task의 remote branch 삭제 여부, `chore/agent-orchestration` 후보 처리.
 
 ## Next Milestone
 

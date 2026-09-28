@@ -15,6 +15,7 @@ import type { RagAdminStatus } from '../../types/admin'
 import type { UserRole } from '../../types/auth'
 import { AdminConsoleContext, type AdminConsoleValue } from './adminConsoleContext'
 import ToastStack, { type ToastMessage, type ToastTone } from './Toast'
+import '../../styles/admin-console.css'
 
 /** 요약 지표 자동 갱신 주기 — 대기 건수가 오래 묵지 않을 만큼 자주, 서버 부담은 적게. */
 const SUMMARY_POLL_MS = 30_000

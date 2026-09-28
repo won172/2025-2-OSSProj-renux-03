@@ -1148,6 +1148,13 @@ FALLBACK_REASON_ACTIVE_DEADLINE_ELIMINATED_ALL = (
 FALLBACK_REASON_DATASET_UNAVAILABLE = "dataset_unavailable"
 FALLBACK_REASON_SCORE_BELOW_THRESHOLD = "score_below_threshold"
 FALLBACK_REASON_CAMPUS_OUT_OF_SCOPE = "campus_out_of_scope"
+# Terminal replies that withhold an answer or limit it need distinct reasons.
+# Each sets fallback_triggered=True; their verification_status is not_required.
+FALLBACK_REASON_FUTURE_UNANNOUNCED = "future_unannounced"
+FALLBACK_REASON_STALE_DATA = "stale_data"
+FALLBACK_REASON_CLARIFICATION_NEEDED = "clarification_needed"
+FALLBACK_REASON_OUT_OF_DOMAIN = "out_of_domain"
+FALLBACK_REASON_SELECTOR_REFUSED = "selector_refused"
 # 학과 필터를 적용하지 않는 sentinel 값들(백엔드는 보통 null을 보내지만 방어적으로 처리).
 _NO_MAJOR_SENTINELS = {"Default", "Unknown"}
 
@@ -2078,6 +2085,10 @@ def _try_direct_answer(query: str, today: date) -> DirectAnswer | None:
 
 
 _FAIL_CLOSED_DIRECT_ANSWER_KINDS = frozenset({"meal_stale", "schedule_stale"})
+
+
+def _direct_answer_fallback_reason(direct: DirectAnswer) -> str | None:
+    return FALLBACK_REASON_STALE_DATA if direct.kind in _FAIL_CLOSED_DIRECT_ANSWER_KINDS else None
 
 
 def _direct_answer_grounding(direct: DirectAnswer) -> tuple[bool | None, float | None]:
@@ -5357,8 +5368,13 @@ async def _select_evidence_for_answer(
                 shortlist,
                 min_term_coverage=rag_config.RAG_SELECTOR_REFUSAL_MIN_COVERAGE,
             ).empty:
-                return shortlist.iloc[:0].copy(), True
-        return _deterministic_evidence_fallback(question, shortlist), True
+                refused = shortlist.iloc[:0].copy()
+                refused.attrs["selector_refused"] = True
+                return refused, True
+        fallback = _deterministic_evidence_fallback(question, shortlist)
+        if fallback.empty:
+            fallback.attrs["selector_refused"] = True
+        return fallback, True
     selected = _materialize_evidence_groups(shortlist, groups)
     selected["selector_fallback"] = 0
     return selected, False
@@ -8535,12 +8551,12 @@ async def ask_stream(req: AskRequest, request: Request):
             answer = future_unannounced.answer
             route = ["notices"]
             _mark_stage(stage_timings, "total", request_started_at)
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': route, 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': route, 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_FUTURE_UNANNOUNCED}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'text', 'content': answer}, ensure_ascii=False)}\n\n"
             await run_in_threadpool(
                 _save_rag_evaluation_log,
                 request_id, session_id, raw_query, raw_query, route, answer,
-                False, None, False, False,
+                True, FALLBACK_REASON_FUTURE_UNANNOUNCED, False, False,
                 "future_unannounced", None, None,
                 json.dumps([raw_query], ensure_ascii=False), False, None,
                 False, False, json.dumps([raw_query], ensure_ascii=False), None,
@@ -8559,7 +8575,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 grounding_score=None,
                 verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
-                fallback_reason=None,
+                fallback_reason=FALLBACK_REASON_FUTURE_UNANNOUNCED,
                 sources=[],
                 resolved_intents=route,
             )
@@ -8575,6 +8591,7 @@ async def ask_stream(req: AskRequest, request: Request):
         if direct is not None:
             direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
             direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
+            direct_fallback_reason = _direct_answer_fallback_reason(direct)
             direct_suggestion_details = _direct_answer_suggestions(direct, direct_sources)
             direct_suggestions = [
                 detail.question for detail in direct_suggestion_details
@@ -8582,14 +8599,15 @@ async def ask_stream(req: AskRequest, request: Request):
             serialized_sources = [source.model_dump() for source in direct_sources]
             direct_route = ["meals"] if direct.kind.startswith("meal") else ["schedule"]
             _mark_stage(stage_timings, "total", request_started_at)
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': serialized_sources, 'citations': direct_citations, 'route': direct_route, 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
+            direct_fallback_metadata = {"fallback_reason": direct_fallback_reason} if direct_fallback_reason else {}
+            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': serialized_sources, 'citations': direct_citations, 'route': direct_route, 'fallback_triggered': direct_fallback_reason is not None, **direct_fallback_metadata}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'text', 'content': direct_answer}, ensure_ascii=False)}\n\n"
             if direct_suggestions:
                 yield f"data: {json.dumps({'type': 'suggestions', 'questions': direct_suggestions}, ensure_ascii=False)}\n\n"
             await run_in_threadpool(
                 _save_rag_evaluation_log,
                 request_id, session_id, raw_query, raw_query, direct_route, direct_answer,
-                False, None, False, False,
+                direct_fallback_reason is not None, direct_fallback_reason, False, False,
                 direct_route[0], None, None, None, False, None,
                 False, False, json.dumps([raw_query], ensure_ascii=False), 1.0,
                 direct_sources, stage_timings, llm_usage,
@@ -8611,7 +8629,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=direct_suggestions,
                 suggested_question_details=direct_suggestion_details,
-                fallback_reason=None,
+                fallback_reason=direct_fallback_reason,
                 sources=direct_sources,
                 resolved_intents=direct_route,
             )
@@ -8647,12 +8665,12 @@ async def ask_stream(req: AskRequest, request: Request):
         if clarification_fields:
             clarification_answer = _build_clarification_answer(clarification_fields)
             _mark_stage(stage_timings, "total", request_started_at)
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_CLARIFICATION_NEEDED}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'text', 'content': clarification_answer}, ensure_ascii=False)}\n\n"
             await run_in_threadpool(
                 _save_rag_evaluation_log,
                 request_id, session_id, raw_query, raw_query, ["unknown"], clarification_answer,
-                False, None, False, False,
+                True, FALLBACK_REASON_CLARIFICATION_NEEDED, False, False,
                 None if analysis_meta.result is None else analysis_meta.result.intent,
                 None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
                 None if analysis_meta.result is None else analysis_meta.result.time_focus,
@@ -8668,7 +8686,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 grounding_score=None,
                 verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
-                fallback_reason=None,
+                fallback_reason=FALLBACK_REASON_CLARIFICATION_NEEDED,
                 sources=[],
                 resolved_intents=["unknown"],
             )
@@ -8686,7 +8704,7 @@ async def ask_stream(req: AskRequest, request: Request):
             domain_reply = out_of_domain_reply(raw_query)
 
             # 메타데이터 전송 (소스 없음)
-            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': [], 'citations': '', 'route': ['unknown'], 'fallback_triggered': True, 'fallback_reason': FALLBACK_REASON_OUT_OF_DOMAIN}, ensure_ascii=False)}\n\n"
 
             full_answer = [domain_reply]
             yield f"data: {json.dumps({'type': 'text', 'content': domain_reply}, ensure_ascii=False)}\n\n"
@@ -8702,7 +8720,7 @@ async def ask_stream(req: AskRequest, request: Request):
             await run_in_threadpool(
                 _save_rag_evaluation_log,
                 request_id, session_id, raw_query, raw_query, ["unknown"], "".join(full_answer),
-                False, None, False, False, analysis_meta.result.intent,
+                True, FALLBACK_REASON_OUT_OF_DOMAIN, False, False, analysis_meta.result.intent,
                 json.dumps(analysis_meta.result.entities, ensure_ascii=False),
                 analysis_meta.result.time_focus,
                 json.dumps(analysis_meta.result.search_queries, ensure_ascii=False),
@@ -8716,7 +8734,7 @@ async def ask_stream(req: AskRequest, request: Request):
                 grounding_score=None,
                 verification_status=VERIFICATION_NOT_REQUIRED,
                 suggested_questions=[],
-                fallback_reason=None,
+                fallback_reason=FALLBACK_REASON_OUT_OF_DOMAIN,
                 sources=[],
                 resolved_intents=["unknown"],
             )
@@ -8944,7 +8962,11 @@ async def ask_stream(req: AskRequest, request: Request):
                 document_count=len(merged),
             )
             if merged.empty:
-                fallback_reason = FALLBACK_REASON_NO_RESULTS
+                fallback_reason = (
+                    FALLBACK_REASON_SELECTOR_REFUSED
+                    if merged.attrs.get("selector_refused")
+                    else FALLBACK_REASON_NO_RESULTS
+                )
 
         if fallback_reason is not None:
             # 검색이 비었더라도 학사일정·식단 표에 답이 있는 시점 질문이면 직접 조회해 답한다.
@@ -8957,6 +8979,7 @@ async def ask_stream(req: AskRequest, request: Request):
             if direct is not None:
                 direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
                 direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
+                direct_fallback_reason = _direct_answer_fallback_reason(direct)
                 direct_suggestion_details = _direct_answer_suggestions(
                     direct,
                     direct_sources,
@@ -8968,14 +8991,15 @@ async def ask_stream(req: AskRequest, request: Request):
                     source.model_dump() for source in direct_sources
                 ]
                 _mark_stage(stage_timings, "total", request_started_at)
-                yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': serialized_direct_sources, 'citations': direct_citations, 'route': route, 'fallback_triggered': False}, ensure_ascii=False)}\n\n"
+                direct_fallback_metadata = {"fallback_reason": direct_fallback_reason} if direct_fallback_reason else {}
+                yield f"data: {json.dumps({'type': 'metadata', 'request_id': request_id, 'sources': serialized_direct_sources, 'citations': direct_citations, 'route': route, 'fallback_triggered': direct_fallback_reason is not None, **direct_fallback_metadata}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'text', 'content': direct_answer}, ensure_ascii=False)}\n\n"
                 if direct_suggestions:
                     yield f"data: {json.dumps({'type': 'suggestions', 'questions': direct_suggestions}, ensure_ascii=False)}\n\n"
                 await run_in_threadpool(
                     _save_rag_evaluation_log,
                     request_id, session_id, raw_query, expanded_query, route, direct_answer,
-                    False, None, date_filter_applied, date_filter_relaxed,
+                    direct_fallback_reason is not None, direct_fallback_reason, date_filter_applied, date_filter_relaxed,
                     None if analysis_meta.result is None else analysis_meta.result.intent,
                     None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
                     None if analysis_meta.result is None else analysis_meta.result.time_focus,
@@ -9001,7 +9025,7 @@ async def ask_stream(req: AskRequest, request: Request):
                     verification_status=VERIFICATION_NOT_REQUIRED,
                     suggested_questions=direct_suggestions,
                     suggested_question_details=direct_suggestion_details,
-                    fallback_reason=None,
+                    fallback_reason=direct_fallback_reason,
                     sources=direct_sources,
                     resolved_intents=route,
                 )
@@ -9469,7 +9493,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id, session_id, raw_query, raw_query, route, answer,
-            False, None, False, False,
+            True, FALLBACK_REASON_FUTURE_UNANNOUNCED, False, False,
             "future_unannounced", None, None,
             json.dumps([raw_query], ensure_ascii=False), False, None,
             False, False, json.dumps([raw_query], ensure_ascii=False), None,
@@ -9492,8 +9516,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             grounded=None,
             grounding_score=None,
             verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=False,
-            fallback_reason=None,
+            fallback_triggered=True,
+            fallback_reason=FALLBACK_REASON_FUTURE_UNANNOUNCED,
         )
 
     direct = await run_in_threadpool(
@@ -9504,6 +9528,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
     if direct is not None:
         direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
         direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
+        direct_fallback_reason = _direct_answer_fallback_reason(direct)
         direct_suggestion_details = _direct_answer_suggestions(direct, direct_sources)
         direct_suggestions = [
             detail.question for detail in direct_suggestion_details
@@ -9513,7 +9538,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         await run_in_threadpool(
             _save_rag_evaluation_log,
             request_id, session_id, raw_query, raw_query, direct_route, direct_answer,
-            False, None, False, False,
+            direct_fallback_reason is not None, direct_fallback_reason, False, False,
             direct_route[0], None, None, None, False, None,
             False, False, json.dumps([raw_query], ensure_ascii=False), 1.0,
             direct_sources, stage_timings, llm_usage,
@@ -9540,8 +9565,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             grounded=direct_grounded,
             grounding_score=direct_grounding_score,
             verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=False,
-            fallback_reason=None,
+            fallback_triggered=direct_fallback_reason is not None,
+            fallback_reason=direct_fallback_reason,
         )
 
     # 스트리밍 경로와 동일하게, 알려진 오타·구어체를 질의 분석 전에 교정한다.
@@ -9580,8 +9605,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             raw_query,
             ["unknown"],
             clarification_answer,
-            False,
-            None,
+            True,
+            FALLBACK_REASON_CLARIFICATION_NEEDED,
             False,
             False,
             None if analysis_meta.result is None else analysis_meta.result.intent,
@@ -9607,8 +9632,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             sources=[],
             resolved_intents=["unknown"],
             verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=False,
-            fallback_reason=None,
+            fallback_triggered=True,
+            fallback_reason=FALLBACK_REASON_CLARIFICATION_NEEDED,
         )
 
     if (
@@ -9634,8 +9659,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             raw_query,
             ["unknown"],
             answer,
-            False,
-            None,
+            True,
+            FALLBACK_REASON_OUT_OF_DOMAIN,
             False,
             False,
             analysis_meta.result.intent,
@@ -9660,8 +9685,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             sources=[],
             resolved_intents=["unknown"],
             verification_status=VERIFICATION_NOT_REQUIRED,
-            fallback_triggered=False,
-            fallback_reason=None,
+            fallback_triggered=True,
+            fallback_reason=FALLBACK_REASON_OUT_OF_DOMAIN,
         )
 
     stage_started_at = time.perf_counter()
@@ -9905,7 +9930,11 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             document_count=len(merged),
         )
         if merged.empty:
-            fallback_reason = FALLBACK_REASON_NO_RESULTS
+            fallback_reason = (
+                FALLBACK_REASON_SELECTOR_REFUSED
+                if merged.attrs.get("selector_refused")
+                else FALLBACK_REASON_NO_RESULTS
+            )
 
     matched_queries = _collect_matched_queries(merged)
 
@@ -9920,6 +9949,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         if direct is not None:
             direct_answer, direct_citations, direct_sources = _direct_answer_transport(direct)
             direct_grounded, direct_grounding_score = _direct_answer_grounding(direct)
+            direct_fallback_reason = _direct_answer_fallback_reason(direct)
             direct_suggestion_details = _direct_answer_suggestions(direct, direct_sources)
             direct_suggestions = [
                 detail.question for detail in direct_suggestion_details
@@ -9928,7 +9958,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
             await run_in_threadpool(
                 _save_rag_evaluation_log,
                 request_id, session_id, raw_query, expanded_query, route, direct_answer,
-                False, None, date_filter_applied, date_filter_relaxed,
+                direct_fallback_reason is not None, direct_fallback_reason, date_filter_applied, date_filter_relaxed,
                 None if analysis_meta.result is None else analysis_meta.result.intent,
                 None if analysis_meta.result is None else json.dumps(analysis_meta.result.entities, ensure_ascii=False),
                 None if analysis_meta.result is None else analysis_meta.result.time_focus,
@@ -9960,8 +9990,8 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
                 grounded=direct_grounded,
                 grounding_score=direct_grounding_score,
                 verification_status=VERIFICATION_NOT_REQUIRED,
-                fallback_triggered=False,
-                fallback_reason=None,
+                fallback_triggered=direct_fallback_reason is not None,
+                fallback_reason=direct_fallback_reason,
             )
 
         fallback_answer = _build_retrieval_fallback_answer(

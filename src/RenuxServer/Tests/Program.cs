@@ -174,6 +174,8 @@ fallbackTerminal.ObserveEndOfStream();
 Check(fallbackTerminal.IsSuccessful,
     "The graceful fallback sequence must satisfy the strict completion -> done terminal contract.");
 
+await RagRelayTimeoutTests.RunAsync(Check);
+
 string keyDirectory = Path.Combine(Path.GetTempPath(), $"dongttok-dp-{Guid.NewGuid():N}");
 string otherKeyDirectory = Path.Combine(Path.GetTempPath(), $"dongttok-dp-other-{Guid.NewGuid():N}");
 Directory.CreateDirectory(keyDirectory);
@@ -375,5 +377,5 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("Product telemetry contract tests passed.");
+Console.WriteLine("Backend contract tests passed.");
 return 0;

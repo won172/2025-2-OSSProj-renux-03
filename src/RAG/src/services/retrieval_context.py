@@ -12,6 +12,8 @@ from src.utils.audience import derive_audience
 _YEAR_RE = re.compile(r"(?<!\d)(20\d{2})\s*(?:학년도|년도|년)?")
 _SEMESTER_RE = re.compile(r"([12])\s*학기")
 _SHORT_PERIOD_RE = re.compile(r"(?<!\d)(\d{2})\s*[-./]\s*([12])(?!\d)")
+_IDENTIFIER_PREFIX_RE = re.compile(r"(?:[A-Za-z][A-Za-z0-9_]*|학번)_?$")
+_NUMERIC_SEGMENT_BEFORE_RE = re.compile(r"\d+\s*[-./]\s*$")
 _AUDIENCE_LABELS = {
     "undergraduate": "학부",
     "graduate": "대학원",
@@ -35,6 +37,33 @@ def _first_value(row: pd.Series, *columns: str) -> str:
     return ""
 
 
+def _is_code_period(material: str, match: re.Match[str], kind: str) -> bool:
+    """Keep legacy period matches except numbers inside identifiers or numeric codes."""
+    before = material[:match.start()]
+    after = material[match.end():]
+    if _IDENTIFIER_PREFIX_RE.search(before):
+        return True
+    after_number = material[match.end(1):] if kind == "year" else after
+    identifier_suffix = re.match(r"_?[A-Za-z]|\s*학번", after_number) or re.match(
+        r"\s*학번", after
+    )
+    if identifier_suffix and not (kind == "short" and after.startswith("_")):
+        return True
+    if kind == "semester":
+        return bool(re.search(r"(?:\d+\s*[-./]\s*){2,}$", before)) or bool(
+            before and before[-1].isdigit()
+        )
+    if _NUMERIC_SEGMENT_BEFORE_RE.search(before):
+        return True
+    if kind == "short":
+        return bool(re.match(r"\s*[-./]\s*\d", after))
+    if re.match(r"\s*[-./]\s*\d{4}\s*[-./]\s*\d", after):
+        return True
+    return bool(
+        re.match(r"\s*[-./]\s*(?!20\d{2}(?:\b|학년도|년도|년))\d{3,}", after)
+    )
+
+
 def _academic_period(row: pd.Series) -> str:
     material = " ".join(
         [
@@ -42,9 +71,27 @@ def _academic_period(row: pd.Series) -> str:
             _first_value(row, "chunk_text")[:500],
         ]
     )
-    year_match = _YEAR_RE.search(material)
-    semester_match = _SEMESTER_RE.search(material)
-    short_match = _SHORT_PERIOD_RE.search(material)
+    year_match = next(
+        (
+            match for match in _YEAR_RE.finditer(material)
+            if not _is_code_period(material, match, "year")
+        ),
+        None,
+    )
+    semester_match = next(
+        (
+            match for match in _SEMESTER_RE.finditer(material)
+            if not _is_code_period(material, match, "semester")
+        ),
+        None,
+    )
+    short_match = next(
+        (
+            match for match in _SHORT_PERIOD_RE.finditer(material)
+            if not _is_code_period(material, match, "short")
+        ),
+        None,
+    )
     year = int(year_match.group(1)) if year_match else None
     semester = int(semester_match.group(1)) if semester_match else None
     if short_match:
@@ -82,11 +129,52 @@ def build_retrieval_context(row: pd.Series) -> str:
     parts = [f"문서: {title}"]
     if published:
         parts.append(f"기준일: {published}")
-    if period:
+    if period and period not in title:
         parts.append(f"학사시기: {period}")
     if audience != "common":
         parts.append(f"대상: {_AUDIENCE_LABELS[audience]}")
     return f"[{' · '.join(parts)}]"
+
+
+def _retrieval_body(row: pd.Series) -> str:
+    """Keep the source chunk intact while indexing its title only in the header."""
+    body = _first_value(row, "chunk_text")
+    title = _first_value(row, "title", "filename")
+    if not title or not body:
+        return body
+
+    # to_chunks(include_title=True) adds this prefix for the LLM's source text.
+    # The retrieval header already carries the same title.
+    prefix = f"[{title}]"
+    if body == prefix:
+        body = ""
+    elif body.startswith(prefix + "\n"):
+        body = body[len(prefix):].lstrip("\n")
+
+    # Notice chunks can start with a board metadata line before their fallback
+    # title line. Treat only that fixed preamble as part of the leading header.
+    preamble = ""
+    if body.startswith("[게시판:"):
+        metadata_line, separator, remainder = body.partition("\n")
+        if separator and metadata_line.endswith("]"):
+            preamble = metadata_line
+            body = remainder.lstrip("\n")
+
+    # Some builders put a title-only heading immediately after the prefix.
+    # Drop the whole leading line, leaving substantive and later mentions intact.
+    first_line, separator, remainder = body.partition("\n")
+    title_lines = {
+        title,
+        f"공지 제목: {title}",
+        f"일정: {title}",
+        f"교과목명: {title}",
+        f"{title} 식단 메뉴",
+    }
+    if first_line.strip() in title_lines:
+        body = remainder.lstrip("\n") if separator else ""
+    if preamble:
+        body = f"{preamble}\n\n{body}" if body else preamble
+    return body.strip()
 
 
 def enrich_retrieval_fields(frame: pd.DataFrame) -> pd.DataFrame:
@@ -131,10 +219,7 @@ def enrich_retrieval_fields(frame: pd.DataFrame) -> pd.DataFrame:
         build_retrieval_context,
         axis=1,
     )
-    body = enriched.get(
-        "chunk_text",
-        pd.Series("", index=enriched.index, dtype=str),
-    ).fillna("").astype(str)
+    body = enriched.apply(_retrieval_body, axis=1)
     enriched["retrieval_text"] = (
         enriched["retrieval_context"].astype(str) + "\n\n" + body
     ).str.strip()

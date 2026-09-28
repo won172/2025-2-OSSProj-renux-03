@@ -4,7 +4,7 @@ import { withGuestTokenHeader } from '../../chat/guestToken'
 import ChatMarkdown from './ChatMarkdown'
 import SourceCards from './SourceCards'
 import SuggestedQuestions from './SuggestedQuestions'
-import type { ChatViewMessage } from '../../chat/chatState'
+import { getVerificationNoteKind, type ChatViewMessage } from '../../chat/chatState'
 import { getFallbackLabel } from '../../chat/fallbackLabels'
 import { canShareAnswer, shareAnswer } from '../../native/nativeFeatures'
 
@@ -92,6 +92,7 @@ const ChatMessageItem = ({
   }
 
   const hasContent = message.content.trim().length > 0
+  const verificationNote = getVerificationNoteKind(message)
 
   const submitFeedback = async (rating: 1 | -1) => {
     if (!message.requestId) return
@@ -168,15 +169,18 @@ const ChatMessageItem = ({
 
         <ChatMarkdown content={message.content} onCitationClick={onCitationClick} />
 
-        {!isStopped && message.grounded === false && (
+        {!isStopped && verificationNote && (
           <div className="ch-msg__notes" style={{ marginTop: '8px', marginBottom: 0 }}>
             <span
-              className="ch-note ch-note--warn"
-              title={typeof message.groundingScore === 'number'
+              className={`ch-note ch-note--${verificationNote === 'failed' ? 'warn' : 'muted'}`}
+              role="status"
+              title={verificationNote === 'failed' && typeof message.groundingScore === 'number'
                 ? `근거 일치도 약 ${Math.round(message.groundingScore * 100)}%`
                 : undefined}
             >
-              ⚠️ 제공된 자료로 충분히 확인되지 않은 내용이 포함될 수 있어요
+              {verificationNote === 'failed'
+                ? '⚠️ 제공된 자료로 충분히 확인되지 않은 내용이 포함될 수 있어요'
+                : '근거 확인을 완료하지 못한 답변입니다'}
             </span>
           </div>
         )}

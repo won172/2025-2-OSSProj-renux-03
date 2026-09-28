@@ -645,6 +645,8 @@ const HomePage = () => {
                       requestId: meta.requestId,
                       isFallback: meta.isFallback,
                       fallbackReason: meta.fallbackReason,
+                      verificationStatus: meta.verificationStatus,
+                      relevanceScore: meta.relevanceScore,
                     }
                   : message,
               ),

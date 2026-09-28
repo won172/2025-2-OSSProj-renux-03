@@ -3,6 +3,8 @@ import type { ActiveChat } from '../types/chat'
 
 export const GUEST_CHAT_STORAGE_KEY = 'renux-guest-chats'
 
+export type ChatVerificationStatus = 'passed' | 'failed' | 'unavailable' | 'not_required'
+
 export interface ChatViewMessage {
   id: string
   chatId: string
@@ -16,6 +18,8 @@ export interface ChatViewMessage {
   suggestedQuestions?: string[]
   grounded?: boolean
   groundingScore?: number
+  verificationStatus?: ChatVerificationStatus
+  relevanceScore?: number | null
   /** Client-only terminal state. Stopped attempts are never persisted as completed answers. */
   streamState?: 'stopped'
 }
@@ -42,6 +46,16 @@ export const isStoppedAssistant = (message: ChatViewMessage) =>
     // Remove the status row written by builds released before streamState existed.
     || (message.content.trim() === '답변 생성을 중단했습니다.' && !message.requestId)
   )
+
+/** Older history rows have no verification status, so retain their grounded warning. */
+export const getVerificationNoteKind = (
+  message: Pick<ChatViewMessage, 'verificationStatus' | 'grounded'>,
+): 'failed' | 'unavailable' | null => {
+  if (message.verificationStatus === 'failed') return 'failed'
+  if (message.verificationStatus === 'unavailable') return 'unavailable'
+  if (message.verificationStatus === 'passed' || message.verificationStatus === 'not_required') return null
+  return message.grounded === false ? 'failed' : null
+}
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
@@ -234,6 +248,8 @@ export const prepareRegeneration = (
     suggestedQuestions: [],
     grounded: undefined,
     groundingScore: undefined,
+    verificationStatus: undefined,
+    relevanceScore: undefined,
     streamState: undefined,
   }
 
@@ -265,6 +281,8 @@ export const finalizeStoppedAssistant = (
     suggestedQuestions: [],
     grounded: undefined,
     groundingScore: undefined,
+    verificationStatus: undefined,
+    relevanceScore: undefined,
     streamState: 'stopped',
   }
 })
