@@ -100,6 +100,10 @@ def _dataset_freshness(
         state = "never_succeeded"
     elif not fresh:
         state = "stale"
+    elif latest_run is not None and latest_run.outcome_code == "partial_source":
+        # A new canonical collection timestamp cannot certify that every
+        # source was covered. Keep the partial scope visible to readiness.
+        state = "warning"
     elif completed_before_success >= 2:
         state = "warning"
     else:
