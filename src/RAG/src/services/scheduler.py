@@ -33,6 +33,12 @@ from src.config import (
     RAG_SCHEDULER_JOB_LEASE_TTL_SECONDS,
     RAG_SCHEDULER_REQUEST_RETRIES,
     RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS,
+    RAG_TELEMETRY_HEARTBEAT_ENABLED,
+    RAG_TELEMETRY_HEARTBEAT_INTERVAL_SECONDS,
+    RAG_TELEMETRY_HEARTBEAT_STALE_INTERVALS,
+    RAG_TELEMETRY_NO_TRAFFIC_SECONDS,
+    RAG_TELEMETRY_EXPECTED_TRAFFIC_START_HOUR,
+    RAG_TELEMETRY_EXPECTED_TRAFFIC_END_HOUR,
 )
 from src.database import IngestionRun, SessionLocal, kst_now
 from src.services.ingest_runtime import ingestion_run_context
@@ -77,6 +83,12 @@ def _send_scheduler_alert(job_id: str, status: str, message: str | None) -> None
         # structured fields above.
         "text": text,
     }
+    _post_operations_alert(payload)
+
+
+def _post_operations_alert(payload: dict) -> None:
+    if not RAG_SCHEDULER_ALERT_WEBHOOK_URL:
+        return
     try:
         response = httpx.post(
             RAG_SCHEDULER_ALERT_WEBHOOK_URL,
@@ -85,7 +97,67 @@ def _send_scheduler_alert(job_id: str, status: str, message: str | None) -> None
         )
         response.raise_for_status()
     except Exception as exc:  # noqa: BLE001 - observability must not break ingestion.
-        logger.warning("[scheduler] 운영 경보 전송 실패 job=%s status=%s: %s", job_id, status, exc)
+        logger.warning(
+            "[scheduler] 운영 경보 전송 실패 event=%s job=%s status=%s: %s",
+            payload.get("event"), payload.get("job_id"), payload.get("status"), exc,
+        )
+
+
+def send_telemetry_alert(status: str, verdict=None) -> None:
+    """Send aggregate-only telemetry warnings through the existing webhook."""
+    if status not in {"stale_heartbeat", "no_traffic_or_logging_broken", "write_failed", "no_heartbeat"}:
+        return
+    latest = verdict.latest_heartbeat_at if verdict else None
+    latest_query = verdict.latest_query_log_at if verdict else None
+    payload = {
+        "schema_version": 1,
+        "service": "dongttok-rag",
+        "event": "telemetry_heartbeat",
+        "status": "warning" if status == "no_traffic_or_logging_broken" else "failed",
+        "verdict": status,
+        "latest_heartbeat_at": latest.isoformat() if latest else None,
+        "latest_query_log_at": latest_query.isoformat() if latest_query else None,
+        "occurred_at": datetime.now(KST).isoformat(),
+        "text": f"[동똑이 RAG] telemetry {status}",
+    }
+    _post_operations_alert(payload)
+
+
+def _run_telemetry_heartbeat(scheduler, *, now: datetime | None = None) -> None:
+    from src.services.telemetry_heartbeat import read_verdict, write_heartbeat
+
+    thresholds = dict(
+        interval_seconds=RAG_TELEMETRY_HEARTBEAT_INTERVAL_SECONDS,
+        stale_intervals=RAG_TELEMETRY_HEARTBEAT_STALE_INTERVALS,
+        no_traffic_seconds=RAG_TELEMETRY_NO_TRAFFIC_SECONDS,
+        expected_start_hour=RAG_TELEMETRY_EXPECTED_TRAFFIC_START_HOUR,
+        expected_end_hour=RAG_TELEMETRY_EXPECTED_TRAFFIC_END_HOUR,
+    )
+    session = SessionLocal()
+    try:
+        previous = read_verdict(session, now=now, **thresholds)
+        if previous.status == "stale_heartbeat":
+            send_telemetry_alert(previous.status, previous)
+        previously_warned = (
+            read_verdict(session, now=previous.latest_heartbeat_at, **thresholds).status
+            == "no_traffic_or_logging_broken"
+            if previous.latest_heartbeat_at is not None else False
+        )
+        write_heartbeat(
+            session,
+            scheduler_alive=bool(scheduler.running),
+            interval_seconds=RAG_TELEMETRY_HEARTBEAT_INTERVAL_SECONDS,
+            now=now,
+        )
+        current = read_verdict(session, now=now, **thresholds)
+        if current.status == "no_traffic_or_logging_broken" and not previously_warned:
+            send_telemetry_alert(current.status, current)
+    except Exception:  # noqa: BLE001 - telemetry failures cannot stop ingestion.
+        session.rollback()
+        logger.exception("[scheduler] telemetry heartbeat 기록 실패")
+        send_telemetry_alert("write_failed")
+    finally:
+        session.close()
 
 
 def _record_run(job_id: str, status: str, message: str | None = None) -> None:
@@ -1140,6 +1212,17 @@ def start_scheduler():
     add_cron("refresh_meals", refresh_meals_job, meals_cron)
     add_cron("refresh_courses", refresh_courses_job, courses_cron)
     add_cron("refresh_staff", refresh_staff_job, staff_cron)
+    if RAG_TELEMETRY_HEARTBEAT_ENABLED:
+        if RAG_TELEMETRY_HEARTBEAT_INTERVAL_SECONDS <= 0:
+            raise ValueError("RAG_TELEMETRY_HEARTBEAT_INTERVAL_SECONDS must be positive")
+        scheduler.add_job(
+            partial(_run_telemetry_heartbeat, scheduler),
+            "interval",
+            seconds=RAG_TELEMETRY_HEARTBEAT_INTERVAL_SECONDS,
+            next_run_time=datetime.now(timezone.utc),
+            id="telemetry_heartbeat",
+            **job_defaults,
+        )
     scheduler.start()
     _scheduler = scheduler
     logger.info(
@@ -1163,6 +1246,7 @@ __all__ = [
     "start_scheduler",
     "shutdown_scheduler",
     "get_scheduler_status",
+    "send_telemetry_alert",
     "refresh_notices_job",
     "refresh_rules_job",
     "refresh_schedule_job",
