@@ -89,7 +89,7 @@ def response_from_events(events, response, *, expected_grounding_reason=None):
 
 
 async def assert_endpoint_parity(monkeypatch, question=QUESTION, *, expected_grounding_reason=None,
-                                 saved_stages=None):
+                                 saved_stages=None, persist_logs=False):
     temporal_context = service.TemporalContext(
         as_of=AS_OF, academic_year=2026, semester=2, phase="학기중")
     monkeypatch.setattr(service, "_request_temporal_context", lambda _req: temporal_context)
@@ -97,7 +97,8 @@ async def assert_endpoint_parity(monkeypatch, question=QUESTION, *, expected_gro
         if saved_stages is not None:
             saved_stages.append(next(value.copy() for value in args
                                      if isinstance(value, dict) and "query_plan" in value))
-    monkeypatch.setattr(service, "_save_rag_evaluation_log", save)
+    if not persist_logs:
+        monkeypatch.setattr(service, "_save_rag_evaluation_log", save)
     monkeypatch.setattr(service, "append_manual_history", lambda *_a: None)
     monkeypatch.setattr(service, "_update_observability_log", lambda *_a: None)
     original = service._plan_query
@@ -646,6 +647,93 @@ async def test_one_degraded_dataset_reaches_both_endpoints_and_query_logs(monkey
                 assert retrieval["sources"][0]["corpus_revision"] == "rules:revision"
     finally:
         engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_retrieval_keeps_endpoint_sources_citations_and_trace(monkeypatch, tmp_path):
+    configure(monkeypatch, None)
+
+    async def two_dataset_plan(**_kwargs):
+        return service._RetrievalPlan(
+            ["rules", "courses"], service.RetrievalStrategy("hybrid"), {}, {},
+        )
+
+    monkeypatch.setattr(service, "_plan_retrieval", two_dataset_plan)
+    monkeypatch.setattr(service, "_ensure_dataset", lambda _: (pd.DataFrame(), None, None, None))
+    monkeypatch.setattr(service, "RAG_GROUNDING_CHECK_ENABLED", False)
+    row = {
+        "dataset": "rules", "source": "rules", "chunk_id": "rules:1",
+        "chunk_text": "공식 규정 내용", "title": "공식 규정",
+        "url": "https://www.dongguk.edu/rules/1", "published_at": "2026-09-01",
+        "campus_scope": "seoul", "hybrid_score": 0.95,
+        "structured_match": 1, "evidence_group": 1, "citation_number": 1,
+        "dense_rank": 1, "sparse_rank": 2, "fusion_rank": 1,
+        "corpus_revision": "rules:revision",
+    }
+
+    def search(**kwargs):
+        dataset = next(
+            key for key, artifacts in service.DATASET_ARTIFACTS.items()
+            if artifacts.collection == kwargs["collection_name"]
+        )
+        hits = pd.DataFrame([row]) if dataset == "rules" else pd.DataFrame(columns=row)
+        hits.attrs.update(
+            retrieval_mode="hybrid" if dataset == "rules" else "sparse_degraded",
+            dense_error_type=None if dataset == "rules" else "InternalError",
+        )
+        return hits
+
+    async def select(_question, shortlist, _usage, **_kwargs):
+        return shortlist, False
+
+    async def generate(**_kwargs):
+        return "공식 규정 내용입니다. [문서1]"
+
+    async def generate_stream(**_kwargs):
+        yield "공식 규정 내용입니다. [문서1]"
+
+    monkeypatch.setattr(service, "hybrid_search_with_meta", search)
+    monkeypatch.setattr(service, "_enrich_staff_lookup_frames", lambda **kw: _return_enriched(kw))
+    monkeypatch.setattr(service, "_build_balanced_shortlist", lambda frames, **_: frames[0].copy())
+    monkeypatch.setattr(service, "_apply_cross_encoder_rerank", lambda frame, _q: frame)
+    monkeypatch.setattr(service, "_select_answer_evidence", select)
+    monkeypatch.setattr(service, "generate_langchain_answer", generate)
+    monkeypatch.setattr(service, "generate_langchain_answer_stream", generate_stream)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'parity.db'}")
+    Base.metadata.create_all(engine, tables=[RagQueryLog.__table__, RagRetrievalLog.__table__])
+    sessions = sessionmaker(bind=engine)
+    monkeypatch.setattr(service, "SessionLocal", sessions)
+    try:
+        outcomes = []
+        for concurrency in (1, 3):
+            monkeypatch.setattr(service.rag_config, "RAG_RETRIEVAL_CONCURRENCY", concurrency)
+            _, answer, events = await assert_endpoint_parity(monkeypatch, persist_logs=True)
+            with sessions() as session:
+                logs = session.query(RagQueryLog).order_by(RagQueryLog.id.desc()).limit(2).all()
+                traces = [json.loads(log.stage_timings_json)["retrieval"] for log in logs]
+            assert len(traces) == 2
+            assert traces[0]["searches"] == traces[1]["searches"]
+            outcomes.append((
+                answer.model_dump(exclude={"request_id"}),
+                [{key: value for key, value in event.items() if key != "request_id"} for event in events],
+                {key: traces[0][key] for key in ("retrieval_mode", "degraded_datasets", "searches")},
+            ))
+        assert outcomes[0] == outcomes[1]
+        answer, events, trace = outcomes[0]
+        assert answer["sources"] and answer["citations"]
+        assert answer["retrieval_mode"] == "sparse_degraded"
+        assert answer["degraded_datasets"] == ["courses"]
+        assert [(item["dataset"], item["retrieval_mode"]) for item in trace["searches"]] == [
+            ("rules", "hybrid"), ("courses", "sparse_degraded"),
+        ]
+        assert next(event for event in events if event["type"] == "completion")["sources"] == answer["sources"]
+    finally:
+        engine.dispose()
+
+
+async def _return_enriched(kwargs):
+    return kwargs["frames"], []
 
 @pytest.mark.asyncio
 async def test_execute_query_emits_typed_events_then_one_direct_outcome(monkeypatch):

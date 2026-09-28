@@ -16,6 +16,7 @@ import time
 import uuid
 import json
 import os
+import weakref
 from contextvars import ContextVar
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -24,6 +25,7 @@ from typing import Any, AsyncIterator, Dict, List, Tuple
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+import chromadb
 import numpy as np
 import pandas as pd
 from scipy.sparse import vstack
@@ -102,6 +104,7 @@ from src.pipelines.notices_sync import (
     ensure_manual_notice_source_document,
     refresh_notice_artifacts,
 )
+from src.models.embedding import encode_queries
 from src.search.hybrid import (
     hybrid_search_with_meta,
     lexical_artifact_path,
@@ -111,6 +114,7 @@ from src.search.hybrid import (
     score_lexical_query,
 )
 from src.search.fts_index import Fts5LexicalIndex
+from src.vectorstore.chroma_client import get_collection
 from src.services import semantic_cache
 from src.services.answer import format_citations
 from src.services.langchain_chat import (
@@ -1049,6 +1053,49 @@ class QueryAnalysisMeta:
 _datasets: Dict[str, DatasetCache] = {}
 # admin 리로드(del/재로드)와 검색 스레드의 _ensure_dataset 경합 방지용 락
 _datasets_lock = threading.Lock()
+# Keep a collection's reads and cold query encoding single-file within an
+# event loop. Acquire these gates before entering the threadpool: a waiting
+# request must never occupy an AnyIO worker slot.
+_retrieval_async_locks_guard = threading.Lock()
+_retrieval_async_locks = weakref.WeakKeyDictionary()
+
+
+def _retrieval_async_lock(key: str) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    with _retrieval_async_locks_guard:
+        locks = _retrieval_async_locks.setdefault(loop, {})
+        return locks.setdefault(key, asyncio.Lock())
+
+
+def _prime_query_embedding(collection_names: tuple[str, ...], query: str) -> bool:
+    """Populate the shared encoder cache once before parallel hybrid searches.
+
+    A missing collection is a dense-search degradation, so leave that decision
+    to hybrid_search_with_meta and try another available collection later.
+    """
+    for collection_name in collection_names:
+        try:
+            get_collection(collection_name)
+            encode_queries([query])
+        except chromadb.errors.ChromaError:
+            continue
+        return True
+    return False
+
+
+async def _search_dataset(dataset: str, search_func, started: asyncio.Event | None = None):
+    async with _retrieval_async_lock(f"dataset:{dataset}"):
+        if started is None:
+            return await run_in_threadpool(search_func)
+        loop = asyncio.get_running_loop()
+
+        def run_search():
+            loop.call_soon_threadsafe(started.set)
+            return search_func()
+
+        return await run_in_threadpool(run_search)
+
+
 # 로컬/운영 인덱스에 실제 데이터가 존재하는 6개 검색 데이터셋은 모두 서비스 준비에 필수다.
 # scheduler는 데이터 신선도를 높이는 선택 기능이므로 readiness 필수 항목에서 제외한다.
 _REQUIRED_DATASETS: tuple[str, ...] = tuple(_DATASET_LOADERS.keys())
@@ -4551,16 +4598,19 @@ async def _retrieve_frames(
     ontology_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
     structured_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
     as_of: date | None = None,
+    _semaphore: asyncio.Semaphore | None = None,
+    _embedding_lock: asyncio.Lock | None = None,
+    _primed_queries: set[str] | None = None,
 ) -> tuple[List[pd.DataFrame], bool, List[str]]:
-    frames: List[pd.DataFrame] = []
-    date_filter_eliminated_any = False
-    unavailable_datasets: List[str] = []
+    semaphore = _semaphore or asyncio.Semaphore(rag_config.RAG_RETRIEVAL_CONCURRENCY)
+    embedding_lock = _embedding_lock or asyncio.Lock()
+    primed_queries = _primed_queries if _primed_queries is not None else set()
 
-    for dataset in route:
+    async def retrieve_dataset(dataset: str, started: asyncio.Event):
+        observation = None
         try:
             chunks_df, vectorizer, matrix, tfidf_chunk_ids = await run_in_threadpool(_ensure_dataset, dataset)
         except (KeyError, FileNotFoundError, ValueError) as exc:
-            unavailable_datasets.append(dataset)
             _log_event(
                 logging.ERROR,
                 "retrieval_dataset_unavailable",
@@ -4568,7 +4618,7 @@ async def _retrieve_frames(
                 dataset=dataset,
                 error=str(exc),
             )
-            continue
+            return None, False, dataset, None
 
         requested_audience = query_audience(query)
         audience_blocked = 0
@@ -4713,6 +4763,21 @@ async def _retrieve_frames(
             hits = await run_in_threadpool(search_func)
             eliminated = False
         else:
+            if (
+                rag_config.RAG_RETRIEVAL_CONCURRENCY > 1
+                and not chunks_df.empty
+                and query not in primed_queries
+            ):
+                async with embedding_lock:
+                    if query not in primed_queries:
+                        # Requests can arrive with the same cold query. Gate
+                        # encoder cache population before entering the pool.
+                        async with _retrieval_async_lock("query_embedding"):
+                            primed = await run_in_threadpool(
+                                _prime_query_embedding, (artifacts.collection,), query,
+                            )
+                        if primed:
+                            primed_queries.add(query)
             search_func = functools.partial(
                 hybrid_search_with_meta,
                 collection_name=artifacts.collection,
@@ -4726,14 +4791,12 @@ async def _retrieve_frames(
                 tfidf_chunk_ids=tfidf_chunk_ids,
                 academic_period_query=period_query,
             )
-            hits = await run_in_threadpool(search_func)
-            observations = _retrieval_observations.get()
-            if observations is not None:
-                observations.append({
-                    "dataset": dataset,
-                    "retrieval_mode": hits.attrs.get("retrieval_mode", "hybrid"),
-                    "dense_error_type": hits.attrs.get("dense_error_type"),
-                })
+            hits = await _search_dataset(dataset, search_func, started)
+            observation = {
+                "dataset": dataset,
+                "retrieval_mode": hits.attrs.get("retrieval_mode", "hybrid"),
+                "dense_error_type": hits.attrs.get("dense_error_type"),
+            }
             hits, eliminated = _apply_date_filter(hits, dataset, date_filter)
             if dataset == "schedule":
                 hits = _apply_schedule_calendar_alignment(hits, query)
@@ -4781,7 +4844,6 @@ async def _retrieve_frames(
                 requested_audience=requested_audience,
                 blocked_count=audience_blocked,
             )
-        date_filter_eliminated_any = date_filter_eliminated_any or eliminated
 
         _log_event(
             logging.INFO,
@@ -4795,9 +4857,48 @@ async def _retrieve_frames(
         )
 
         if not hits.empty:
+            hits = hits.copy()
             hits["dataset"] = dataset
-            frames.append(hits)
+        return hits, eliminated, None, observation
 
+    starts = [asyncio.Event() for _ in route]
+
+    async def bounded(index: int, dataset: str):
+        # Preserve the route's search start order without occupying a worker
+        # or a semaphore slot while waiting for the previous start.
+        if index:
+            await starts[index - 1].wait()
+        try:
+            async with semaphore:
+                return await retrieve_dataset(dataset, starts[index])
+        finally:
+            starts[index].set()
+
+    if rag_config.RAG_RETRIEVAL_CONCURRENCY == 1:
+        results = [await bounded(index, dataset) for index, dataset in enumerate(route)]
+    else:
+        results = await asyncio.gather(*(
+            bounded(index, dataset) for index, dataset in enumerate(route)
+        ), return_exceptions=True)
+
+    # gather's completion order can differ from the sequential route. Raise
+    # before publishing any frames or observations from successful workers.
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+
+    frames: List[pd.DataFrame] = []
+    date_filter_eliminated_any = False
+    unavailable_datasets: List[str] = []
+    observations = _retrieval_observations.get()
+    for hits, eliminated, unavailable, observation in results:
+        if unavailable is not None:
+            unavailable_datasets.append(unavailable)
+        if hits is not None and not hits.empty:
+            frames.append(hits)
+        date_filter_eliminated_any = date_filter_eliminated_any or eliminated
+        if observations is not None and observation is not None:
+            observations.append(observation)
     return frames, date_filter_eliminated_any, unavailable_datasets
 
 
@@ -4825,36 +4926,82 @@ async def _retrieve_frames_for_queries(
     unavailable_datasets: List[str] = []
 
     period_query = queries[0] if queries else ""
-    for query_index, query_candidate in enumerate(queries):
-        frames, eliminated, unavailable = await _retrieve_frames(
-            route=route,
-            query=query_candidate,
-            final_where_filter=final_where_filter,
-            notice_board_filter=notice_board_filter,
-            notice_visibility_filter=notice_visibility_filter,
-            date_filter=date_filter,
-            entry_year=entry_year,
-            request_id=request_id,
-            recent_notice_query=recent_notice_query,
-            active_notice_query=active_notice_query,
-            active_notice_as_of=active_notice_as_of,
-            current_operational_notice_terms=current_operational_notice_terms,
-            allow_wise=allow_wise,
-            period_query=period_query,
-            # One graph observation must contribute at most once. Repeating
-            # it for every query expansion would manufacture RRF agreement.
-            ontology_document_keys_by_dataset=(
-                ontology_document_keys_by_dataset
-                if query_index == 0
-                else None
-            ),
-            structured_document_keys_by_dataset=(
-                structured_document_keys_by_dataset
-                if query_index == 0
-                else None
-            ),
-            as_of=as_of,
-        )
+    semaphore = asyncio.Semaphore(rag_config.RAG_RETRIEVAL_CONCURRENCY)
+    embedding_lock = asyncio.Lock()
+    primed_queries: set[str] = set()
+
+    async def retrieve_query(query_index: int, query_candidate: str):
+        # Child tasks inherit ContextVar values, including the same mutable
+        # observation list. Collect locally and publish in query order below.
+        token = _retrieval_observations.set([])
+        try:
+            result = await _retrieve_frames(
+                route=route,
+                query=query_candidate,
+                final_where_filter=final_where_filter,
+                notice_board_filter=notice_board_filter,
+                notice_visibility_filter=notice_visibility_filter,
+                date_filter=date_filter,
+                entry_year=entry_year,
+                request_id=request_id,
+                recent_notice_query=recent_notice_query,
+                active_notice_query=active_notice_query,
+                active_notice_as_of=active_notice_as_of,
+                current_operational_notice_terms=current_operational_notice_terms,
+                allow_wise=allow_wise,
+                period_query=period_query,
+                # One graph observation must contribute at most once. Repeating
+                # it for every query expansion would manufacture RRF agreement.
+                ontology_document_keys_by_dataset=(
+                    ontology_document_keys_by_dataset
+                    if query_index == 0
+                    else None
+                ),
+                structured_document_keys_by_dataset=(
+                    structured_document_keys_by_dataset
+                    if query_index == 0
+                    else None
+                ),
+                as_of=as_of,
+                _semaphore=semaphore,
+                _embedding_lock=embedding_lock,
+                _primed_queries=primed_queries,
+            )
+            return result, _retrieval_observations.get()
+        finally:
+            _retrieval_observations.reset(token)
+
+    if not queries:
+        return all_frames, False, unavailable_datasets
+
+    first = await retrieve_query(0, queries[0])
+    first_frames = first[0][0]
+    structured_first = any(
+        "structured_match" in frame.columns
+        and frame["structured_match"].eq(1).any()
+        for frame in first_frames
+    )
+    results = [first]
+    if not structured_first:
+        if rag_config.RAG_RETRIEVAL_CONCURRENCY == 1:
+            results.extend([
+                await retrieve_query(index, candidate)
+                for index, candidate in enumerate(queries[1:], start=1)
+            ])
+        else:
+            results.extend(await asyncio.gather(*(
+                retrieve_query(index, candidate)
+                for index, candidate in enumerate(queries[1:], start=1)
+            ), return_exceptions=True))
+
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+
+    observations = _retrieval_observations.get()
+    for query_candidate, ((frames, eliminated, unavailable), query_observations) in zip(queries, results):
+        if observations is not None:
+            observations.extend(query_observations)
         for frame in frames:
             if frame.empty:
                 continue
@@ -4863,14 +5010,6 @@ async def _retrieve_frames_for_queries(
             all_frames.append(tagged)
         date_filter_eliminated_any = date_filter_eliminated_any or eliminated
         unavailable_datasets.extend(unavailable)
-        if query_index == 0 and any(
-            "structured_match" in frame.columns
-            and frame["structured_match"].eq(1).any()
-            for frame in frames
-        ):
-            # Query expansion would search the unrestricted corpus again and
-            # undo the exact SQL scope established by this first pass.
-            break
 
     return all_frames, date_filter_eliminated_any, list(dict.fromkeys(unavailable_datasets))
 
