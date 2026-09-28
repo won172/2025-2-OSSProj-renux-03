@@ -51,3 +51,23 @@ test('/chat/load 응답의 검증 상태가 화면 메시지에 전달된다', a
   assert.equal(messages[0].relevanceScore, 0.4)
   assert.equal(getVerificationNoteKind(messages[0]), 'unavailable')
 })
+
+test('/chat/load 검색 저하 정보가 화면 메시지에 전달되고 이전 기록은 비어 있다', async (t) => {
+  t.mock.method(Capacitor, 'isNativePlatform', () => false)
+  t.mock.method(globalThis, 'fetch', async () => ({
+    ok: true,
+    text: async () => JSON.stringify([
+      { ...answer, retrievalMode: 'sparse_degraded', degradedDatasets: ['courses', 'courses'] },
+      { ...answer, id: 'answer-2', retrievalMode: 'unknown', degradedDatasets: ['bad name'] },
+      { ...answer, id: 'answer-3' },
+    ]),
+  }))
+
+  const messages = await loadChatMessages('chat-1', '2026-09-28T01:00:00Z')
+  assert.equal(messages[0].retrievalMode, 'sparse_degraded')
+  assert.deepEqual(messages[0].degradedDatasets, ['courses'])
+  assert.equal(messages[1].retrievalMode, undefined)
+  assert.deepEqual(messages[1].degradedDatasets, [])
+  assert.equal(messages[2].retrievalMode, undefined)
+  assert.equal(messages[2].degradedDatasets, undefined)
+})

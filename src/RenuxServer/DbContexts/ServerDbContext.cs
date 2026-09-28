@@ -117,6 +117,8 @@ public class ServerDbContext : DbContext
         message.Property(c => c.GroundingScore).HasColumnName("grounding_score");
         message.Property(c => c.VerificationStatus).HasColumnName("verification_status");
         message.Property(c => c.RelevanceScore).HasColumnName("relevance_score");
+        message.Property(c => c.RetrievalMode).HasColumnName("retrieval_mode");
+        message.Property(c => c.DegradedDatasetsJson).HasColumnName("degraded_datasets_json");
         message.Property(c => c.IsFallback).HasColumnName("is_fallback").HasDefaultValue(false);
         message.Property(c => c.FallbackReason).HasColumnName("fallback_reason");
 

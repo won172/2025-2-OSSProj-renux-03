@@ -25,6 +25,10 @@ public class ChatMessageDto
 
     public double? RelevanceScore { get; init; }
 
+    public string? RetrievalMode { get; init; }
+
+    public List<string>? DegradedDatasets { get; init; }
+
     public bool IsFallback { get; init; }
 
     public string? FallbackReason { get; init; }

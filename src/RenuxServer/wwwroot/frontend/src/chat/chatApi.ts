@@ -1,6 +1,7 @@
 import { apiFetch } from '../api/client.ts'
 import { withGuestTokenHeader } from './guestToken.ts'
 import type { ChatVerificationStatus, ChatViewMessage } from './chatState'
+import { isChatRetrievalMode, normalizeDegradedDatasets } from './streamEvents.ts'
 import type { HomeBriefing } from '../types/briefing'
 import type { ActiveChat } from '../types/chat'
 import type { Department } from '../types/organization'
@@ -24,22 +25,26 @@ export const startChat = (org: Department, title: string, guestToken?: string) =
     json: { org, title },
   })
 
-type ChatHistoryMessage = Omit<ChatViewMessage, 'verificationStatus' | 'relevanceScore'> & {
+type ChatHistoryMessage = Omit<ChatViewMessage, 'verificationStatus' | 'relevanceScore' | 'retrievalMode' | 'degradedDatasets'> & {
   verificationStatus?: unknown
   relevanceScore?: unknown
+  retrievalMode?: unknown
+  degradedDatasets?: unknown
 }
 
 const isVerificationStatus = (value: unknown): value is ChatVerificationStatus =>
   value === 'passed' || value === 'failed' || value === 'unavailable' || value === 'not_required'
 
 export const mapChatHistoryMessage = (message: ChatHistoryMessage): ChatViewMessage => {
-  const { verificationStatus, relevanceScore, ...rest } = message
+  const { verificationStatus, relevanceScore, retrievalMode, degradedDatasets, ...rest } = message
   return {
     ...rest,
     verificationStatus: isVerificationStatus(verificationStatus) ? verificationStatus : undefined,
     relevanceScore: typeof relevanceScore === 'number' && Number.isFinite(relevanceScore)
       ? relevanceScore
       : relevanceScore === null ? null : undefined,
+    retrievalMode: isChatRetrievalMode(retrievalMode) ? retrievalMode : undefined,
+    degradedDatasets: normalizeDegradedDatasets(degradedDatasets),
   }
 }
 

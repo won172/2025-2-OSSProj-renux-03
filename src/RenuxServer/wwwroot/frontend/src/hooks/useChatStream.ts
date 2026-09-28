@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { resolveApiUrl, withNgrokHeader } from '../api/client'
 import { withGuestTokenHeader } from '../chat/guestToken'
-import { getCompletionVerification, getGroundingFromEvent, parseChatStreamLine } from '../chat/streamEvents'
-import type { ChatVerificationStatus } from '../chat/chatState'
+import { getCompletionRetrieval, getCompletionVerification, getGroundingFromEvent, parseChatStreamLine } from '../chat/streamEvents'
+import type { ChatRetrievalMode, ChatVerificationStatus } from '../chat/chatState'
 import type { ChatSource } from '../components/chat/SourceCards'
 
 export interface ChatStreamPayload {
@@ -20,6 +20,8 @@ export interface ChatStreamMetadata {
   fallbackReason?: string | null
   verificationStatus?: ChatVerificationStatus
   relevanceScore?: number | null
+  retrievalMode?: ChatRetrievalMode
+  degradedDatasets?: string[]
 }
 
 export interface ChatStreamGrounding {
@@ -188,6 +190,7 @@ export const useChatStream = () => {
               isFallback: Boolean(data.fallback_reason),
               fallbackReason: data.fallback_reason,
               ...verification,
+              ...getCompletionRetrieval(data),
             })
             handlers.onSuggestions?.(data.suggested_questions ?? [])
             if (verification.verificationStatus === 'failed') {

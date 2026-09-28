@@ -158,11 +158,16 @@ const ChatMessageItem = ({
   return (
     <li className={`ch-msg ${message.isFallback ? 'ch-msg--fallback' : ''} ${isStopped ? 'ch-msg--stopped' : ''}`}>
       <div className="ch-msg__doc">
-        {(isStopped || message.isFallback) && (
+        {(isStopped || message.isFallback || message.retrievalMode === 'sparse_degraded') && (
           <div className="ch-msg__notes">
             {isStopped && <span className="ch-note ch-note--muted">생성을 중단한 임시 답변</span>}
             {message.isFallback && (
               <span className="ch-note ch-note--warn">{getFallbackLabel(message.fallbackReason)}</span>
+            )}
+            {!isStopped && message.retrievalMode === 'sparse_degraded' && (
+              <span className="ch-note ch-note--muted" role="note">
+                일부 검색 기능이 제한된 상태에서 만든 답변입니다
+              </span>
             )}
           </div>
         )}

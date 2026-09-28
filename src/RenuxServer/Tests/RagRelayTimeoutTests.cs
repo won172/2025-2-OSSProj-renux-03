@@ -88,6 +88,7 @@ internal static class RagRelayTimeoutTests
             DownstreamMode.Normal, expectPartial: true, check);
 
         await VerifyCompletionMetadataAsync(shortLimits, check);
+        await VerifyRetrievalMetadataAsync(shortLimits, check);
 
         await VerifyIncompleteEofAsync(shortLimits, check);
         await VerifyUnterminatedDataFallbackAsync(shortLimits, check);
@@ -224,6 +225,87 @@ internal static class RagRelayTimeoutTests
         check(missingResult.CompletedVersionReady && missingResult.VerificationStatus is null
               && missingResult.RelevanceScore is null,
             "Completion metadata absent: status and relevance must stay null.");
+    }
+
+    private static async Task VerifyRetrievalMetadataAsync(
+        RagRelayTimeoutSettings limits, Action<bool, string> check)
+    {
+        foreach (var (modeJson, datasetsJson, expectedMode, expectedDatasets) in
+            new (string ModeJson, string DatasetsJson, string? ExpectedMode, string[]? ExpectedDatasets)[]
+        {
+            ("\"hybrid\"", "[]", "hybrid", Array.Empty<string>()),
+            ("\"sparse_degraded\"", "[\"notices\",\"courses\"]", "sparse_degraded", new[] { "notices", "courses" }),
+            ("\"sparse_only\"", "[]", "sparse_only", Array.Empty<string>()),
+            ("\"unknown\"", "[\"bad name\",\"courses\",\"courses\",42,\"../bad\",\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"]",
+                (string?)null, new[] { "courses" }),
+            ("null", "[]", (string?)null, Array.Empty<string>()),
+            ("\"hybrid\"", "\"not-an-array\"", "hybrid", null),
+        })
+        {
+            using var handler = new FakeUpstreamHandler(TimeSpan.Zero, id =>
+            {
+                string completion = Completion(id).Replace(
+                    "\"grounding_score\":0.9",
+                    $"\"grounding_score\":0.9,\"retrieval_mode\":{modeJson},\"degraded_datasets\":{datasetsJson}",
+                    StringComparison.Ordinal);
+                return [(TimeSpan.Zero, Event(Text)), (TimeSpan.Zero, Event(completion)),
+                    (TimeSpan.Zero, Event(Done(id)))];
+            });
+            using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+            using var downstream = new ControlledDownstream(DownstreamMode.Normal);
+            var context = new DefaultHttpContext();
+            context.Response.Body = downstream;
+            RagStreamRelayResult? persisted = null;
+            RagStreamRelayResult result = await ChatRequestApis.RelayRagStreamAsync(
+                context, Configuration(limits), client, new RecordingLogger(), "question", "session", null,
+                completed =>
+                {
+                    persisted = completed;
+                    return Task.FromResult(true);
+                },
+                _ => Task.CompletedTask).WaitAsync(TimeSpan.FromSeconds(3));
+
+            check(result.CompletedVersionReady && persisted is not null
+                  && persisted.RetrievalMode == expectedMode
+                  && (persisted.DegradedDatasets is null) == (expectedDatasets is null)
+                  && (persisted.DegradedDatasets ?? []).SequenceEqual(expectedDatasets ?? []),
+                $"Retrieval metadata {modeJson}: relay must validate values before persistence.");
+
+            if (persisted is not null)
+            {
+                var question = new ChatMessage { Id = Guid.NewGuid(), ChatId = Guid.NewGuid(), IsAsk = true };
+                DateTime createdTime = DateTime.UtcNow;
+                ChatMessage reply = ChatRequestApis.BuildReplyVersion(
+                    question, persisted, Guid.NewGuid(), createdTime, createdTime, 1);
+                var history = ChatRequestApis.ToDto(reply);
+                JsonElement historyJson = JsonSerializer.SerializeToElement(
+                    history, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                check(reply.RetrievalMode == expectedMode
+                      && history.RetrievalMode == expectedMode
+                      && (history.DegradedDatasets is null) == (expectedDatasets is null)
+                      && (history.DegradedDatasets ?? []).SequenceEqual(expectedDatasets ?? [])
+                      && historyJson.GetProperty("retrievalMode").GetString() == expectedMode
+                      && (expectedDatasets is null
+                          ? historyJson.GetProperty("degradedDatasets").ValueKind == JsonValueKind.Null
+                          : historyJson.GetProperty("degradedDatasets").GetArrayLength() == expectedDatasets.Length),
+                    $"Retrieval metadata {modeJson}: builder and history DTO must retain validated values.");
+            }
+        }
+
+        using var missingHandler = new FakeUpstreamHandler(TimeSpan.Zero, id =>
+            [(TimeSpan.Zero, Event(Text)), (TimeSpan.Zero, Event(Completion(id))),
+             (TimeSpan.Zero, Event(Done(id)))]);
+        using var missingClient = new HttpClient(missingHandler) { Timeout = Timeout.InfiniteTimeSpan };
+        using var missingDownstream = new ControlledDownstream(DownstreamMode.Normal);
+        var missingContext = new DefaultHttpContext();
+        missingContext.Response.Body = missingDownstream;
+        RagStreamRelayResult missing = await ChatRequestApis.RelayRagStreamAsync(
+            missingContext, Configuration(limits), missingClient, new RecordingLogger(),
+            "question", "session", null, _ => Task.FromResult(true),
+            _ => Task.CompletedTask).WaitAsync(TimeSpan.FromSeconds(3));
+        check(missing.CompletedVersionReady && missing.RetrievalMode is null
+              && missing.DegradedDatasets is null,
+            "Older completion events must leave retrieval fields null.");
     }
 
     public static async Task RunPersistenceAsync(
