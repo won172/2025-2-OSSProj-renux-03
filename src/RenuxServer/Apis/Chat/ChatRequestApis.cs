@@ -40,6 +40,17 @@ public record RagFollowupResponse(
     [property: JsonPropertyName("request_id")] string? RequestId,
     List<string>? Questions);
 
+public sealed record RagStreamRelayResult(
+    string RequestId,
+    string Answer,
+    IReadOnlyList<ChatSourceDto> Sources,
+    bool FallbackTriggered,
+    string? FallbackReason,
+    IReadOnlyList<string> SuggestedQuestions,
+    bool? Grounded,
+    double? GroundingScore,
+    bool CompletedVersionReady);
+
 static public class ChatRequestApis
 {
     private const string DefaultRagFailureMessage = "죄송합니다. 지금은 학교 정보 검색 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.";
@@ -99,6 +110,318 @@ static public class ChatRequestApis
         };
 
         return utc > now ? now : utc;
+    }
+
+    public static async Task<RagStreamRelayResult> RelayRagStreamAsync(
+        HttpContext context,
+        IConfiguration configuration,
+        HttpClient client,
+        ILogger logger,
+        string question,
+        string sessionId,
+        string? major,
+        Func<RagStreamRelayResult, Task<bool>> persistCompleted,
+        Func<RagStreamRelayResult, Task> recordCompleted)
+    {
+        context.Response.ContentType = "text/event-stream";
+        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.Headers.Connection = "keep-alive";
+        // nginx 등 리버스 프록시가 SSE를 버퍼링하지 않도록 지시 (nginx.conf의 proxy_buffering off와 이중 안전망)
+        context.Response.Headers["X-Accel-Buffering"] = "no";
+
+        var fullAnswer = new System.Text.StringBuilder();
+        List<ChatSourceDto> sources = [];
+        bool fallbackTriggered = false;
+        string? fallbackReason = null;
+        bool ragResponseSucceeded = false;
+        bool streamReportedError = false;
+        bool streamCancelled = false;
+        // This answer identifier is backend-owned and independent from the
+        // request trace id so infrastructure logs cannot disclose it.
+        string backendRequestId = Guid.NewGuid().ToString("N");
+        var terminalState = new RagTerminalStateMachine(backendRequestId);
+        List<string> suggestedQuestions = [];
+        bool? grounded = null;
+        double? groundingScore = null;
+        // Keep both terminal frames, including their blank separators, until
+        // EOF proves that the upstream completed without a transport failure.
+        var pendingTerminalLines = new List<string>(4);
+        bool atFrameBoundary = true;
+        bool forwardedFrameOpen = false;
+
+        var relaySettings = RagRelayTimeoutSettings.FromConfiguration(
+            configuration, "Stream", RagRelayTimeoutSettings.StreamDefaults);
+        using var relayTimeouts = new RagRelayTimeouts(relaySettings, context.RequestAborted);
+
+        try
+        {
+            var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
+            client.Timeout = Timeout.InfiniteTimeSpan;
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{ragUrl}/ask/stream")
+            {
+                Content = JsonContent.Create(new { question, sessionId, major })
+            };
+            request.Headers.TryAddWithoutValidation("X-Request-ID", backendRequestId);
+
+            using var response = await relayTimeouts.SendAsync(client, request);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                fallbackTriggered = true;
+                fallbackReason = "rag_stream_http_error";
+                logger.LogWarning(
+                    "RAG stream request failed. StatusCode={StatusCode}",
+                    (int)response.StatusCode);
+            }
+            else
+            {
+                ragResponseSucceeded = true;
+                using var reader = new StreamReader(await relayTimeouts.OpenBodyAsync(response));
+
+                while (await reader.ReadLineAsync(context.RequestAborted) is { } line)
+                {
+                    bool startsNewFrame = atFrameBoundary;
+                    atFrameBoundary = line.Length == 0;
+                    if (line.Length == 0 || !line.StartsWith("data: "))
+                    {
+                        // Preserve blank lines and non-data SSE fields. Data
+                        // fields are forwarded only after contract validation.
+                        if (pendingTerminalLines.Count > 0)
+                            pendingTerminalLines.Add(line);
+                        else
+                        {
+                            await relayTimeouts.ForwardAsync(token => ForwardLineAsync(context, line, token));
+                            forwardedFrameOpen = line.Length != 0;
+                        }
+                        continue;
+                    }
+
+                    try
+                    {
+                        var json = line.Substring(6);
+                        var chunk = JsonSerializer.Deserialize<JsonElement>(json);
+                        if (chunk.TryGetProperty("type", out var eventType)
+                            && eventType.ValueKind == JsonValueKind.String
+                            && eventType.GetString() is ("completion" or "done")
+                            && !startsNewFrame)
+                        {
+                            terminalState.ObserveMalformedData();
+                            streamReportedError = true;
+                            continue;
+                        }
+                        if (!terminalState.Observe(chunk, out string? type))
+                        {
+                            streamReportedError = true;
+                            continue;
+                        }
+
+                        // Count accepted text before forwarding. A client write
+                        // can time out after some bytes were already delivered.
+                        if (type == "text" && chunk.TryGetProperty("content", out var textContent))
+                            fullAnswer.Append(textContent.GetString());
+
+                        // Hold terminal events and their separators together.
+                        // Each terminal data line must start its own SSE frame.
+                        if (type is "completion" or "done")
+                        {
+                            pendingTerminalLines.Add(line);
+                        }
+                        else
+                        {
+                            forwardedFrameOpen = true;
+                            await relayTimeouts.ForwardAsync(token => ForwardLineAsync(context, line, token));
+                        }
+                        if (type is not null)
+                        {
+                            if (type == "metadata")
+                            {
+                                if (chunk.TryGetProperty("sources", out var sourcesProp))
+                                {
+                                    var ragSources = JsonSerializer.Deserialize<List<RagSource>>(sourcesProp.GetRawText(), JsonOptions);
+                                    sources = MapSources(ragSources);
+                                }
+                                if (chunk.TryGetProperty("fallback_triggered", out var fbProp))
+                                {
+                                    fallbackTriggered = fbProp.GetBoolean();
+                                }
+                                if (chunk.TryGetProperty("fallback_reason", out var fbrProp))
+                                {
+                                    fallbackReason = fbrProp.GetString();
+                                }
+                            }
+                            else if (type == "suggestions")
+                            {
+                                suggestedQuestions = ReadSuggestedQuestions(chunk);
+                            }
+                            else if (type == "grounding")
+                            {
+                                if (chunk.TryGetProperty("grounded", out var groundedProp)
+                                    && groundedProp.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                                {
+                                    grounded = groundedProp.GetBoolean();
+                                }
+                                groundingScore = ReadGroundingScore(chunk, "score") ?? groundingScore;
+                            }
+                            else if (type == "completion")
+                            {
+                                suggestedQuestions = ReadSuggestedQuestions(chunk, "suggested_questions", suggestedQuestions);
+                                grounded = ReadNullableBoolean(chunk, "grounded") ?? grounded;
+                                groundingScore = ReadGroundingScore(chunk, "grounding_score") ?? groundingScore;
+                                if (chunk.TryGetProperty("sources", out var completionSourcesProp))
+                                {
+                                    var completionSources = JsonSerializer.Deserialize<List<RagSource>>(completionSourcesProp.GetRawText(), JsonOptions);
+                                    sources = MapSources(completionSources);
+                                }
+                                if (chunk.TryGetProperty("fallback_reason", out var completionFallbackReasonProp))
+                                {
+                                    fallbackReason = completionFallbackReasonProp.ValueKind == JsonValueKind.String
+                                        ? completionFallbackReasonProp.GetString()
+                                        : null;
+                                    fallbackTriggered = !string.IsNullOrWhiteSpace(fallbackReason);
+                                }
+                            }
+                            else if (type == "error")
+                            {
+                                streamReportedError = true;
+                                fallbackTriggered = true;
+                                fallbackReason = "rag_stream_error";
+                            }
+                            else if (type == "done")
+                            {
+                                // Terminal shape/order/request id were already
+                                // validated by RagTerminalStateMachine.
+                            }
+                        }
+                    }
+                    catch (RagRelayTimeoutException)
+                    {
+                        throw;
+                    }
+                    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        terminalState.ObserveMalformedData();
+                        streamReportedError = true;
+                        logger.LogWarning(ex, "Failed to parse an upstream SSE data event.");
+                    }
+                }
+
+                // An unterminated final data line is not an SSE event.
+                if (pendingTerminalLines.Count > 0 && pendingTerminalLines[^1].Length != 0)
+                {
+                    terminalState.ObserveMalformedData();
+                    streamReportedError = true;
+                }
+                terminalState.ObserveEndOfStream();
+                if (terminalState.IsSuccessful && !streamReportedError && fullAnswer.Length > 0)
+                {
+                    string terminalFrames = string.Join('\n', pendingTerminalLines) + "\n";
+                    await relayTimeouts.ForwardAsync(async token =>
+                    {
+                        await context.Response.WriteAsync(terminalFrames, token);
+                        await context.Response.Body.FlushAsync(token);
+                    });
+                }
+                // The total deadline includes delivery of the terminal frames,
+                // but must end before persistence and completion telemetry.
+                relayTimeouts.Stop();
+            }
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected mid-stream: no answer version or completion
+            // event may be committed, even if terminal data was seen first.
+            terminalState.ObserveCancellation();
+            streamCancelled = true;
+            logger.LogInformation("Chat stream cancelled by client.");
+        }
+        catch (RagRelayTimeoutException exception)
+        {
+            terminalState.ObserveTransportFailure();
+            streamReportedError = true;
+            fallbackTriggered = true;
+            fallbackReason = $"rag_stream_{exception.Phase}_timeout";
+            logger.LogWarning("RAG stream timeout. Phase={Phase} RequestId={RequestId}",
+                exception.Phase, backendRequestId);
+        }
+        catch (Exception ex)
+        {
+            terminalState.ObserveTransportFailure();
+            streamReportedError = true;
+            fallbackTriggered = true;
+            fallbackReason = "rag_stream_transport_error";
+            logger.LogError(ex, "RAG stream error.");
+        }
+        finally
+        {
+            relayTimeouts.Stop();
+        }
+
+        bool generationSucceeded = RagRelayCompletion.CanPersist(
+            ragResponseSucceeded, terminalState, streamReportedError, streamCancelled, fullAnswer.Length);
+
+        if (fullAnswer.Length > 0 && !generationSucceeded)
+        {
+            fallbackTriggered = true;
+            fallbackReason ??= streamCancelled
+                ? "rag_stream_cancelled"
+                : "rag_stream_incomplete";
+        }
+
+        // RAG failed or produced nothing: send a graceful fallback to the
+        // client, but never treat it as a completed RAG answer.
+        if (fullAnswer.Length == 0 && !context.RequestAborted.IsCancellationRequested)
+        {
+            fallbackTriggered = true;
+            fallbackReason ??= "rag_stream_incomplete";
+            sources = [];
+            suggestedQuestions = [];
+            grounded = null;
+            groundingScore = null;
+            fullAnswer.Append(DefaultRagFailureMessage);
+            using var fallbackDelivery = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+            fallbackDelivery.CancelAfter(relaySettings.Inactivity);
+            try
+            {
+                if (forwardedFrameOpen)
+                    await context.Response.WriteAsync("\n", fallbackDelivery.Token);
+                foreach (string payload in RagStreamContract.CreateGracefulFallbackPayloads(
+                             backendRequestId,
+                             fallbackReason,
+                             DefaultRagFailureMessage))
+                {
+                    await context.Response.WriteAsync($"data: {payload}\n\n", fallbackDelivery.Token);
+                }
+                await context.Response.Body.FlushAsync(fallbackDelivery.Token);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to emit fallback stream message.");
+            }
+        }
+
+        var result = new RagStreamRelayResult(
+            backendRequestId, fullAnswer.ToString(), sources, fallbackTriggered, fallbackReason,
+            suggestedQuestions, grounded, groundingScore, CompletedVersionReady: false);
+        // Only a successful upstream terminal contract can create an answer
+        // version and its completion telemetry.
+        if (generationSucceeded && !context.RequestAborted.IsCancellationRequested)
+        {
+            result = result with { CompletedVersionReady = await persistCompleted(result) };
+            if (result.CompletedVersionReady)
+                await recordCompleted(result);
+        }
+        return result;
+    }
+
+    private static async Task ForwardLineAsync(HttpContext context, string line, CancellationToken token)
+    {
+        await context.Response.WriteAsync($"{line}\n", token);
+        await context.Response.Body.FlushAsync(token);
     }
 
     static public void AddChatApis(this WebApplication application)
@@ -311,265 +634,56 @@ static public class ChatRequestApis
                 }
             }
 
-            context.Response.ContentType = "text/event-stream";
-            context.Response.Headers.CacheControl = "no-cache";
-            context.Response.Headers.Connection = "keep-alive";
-            // nginx 등 리버스 프록시가 SSE를 버퍼링하지 않도록 지시 (nginx.conf의 proxy_buffering off와 이중 안전망)
-            context.Response.Headers["X-Accel-Buffering"] = "no";
-
-            var fullAnswer = new System.Text.StringBuilder();
-            List<ChatSourceDto> sources = [];
-            bool fallbackTriggered = false;
-            string? fallbackReason = null;
-            bool ragResponseSucceeded = false;
-            bool streamReportedError = false;
-            bool streamCancelled = false;
-            // This answer identifier is backend-owned and independent from the
-            // request trace id so infrastructure logs cannot disclose it.
-            string backendRequestId = Guid.NewGuid().ToString("N");
-            var terminalState = new RagTerminalStateMachine(backendRequestId);
-            List<string> suggestedQuestions = [];
-            bool? grounded = null;
-            double? groundingScore = null;
-
-            try
-            {
-                var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
-                var client = httpClientFactory.CreateClient();
-                client.Timeout = TimeSpan.FromMinutes(5); // Streaming needs longer timeout
-
-                using var request = new HttpRequestMessage(HttpMethod.Post, $"{ragUrl}/ask/stream")
+            await RelayRagStreamAsync(
+                context, configuration, httpClientFactory.CreateClient(), logger,
+                question, sessionId, major,
+                async result =>
                 {
-                    Content = JsonContent.Create(new { question, sessionId, major })
-                };
-                request.Headers.TryAddWithoutValidation("X-Request-ID", backendRequestId);
-
-                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
-
-                if (!response.IsSuccessStatusCode)
+                    if (!isAuthenticated) return true;
+                    if (ask is null) return false;
+                    PersistReplyResult persisted = await PersistReplyVersionAsync(
+                        db, ask, result.Answer, result.Sources.ToList(),
+                        result.FallbackTriggered, result.FallbackReason,
+                        replaceExistingCurrent: true,
+                        requestId: result.RequestId,
+                        suggestedQuestions: result.SuggestedQuestions.ToList(),
+                        grounded: result.Grounded,
+                        groundingScore: result.GroundingScore);
+                    return persisted.Persisted;
+                },
+                async relay =>
                 {
-                    fallbackTriggered = true;
-                    fallbackReason = "rag_stream_http_error";
-                    logger.LogWarning(
-                        "RAG stream request failed. StatusCode={StatusCode}",
-                        (int)response.StatusCode);
-                }
-                else
-                {
-                    ragResponseSucceeded = true;
-                    using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(context.RequestAborted));
-
-                    while (await reader.ReadLineAsync(context.RequestAborted) is { } line)
+                    // Completion is recorded only after the explicit RAG terminal
+                    // event and a successful immutable-version commit for users.
+                    // Telemetry failure does not block chat delivery.
+                    try
                     {
-                        if (line.Length == 0 || !line.StartsWith("data: "))
-                        {
-                            // Preserve blank lines and non-data SSE fields. Data
-                            // fields are forwarded only after contract validation.
-                            await context.Response.WriteAsync($"{line}\n", context.RequestAborted);
-                            await context.Response.Body.FlushAsync(context.RequestAborted);
-                            continue;
-                        }
-
-                        try
-                        {
-                            var json = line.Substring(6);
-                            var chunk = JsonSerializer.Deserialize<JsonElement>(json);
-                            if (!terminalState.Observe(chunk, out string? type))
-                            {
-                                streamReportedError = true;
-                                continue;
-                            }
-
-                            await context.Response.WriteAsync($"{line}\n", context.RequestAborted);
-                            await context.Response.Body.FlushAsync(context.RequestAborted);
-                            if (type is not null)
-                            {
-                                if (type == "metadata")
-                                {
-                                    if (chunk.TryGetProperty("sources", out var sourcesProp))
-                                    {
-                                        var ragSources = JsonSerializer.Deserialize<List<RagSource>>(sourcesProp.GetRawText());
-                                        sources = MapSources(ragSources);
-                                    }
-                                    if (chunk.TryGetProperty("fallback_triggered", out var fbProp))
-                                    {
-                                        fallbackTriggered = fbProp.GetBoolean();
-                                    }
-                                    if (chunk.TryGetProperty("fallback_reason", out var fbrProp))
-                                    {
-                                        fallbackReason = fbrProp.GetString();
-                                    }
-                                }
-                                else if (type == "suggestions")
-                                {
-                                    suggestedQuestions = ReadSuggestedQuestions(chunk);
-                                }
-                                else if (type == "grounding")
-                                {
-                                    if (chunk.TryGetProperty("grounded", out var groundedProp)
-                                        && groundedProp.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                                    {
-                                        grounded = groundedProp.GetBoolean();
-                                    }
-                                    groundingScore = ReadGroundingScore(chunk, "score") ?? groundingScore;
-                                }
-                                else if (type == "completion")
-                                {
-                                    suggestedQuestions = ReadSuggestedQuestions(chunk, "suggested_questions", suggestedQuestions);
-                                    grounded = ReadNullableBoolean(chunk, "grounded") ?? grounded;
-                                    groundingScore = ReadGroundingScore(chunk, "grounding_score") ?? groundingScore;
-                                    if (chunk.TryGetProperty("sources", out var completionSourcesProp))
-                                    {
-                                        var completionSources = JsonSerializer.Deserialize<List<RagSource>>(completionSourcesProp.GetRawText());
-                                        sources = MapSources(completionSources);
-                                    }
-                                    if (chunk.TryGetProperty("fallback_reason", out var completionFallbackReasonProp))
-                                    {
-                                        fallbackReason = completionFallbackReasonProp.ValueKind == JsonValueKind.String
-                                            ? completionFallbackReasonProp.GetString()
-                                            : null;
-                                        fallbackTriggered = !string.IsNullOrWhiteSpace(fallbackReason);
-                                    }
-                                }
-                                else if (type == "text")
-                                {
-                                    if (chunk.TryGetProperty("content", out var contentProp))
-                                    {
-                                        fullAnswer.Append(contentProp.GetString());
-                                    }
-                                }
-                                else if (type == "error")
-                                {
-                                    streamReportedError = true;
-                                    fallbackTriggered = true;
-                                    fallbackReason = "rag_stream_error";
-                                }
-                                else if (type == "done")
-                                {
-                                    // Terminal shape/order/request id were already
-                                    // validated by RagTerminalStateMachine.
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            terminalState.ObserveMalformedData();
-                            streamReportedError = true;
-                            logger.LogWarning(ex, "Failed to parse an upstream SSE data event.");
-                        }
-                    }
-
-                    terminalState.ObserveEndOfStream();
-                }
-            }
-            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
-            {
-                // Client disconnected mid-stream: no answer version or completion
-                // event may be committed, even if terminal data was seen first.
-                terminalState.ObserveCancellation();
-                streamCancelled = true;
-                logger.LogInformation("Chat stream cancelled by client.");
-            }
-            catch (Exception ex)
-            {
-                terminalState.ObserveTransportFailure();
-                streamReportedError = true;
-                fallbackTriggered = true;
-                fallbackReason = "rag_stream_transport_error";
-                logger.LogError(ex, "RAG stream error.");
-            }
-
-            bool generationSucceeded = ragResponseSucceeded &&
-                                       terminalState.IsSuccessful &&
-                                       !streamReportedError &&
-                                       !streamCancelled &&
-                                       fullAnswer.Length > 0;
-
-            if (fullAnswer.Length > 0 && !generationSucceeded)
-            {
-                fallbackTriggered = true;
-                fallbackReason ??= streamCancelled
-                    ? "rag_stream_cancelled"
-                    : "rag_stream_incomplete";
-            }
-
-            // RAG failed or produced nothing: send a graceful fallback to the client and use it as the saved answer.
-            if (fullAnswer.Length == 0 && !context.RequestAborted.IsCancellationRequested)
-            {
-                fallbackTriggered = true;
-                fullAnswer.Append(DefaultRagFailureMessage);
-                try
-                {
-                    foreach (string payload in RagStreamContract.CreateGracefulFallbackPayloads(
-                                 backendRequestId,
-                                 fallbackReason,
-                                 DefaultRagFailureMessage))
-                    {
-                        await context.Response.WriteAsync($"data: {payload}\n\n", context.RequestAborted);
-                    }
-                    await context.Response.Body.FlushAsync(context.RequestAborted);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Failed to emit fallback stream message.");
-                }
-            }
-
-            // Only the exact completion -> done terminal contract may create or
-            // promote an immutable answer version. Partial, malformed, cancelled,
-            // and transport-failed streams remain transient client output.
-            bool completedVersionReady = generationSucceeded && !isAuthenticated;
-            if (isAuthenticated && ask != null && generationSucceeded)
-            {
-                PersistReplyResult persisted = await PersistReplyVersionAsync(
-                    db,
-                    ask,
-                    fullAnswer.ToString(),
-                    sources,
-                    fallbackTriggered,
-                    fallbackReason,
-                    replaceExistingCurrent: true,
-                    requestId: backendRequestId,
-                    suggestedQuestions: suggestedQuestions,
-                    grounded: grounded,
-                    groundingScore: groundingScore);
-
-                completedVersionReady = persisted.Persisted;
-            }
-
-            // Completion is recorded only after the explicit RAG terminal event
-            // and (for authenticated users) a successful immutable-version commit.
-            // Telemetry failure is intentionally non-blocking for chat delivery.
-            if (completedVersionReady)
-            {
-                try
-                {
-                    var eventContext = await ProductTelemetry.ResolveContextAsync(
-                        db,
-                        context,
-                        configuration,
-                        askDto.ChatId,
-                        validatedGuestSubjectId,
-                        CancellationToken.None);
-                    await ProductTelemetry.RecordAsync(
-                        db,
-                        configuration,
-                        eventContext,
-                        new ProductEventData(
-                            ProductEventTypes.AnswerCompleted,
-                            backendRequestId,
+                        var eventContext = await ProductTelemetry.ResolveContextAsync(
+                            db,
+                            context,
+                            configuration,
                             askDto.ChatId,
-                            SuggestionCount: suggestedQuestions.Count,
-                            IsFallback: fallbackTriggered,
-                            Grounded: grounded,
-                            SourceCount: sources.Count),
-                        CancellationToken.None);
-                }
-                catch (Exception exception)
-                {
-                    logger.LogWarning(exception, "Answer completion telemetry write failed.");
-                }
-            }
+                            validatedGuestSubjectId,
+                            CancellationToken.None);
+                        await ProductTelemetry.RecordAsync(
+                            db,
+                            configuration,
+                            eventContext,
+                            new ProductEventData(
+                                ProductEventTypes.AnswerCompleted,
+                                relay.RequestId,
+                                askDto.ChatId,
+                                SuggestionCount: relay.SuggestedQuestions.Count,
+                                IsFallback: relay.FallbackTriggered,
+                                Grounded: relay.Grounded,
+                                SourceCount: relay.Sources.Count),
+                            CancellationToken.None);
+                    }
+                    catch (Exception exception)
+                    {
+                        logger.LogWarning(exception, "Answer completion telemetry write failed.");
+                    }
+                });
         });
 
         app.MapPost("/followups", async (
@@ -635,15 +749,18 @@ static public class ChatRequestApis
                 ?? configuration["RAG_SERVICE_URL"]
                 ?? "http://rag-service:8000";
             var client = httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromMinutes(2);
+            client.Timeout = Timeout.InfiniteTimeSpan;
 
             try
             {
-                using var response = await client.PostAsJsonAsync(
-                    $"{ragUrl}/followups",
-                    new { requestId = request.RequestId },
-                    JsonOptions,
+                using var relayTimeouts = new RagRelayTimeouts(
+                    RagRelayTimeoutSettings.FromConfiguration(configuration, "Followups", RagRelayTimeoutSettings.FollowupDefaults),
                     context.RequestAborted);
+                using var upstreamRequest = new HttpRequestMessage(HttpMethod.Post, $"{ragUrl}/followups")
+                {
+                    Content = JsonContent.Create(new { requestId = request.RequestId }, options: JsonOptions)
+                };
+                using var response = await relayTimeouts.SendAsync(client, upstreamRequest);
                 if (!response.IsSuccessStatusCode)
                 {
                     logger.LogWarning(
@@ -652,9 +769,8 @@ static public class ChatRequestApis
                     return Results.Ok(new { questions = Array.Empty<string>() });
                 }
 
-                RagFollowupResponse? payload = await response.Content.ReadFromJsonAsync<RagFollowupResponse>(
-                    JsonOptions,
-                    context.RequestAborted);
+                RagFollowupResponse? payload = JsonSerializer.Deserialize<RagFollowupResponse>(
+                    await relayTimeouts.ReadBodyToEndAsync(response), JsonOptions);
                 List<string> questions = (payload?.Questions ?? [])
                     .Where(question => !string.IsNullOrWhiteSpace(question))
                     .Select(question => question.Trim())
@@ -687,6 +803,12 @@ static public class ChatRequestApis
             catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
             {
                 return Results.Empty;
+            }
+            catch (RagRelayTimeoutException exception)
+            {
+                logger.LogWarning("RAG followup timeout. Phase={Phase} RequestId={RequestId}",
+                    exception.Phase, request.RequestId);
+                return Results.Ok(new { questions = Array.Empty<string>() });
             }
             catch (Exception exception)
             {
