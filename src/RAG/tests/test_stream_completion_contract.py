@@ -58,6 +58,8 @@ def test_completion_metadata_precedes_done_and_carries_persistence_fields():
         "resolved_intents": ["notices", "scholarship"],
         "fallback_reason": None,
         "sources": [{"source": "notices", "metadata": {"campus_scope": "seoul"}}],
+        "retrieval_mode": None,
+        "degraded_datasets": [],
     }
 
 

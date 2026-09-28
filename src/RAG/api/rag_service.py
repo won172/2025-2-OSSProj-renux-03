@@ -153,6 +153,7 @@ from src.services.data_quality import (
 )
 from src.services.canonical_lineage import build_canonical_lineage_report
 from src.services.ingestion_freshness import build_ingestion_freshness_report
+from src.services.telemetry_heartbeat import read_verdict
 from src.services.ontology_retrieval import OntologyShadowResult, run_ontology_shadow
 from src.services.retrieval_strategy import RetrievalStrategy, choose_retrieval_strategy
 from src.models.embedding import get_embedder, encode_texts
@@ -217,6 +218,7 @@ app = FastAPI(
 # Keep the runtime annotation compatible with the project's Python 3.9 venv;
 # function annotations still use postponed evaluation above.
 _request_as_of: ContextVar = ContextVar("rag_request_as_of", default=None)
+_retrieval_observations: ContextVar = ContextVar("rag_retrieval_observations", default=None)
 
 
 def _log_event(level: int, event: str, exc_info: bool = False, **fields) -> None:
@@ -1093,6 +1095,7 @@ def _new_readiness_state() -> dict:
             },
             "embedder": {"required": True, "ready": False, "detail": "not_checked"},
             "scheduler": {"required": False, "ready": False, "detail": "not_checked"},
+            "telemetry_heartbeat": {"required": False, "ready": False, "detail": "not_checked"},
         },
     }
 
@@ -1136,6 +1139,83 @@ def _readiness_snapshot() -> dict:
         for name, check in snapshot["checks"].items()
         if check["required"] and not check["ready"]
     ]
+    return snapshot
+
+
+_RECOVERY_HINTS = {
+    "configuration": "Check required RAG configuration and restart the service.",
+    "database": "Check SQLite access and run database initialization.",
+    "data_quality": "Review the data quality report and repair affected records.",
+    "canonical_lineage": "Run the strict lineage report and repair the affected index artifacts.",
+    "ingestion_freshness": "Review ingestion runs and retry stale datasets.",
+    "datasets": "Check dataset artifacts and dense index counts, then refresh the affected dataset.",
+    "embedder": "Check the embedding model and restart the service.",
+    "scheduler": "Check scheduler startup and its job logs.",
+    "telemetry_heartbeat": "Check the heartbeat scheduler and query logging.",
+}
+
+
+def _add_readiness_diagnostics(snapshot: dict) -> dict:
+    """Add operational context without changing required readiness decisions."""
+    checks = snapshot["checks"]
+    datasets = checks["datasets"]
+    datasets["corpus_revisions"] = {
+        key: getattr(_datasets.get(key), "corpus_revision", None)
+        for key in _REQUIRED_DATASETS
+    }
+    datasets["last_successful_ingestion_at"] = {key: None for key in _REQUIRED_DATASETS}
+    heartbeat = checks["telemetry_heartbeat"]
+    try:
+        session = SessionLocal()
+        try:
+            try:
+                latest_runs = session.query(
+                    IngestionRun.dataset,
+                    func.max(func.coalesce(IngestionRun.finished_at, IngestionRun.started_at)),
+                ).filter(
+                    IngestionRun.status.in_(("success", "partial_success")),
+                    IngestionRun.dataset.in_(_REQUIRED_DATASETS),
+                ).group_by(IngestionRun.dataset).all()
+                for dataset, finished in latest_runs:
+                    datasets["last_successful_ingestion_at"][dataset] = (
+                        finished.isoformat() if finished else None
+                    )
+            except Exception as exc:  # noqa: BLE001 - ingestion history is informational
+                datasets["ingestion_error"] = _readiness_error("ingestion_history_read_failed", exc)
+            verdict = read_verdict(
+                session,
+                interval_seconds=rag_config.RAG_TELEMETRY_HEARTBEAT_INTERVAL_SECONDS,
+                stale_intervals=rag_config.RAG_TELEMETRY_HEARTBEAT_STALE_INTERVALS,
+                no_traffic_seconds=rag_config.RAG_TELEMETRY_NO_TRAFFIC_SECONDS,
+                expected_start_hour=rag_config.RAG_TELEMETRY_EXPECTED_TRAFFIC_START_HOUR,
+                expected_end_hour=rag_config.RAG_TELEMETRY_EXPECTED_TRAFFIC_END_HOUR,
+            )
+        finally:
+            session.close()
+        heartbeat.update(
+            ready=verdict.status == "healthy",
+            detail=verdict.status,
+            latest_heartbeat_at=(
+                verdict.latest_heartbeat_at.isoformat() + "Z"
+                if verdict.latest_heartbeat_at else None
+            ),
+            latest_heartbeat_age_seconds=verdict.age_seconds,
+            stale=verdict.status in {"no_heartbeat", "stale_heartbeat"},
+            query_log_stalled=verdict.status == "no_traffic_or_logging_broken",
+            error=None,
+        )
+    except Exception as exc:  # noqa: BLE001 - telemetry is informational only
+        heartbeat.update(
+            ready=False, detail="unavailable", latest_heartbeat_at=None,
+            latest_heartbeat_age_seconds=None, stale=None, query_log_stalled=None,
+            error=_readiness_error("telemetry_read_failed", exc),
+        )
+    for name, check in checks.items():
+        if not check["ready"] or (
+            name == "datasets"
+            and (check.get("dense_errors") or check.get("ingestion_error"))
+        ):
+            check["recovery_hint"] = _RECOVERY_HINTS[name]
     return snapshot
 
 # 라우팅 없이 전체 검색을 할 때 대상이 되는 모든 데이터셋(인덱싱된 순서 유지).
@@ -1622,6 +1702,8 @@ _SOURCE_INTERNAL_COLUMNS = {
     "ontology_document_key",
     "ontology_temporal_rank",
     "structured_match",
+    "dense_rank", "sparse_rank", "fusion_rank", "corpus_revision",
+    "dense_distance_raw", "dense_similarity_raw", "sparse_score_raw",
 } | _SOURCE_SCORE_COLUMNS
 
 
@@ -1650,6 +1732,8 @@ class AskResponse(BaseModel):
     verification_status: str = VERIFICATION_UNAVAILABLE
     fallback_triggered: bool = False
     fallback_reason: str | None = None
+    retrieval_mode: str | None = None
+    degraded_datasets: list[str] = Field(default_factory=list)
 
 
 class FollowupRequest(BaseModel):
@@ -4627,6 +4711,13 @@ async def _retrieve_frames(
                 academic_period_query=period_query,
             )
             hits = await run_in_threadpool(search_func)
+            observations = _retrieval_observations.get()
+            if observations is not None:
+                observations.append({
+                    "dataset": dataset,
+                    "retrieval_mode": hits.attrs.get("retrieval_mode", "hybrid"),
+                    "dense_error_type": hits.attrs.get("dense_error_type"),
+                })
             hits, eliminated = _apply_date_filter(hits, dataset, date_filter)
             if dataset == "schedule":
                 hits = _apply_schedule_calendar_alignment(hits, query)
@@ -6165,12 +6256,19 @@ def _save_rag_evaluation_log(
     matched_queries_json: str | None,
     top_hybrid_score: float | None,
     sources: List[SourceChunk],
-    stage_timings: dict[str, float] | None = None,
+    stage_timings: dict[str, Any] | None = None,
     llm_usage: list[dict] | None = None,
     deterministically_grounded: bool = False,
+    source_traces: list[dict[str, Any]] | None = None,
 ) -> None:
     session = SessionLocal()
     try:
+        log_timings = dict(stage_timings or {})
+        log_timings["retrieval"] = {
+            **_retrieval_summary(),
+            "searches": list(_retrieval_observations.get() or []),
+            "sources": source_traces or [],
+        }
         query_log = RagQueryLog(
             request_id=request_id,
             session_id=session_id,
@@ -6197,7 +6295,7 @@ def _save_rag_evaluation_log(
             grounding_checked=deterministically_grounded,
             grounding_grounded=True if deterministically_grounded else None,
             grounding_score=1.0 if deterministically_grounded else None,
-            stage_timings_json=_json_or_none(stage_timings),
+            stage_timings_json=_json_or_none(log_timings),
             llm_usage_json=_json_or_none(llm_usage),
             estimated_llm_cost_usd=_sum_estimated_llm_cost(llm_usage),
         )
@@ -6316,7 +6414,14 @@ def _update_observability_log(
         )
         if query_log is None:
             return
-        query_log.stage_timings_json = _json_or_none(stage_timings)
+        timings = dict(stage_timings or {})
+        try:
+            existing = json.loads(query_log.stage_timings_json or "{}")
+            if "retrieval" in existing:
+                timings["retrieval"] = existing["retrieval"]
+        except (TypeError, ValueError):
+            pass
+        query_log.stage_timings_json = _json_or_none(timings)
         query_log.llm_usage_json = _json_or_none(llm_usage)
         query_log.estimated_llm_cost_usd = _sum_estimated_llm_cost(llm_usage)
         session.commit()
@@ -8488,6 +8593,45 @@ async def _stream_with_terminal_event(
         )
 
 
+def _retrieval_summary() -> dict[str, Any]:
+    observations = _retrieval_observations.get() or []
+    modes = {item["retrieval_mode"] for item in observations}
+    degraded = list(dict.fromkeys(
+        item["dataset"] for item in observations
+        if item["retrieval_mode"] == "sparse_degraded"
+    ))
+    mode = (
+        "sparse_degraded" if degraded else
+        "hybrid" if "hybrid" in modes else
+        "sparse_only" if "sparse_only" in modes else None
+    )
+    return {"retrieval_mode": mode, "degraded_datasets": degraded}
+
+
+_SOURCE_TRACE_FIELDS = (
+    "dense_rank", "sparse_rank", "fusion_rank", "corpus_revision",
+    "dense_distance_raw", "dense_similarity_raw", "sparse_score_raw",
+)
+
+
+def _trace_value(key: str, value: Any) -> str | int | float | None:
+    if key == "corpus_revision":
+        return _clean_response_str(value)
+    numeric = _clean_response_float(value)
+    return int(numeric) if numeric is not None and key.endswith("_rank") else numeric
+
+
+def _source_traces(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    return [
+        {
+            "rank": rank, "dataset": _clean_response_str(row.get("dataset")),
+            "chunk_id": _clean_response_str(row.get("chunk_id")),
+            **{key: _trace_value(key, row.get(key)) for key in _SOURCE_TRACE_FIELDS},
+        }
+        for rank, (_, row) in enumerate(frame.iterrows(), start=1)
+    ]
+
+
 def _completion_payload(
     *,
     request_id: str,
@@ -8521,6 +8665,7 @@ def _completion_payload(
         "resolved_intents": resolved_intents or [],
         "fallback_reason": fallback_reason,
         "sources": serialized_sources,
+        **_retrieval_summary(),
     }
     return payload
 
@@ -8551,6 +8696,8 @@ class QueryOutcome:
     resolved_intents: list[str]
     stage_timings: dict[str, Any]
     request_id: str
+    retrieval_mode: str | None
+    degraded_datasets: list[str]
 
     def response(self) -> AskResponse:
         return AskResponse(
@@ -8562,6 +8709,8 @@ class QueryOutcome:
             relevance_score=self.relevance_score,
             verification_status=self.verification_status,
             fallback_triggered=self.fallback_triggered, fallback_reason=self.fallback_reason,
+            retrieval_mode=self.retrieval_mode,
+            degraded_datasets=self.degraded_datasets,
         )
 
 
@@ -8585,6 +8734,7 @@ async def execute_query(
     """Run one planned path and emit transport-neutral events plus its outcome."""
     if mode not in {"ask", "stream"}:
         raise ValueError(f"Unsupported query mode: {mode}")
+    observation_token = _retrieval_observations.set([])
     if plan.direct_handler is None:
         steps = _execute_retrieval_steps(
             plan, mode, req=req, raw_query=raw_query,
@@ -8601,29 +8751,34 @@ async def execute_query(
         )
     metadata = None
     text_parts: list[str] = []
-    async for event in steps:
-        payload = event.payload
-        if payload["type"] == "metadata":
-            metadata = payload
-        elif payload["type"] == "text":
-            text_parts.append(payload["content"])
-        yield event
-        if payload["type"] == "completion":
-            assert metadata is not None
-            yield QueryOutcome(
-                answer="".join(text_parts),
-                sources=[SourceChunk(**source) for source in payload["sources"]],
-                citations=metadata["citations"], route=metadata["route"],
-                fallback_triggered=metadata["fallback_triggered"],
-                fallback_reason=payload["fallback_reason"],
-                verification_status=payload["verification_status"],
-                grounded=payload["grounded"], grounding_score=payload["grounding_score"],
-                relevance_score=payload["relevance_score"],
-                suggested_questions=payload["suggested_questions"],
-                suggested_question_details=[SuggestedQuestionDetail(**detail) for detail in payload["suggested_question_details"]],
-                resolved_intents=payload["resolved_intents"],
-                stage_timings=stage_timings.copy(), request_id=request_id,
-            )
+    try:
+        async for event in steps:
+            payload = event.payload
+            if payload["type"] == "metadata":
+                metadata = payload
+            elif payload["type"] == "text":
+                text_parts.append(payload["content"])
+            yield event
+            if payload["type"] == "completion":
+                assert metadata is not None
+                yield QueryOutcome(
+                    answer="".join(text_parts),
+                    sources=[SourceChunk(**source) for source in payload["sources"]],
+                    citations=metadata["citations"], route=metadata["route"],
+                    fallback_triggered=metadata["fallback_triggered"],
+                    fallback_reason=payload["fallback_reason"],
+                    verification_status=payload["verification_status"],
+                    grounded=payload["grounded"], grounding_score=payload["grounding_score"],
+                    relevance_score=payload["relevance_score"],
+                    suggested_questions=payload["suggested_questions"],
+                    suggested_question_details=[SuggestedQuestionDetail(**detail) for detail in payload["suggested_question_details"]],
+                    resolved_intents=payload["resolved_intents"],
+                    stage_timings=stage_timings.copy(), request_id=request_id,
+                    retrieval_mode=payload["retrieval_mode"],
+                    degraded_datasets=payload["degraded_datasets"],
+                )
+    finally:
+        _retrieval_observations.reset(observation_token)
 
 
 async def _execute_direct_steps(
@@ -9337,6 +9492,7 @@ async def _execute_retrieval_steps(
 
     # 소스 데이터 정리
     sources = [_source_chunk_from_row(row).model_dump() for _, row in merged.iterrows()]
+    source_traces = _source_traces(merged)
 
     citations_raw = await run_in_threadpool(format_citations, merged)
     citations = re.sub(r'<[^>]+>', '', citations_raw)
@@ -9477,6 +9633,7 @@ async def _execute_retrieval_steps(
         [SourceChunk(**s) for s in sources],
         stage_timings,
         llm_usage,
+        source_traces=source_traces,
     )
     if grounding_result is not None and grounding_result.checked:
         await run_in_threadpool(_update_grounding_log, request_id, grounding_result)
@@ -9857,7 +10014,7 @@ async def evaluation_fingerprint() -> dict[str, object]:
 @app.get("/ready")
 def ready():
     """필수 startup 컴포넌트가 모두 준비됐을 때만 2xx를 반환한다."""
-    snapshot = _readiness_snapshot()
+    snapshot = _add_readiness_diagnostics(_readiness_snapshot())
     if not snapshot["ready"]:
         return JSONResponse(status_code=503, content=snapshot)
     return snapshot
