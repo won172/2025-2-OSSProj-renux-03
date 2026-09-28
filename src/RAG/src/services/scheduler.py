@@ -1,11 +1,10 @@
 """공지/학식/교과과정 데이터의 주기적 자동 갱신 스케줄러 (rag-service 프로세스 내부).
 
-별도 워커 컨테이너 대신 서빙 프로세스 안에서 APScheduler로 돌린다:
-- 이미 로드된 임베딩 모델을 재사용 → 추가 메모리 없음.
-- Chroma 클라이언트를 단일 프로세스가 소유 → 멀티프로세스 동시 접근 위험 없음.
+별도 워커 컨테이너 대신 서빙 프로세스 안에서 APScheduler로 돌린다.
+여러 서빙 replica가 같은 RAG DB를 공유할 때는 job별 DB lease로 중복 시작을 막는다.
 
 작업은 BackgroundScheduler의 워커 스레드에서 실행되어 asyncio 이벤트 루프(서빙)를 막지 않는다.
-재진입 방지(max_instances=1)·중복 누적 방지(coalesce=True)를 적용한다.
+프로세스 내 재진입 방지(max_instances=1)·중복 누적 방지(coalesce=True)를 적용한다.
 
 기본 비활성(RAG_SCHEDULER_ENABLED=0). 배포 환경에서 env로 켠다.
 """
@@ -14,7 +13,12 @@ from __future__ import annotations
 import logging
 import os
 import json
+from queue import Empty, Queue
+import time
+from functools import partial
 from datetime import datetime, timedelta, timezone
+from threading import Thread
+from typing import Callable
 
 import httpx
 import pandas as pd
@@ -24,11 +28,15 @@ from src.config import (
     RAG_SCHEDULER_ALERT_TIMEOUT_SECONDS,
     RAG_SCHEDULER_ALERT_WEBHOOK_URL,
     RAG_SCHEDULER_ENABLED,
+    RAG_SCHEDULER_JOB_LEASE_ENABLED,
+    RAG_SCHEDULER_JOB_LEASE_RENEW_SECONDS,
+    RAG_SCHEDULER_JOB_LEASE_TTL_SECONDS,
     RAG_SCHEDULER_REQUEST_RETRIES,
     RAG_SCHEDULER_REQUEST_TIMEOUT_SECONDS,
 )
 from src.database import IngestionRun, SessionLocal, kst_now
 from src.services.ingest_runtime import ingestion_run_context
+from src.services.job_lease import JobLease, LeaseLostError, check_current_lease
 
 logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
@@ -81,6 +89,8 @@ def _send_scheduler_alert(job_id: str, status: str, message: str | None) -> None
 
 
 def _record_run(job_id: str, status: str, message: str | None = None) -> None:
+    if status in {"ok", "partial", "skipped"}:
+        check_current_lease()
     _LAST_RUNS[job_id] = {
         "last_run_at": datetime.now(KST).isoformat(),
         "last_status": status,
@@ -124,6 +134,8 @@ def _finish_ingestion_run(
     run_derivatives: bool = False,
 ) -> None:
     """실행 기록을 닫는다. 시작 기록이 없었으면(None) 조용히 넘어간다."""
+    if status in {"success", "partial_success", "pending_review"}:
+        check_current_lease()
     if run_id is None:
         return
     dataset_name: str | None = None
@@ -202,6 +214,7 @@ def _finish_ingestion_run(
         or status not in {"success", "partial_success"}
     ):
         return
+    check_current_lease()
     try:
         from src.services.derivative_dag import run_post_ingestion_dag
 
@@ -215,6 +228,7 @@ def _finish_ingestion_run(
             "stages": [],
         }
 
+    check_current_lease()
     followup = SessionLocal()
     try:
         persisted = followup.query(IngestionRun).filter(IngestionRun.id == run_id).first()
@@ -282,6 +296,7 @@ def get_scheduler_status() -> dict:
 
 def _refresh_runtime_dataset_state(dataset: str) -> None:
     """Make scheduler-written artifacts visible to the serving process at once."""
+    check_current_lease()
     try:
         import importlib
 
@@ -436,6 +451,7 @@ def refresh_notices_job() -> None:
             logger.warning("[scheduler] 도서관 운영시간 병합 실패 — 공지만 갱신: %s", exc)
         # 증분 목록은 앞쪽 페이지만 보므로, 사이트에서 삭제된 최근 공지는 설정된
         # 삭제 감지(RAG_NOTICE_DELETION_CHECK_MODE, 기본 off)로만 확인된다.
+        check_current_lease()
         summary = sync_notices(
             df,
             allow_missing_detection=False,
@@ -477,7 +493,10 @@ def refresh_notices_job() -> None:
             else "ok",
             message,
         )
+        check_current_lease()
         _start_faq_draft_worker()
+    except LeaseLostError:
+        raise
     except Exception as exc:  # noqa: BLE001 — 한 번의 실패가 스케줄러를 죽이지 않도록
         logger.error("[scheduler] 공지 갱신 실패: %s", exc, exc_info=True)
         _record_run("refresh_notices", "failed", str(exc))
@@ -524,6 +543,7 @@ def refresh_rules_job() -> None:
     logger.info("[scheduler] 현행 규정 갱신 시작 (%s)", start)
     run_id = _start_ingestion_run("rules")
     try:
+        check_current_lease()
         official = sync_rule_source()
         from src.services.source_schema import fingerprint_dataframe
 
@@ -562,6 +582,7 @@ def refresh_rules_job() -> None:
             logger.info("[scheduler] 현행 규정 변경 없음 — 재임베딩 건너뜀")
             return
         with ingestion_run_context("rules", run_id):
+            check_current_lease()
             chunks, _, _ = ingest_rules(force_source_reload=True)
         _refresh_runtime_dataset_state("rules")
         _record_run(
@@ -576,6 +597,9 @@ def refresh_rules_job() -> None:
             source_structures=source_structures,
             run_derivatives=True,
         )
+    except LeaseLostError:
+        _finish_ingestion_run(run_id, status="failed", error="job lease lost", outcome_code="lease_lost")
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("[scheduler] 현행 규정 갱신 실패: %s", exc, exc_info=True)
         _record_run("refresh_rules", "failed", str(exc))
@@ -635,6 +659,7 @@ def refresh_meals_job() -> None:
             )
             return
         with ingestion_run_context("meals", run_id):
+            check_current_lease()
             chunks_df, _, _ = ingest_meals(df)
         _refresh_runtime_dataset_state("meals")
         logger.info("[scheduler] 학식 갱신 완료: %s행 → %s chunks", len(df), len(chunks_df))
@@ -654,6 +679,9 @@ def refresh_meals_job() -> None:
             source_structures=source_structures,
             run_derivatives=True,
         )
+    except LeaseLostError:
+        _finish_ingestion_run(run_id, status="failed", error="job lease lost", outcome_code="lease_lost")
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("[scheduler] 학식 갱신 실패: %s", exc, exc_info=True)
         _record_run("refresh_meals", "failed", str(exc))
@@ -763,6 +791,7 @@ def refresh_schedule_job() -> None:
             }).fillna("").astype(str)
             output = _merge_schedule_snapshots(existing, output)
         with ingestion_run_context("schedule", run_id):
+            check_current_lease()
             chunks_df, _, _ = ingest_schedule(output, refresh_from_csv=True)
         _refresh_runtime_dataset_state("schedule")
         logger.info(
@@ -782,6 +811,9 @@ def refresh_schedule_job() -> None:
             source_structures=source_structures,
             run_derivatives=True,
         )
+    except LeaseLostError:
+        _finish_ingestion_run(run_id, status="failed", error="job lease lost", outcome_code="lease_lost")
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("[scheduler] 학사일정 갱신 실패: %s", exc, exc_info=True)
         _record_run("refresh_schedule", "failed", str(exc))
@@ -828,6 +860,7 @@ def refresh_courses_job() -> None:
         except (ImportError, OSError, ValueError) as exc:
             logger.warning("[scheduler] 교과과정 XLSX 구조 fingerprint 생략: %s", exc)
         with ingestion_run_context("courses", run_id):
+            check_current_lease()
             chunks_df, _, _ = ingest_courses(refresh_from_csv=True)
         _refresh_runtime_dataset_state("courses")
         logger.info("[scheduler] 교과과정 갱신 완료: %s chunks", len(chunks_df))
@@ -839,6 +872,9 @@ def refresh_courses_job() -> None:
             source_structures=source_structures,
             run_derivatives=True,
         )
+    except LeaseLostError:
+        _finish_ingestion_run(run_id, status="failed", error="job lease lost", outcome_code="lease_lost")
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("[scheduler] 교과과정 갱신 실패: %s", exc, exc_info=True)
         _record_run("refresh_courses", "failed", str(exc))
@@ -904,6 +940,7 @@ def refresh_staff_job() -> None:
             )
             return
 
+        check_current_lease()
         review = stage_staff_refresh(frame)
         diagnostics["review"] = {
             key: review[key]
@@ -943,6 +980,9 @@ def refresh_staff_job() -> None:
             diagnostics=diagnostics,
             source_structures=source_structures,
         )
+    except LeaseLostError:
+        _finish_ingestion_run(run_id, status="failed", error="job lease lost", outcome_code="lease_lost")
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("[scheduler] 교직원 연락처 갱신 실패: %s", exc, exc_info=True)
         _record_run("refresh_staff", "failed", str(exc))
@@ -953,6 +993,96 @@ def refresh_staff_job() -> None:
             error=str(exc),
             outcome_code="pipeline_failure",
         )
+
+
+class _SubmittedFireTimes:
+    """Bridge APScheduler's submission event to its concurrently starting job."""
+
+    def __init__(self, clock: Callable[[], datetime] | None = None) -> None:
+        self._times = {job_name: Queue() for job_name in JOB_LABELS}
+        self._clock = clock or (lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def on_submitted(self, event) -> None:
+        if event.job_id in self._times:
+            # coalesce=True submits only the final fire time for this invocation.
+            fire_at = event.scheduled_run_times[-1]
+            self._times[event.job_id].put(fire_at.astimezone(timezone.utc).replace(tzinfo=None))
+
+    def take(self, job_name: str) -> datetime:
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                fire_at = self._times[job_name].get(timeout=max(0, deadline - time.monotonic()))
+            except Empty as exc:
+                raise RuntimeError(f"missing APScheduler submission fire time for {job_name}") from exc
+            # APScheduler emits SUBMITTED even if its worker subsequently marks
+            # the run MISSED. Such a slot has no wrapper to consume it.
+            if self._clock() - fire_at <= timedelta(seconds=120):
+                return fire_at
+            logger.warning("[scheduler] discarding missed submission slot job=%s fire_at=%s", job_name, fire_at)
+
+
+_RUNTIME_REFRESH_JOBS = {
+    "refresh_notices": "notices",
+    "refresh_rules": "rules",
+    "refresh_schedule": "schedule",
+    "refresh_meals": "meals",
+    "refresh_courses": "courses",
+}
+
+
+def _start_follower_refresh(
+    job_name: str, lease: JobLease, observed_generation: int | None,
+    scheduled_at: datetime | None = None,
+) -> Thread | None:
+    dataset = _RUNTIME_REFRESH_JOBS.get(job_name)
+    if dataset is None:
+        return None
+
+    def wait_and_refresh() -> None:
+        try:
+            if lease.wait_for_release(
+                job_name, observed_generation, scheduled_at=scheduled_at
+            ):
+                _refresh_runtime_dataset_state(dataset)
+            else:
+                logger.warning(
+                    "[scheduler] follower refresh abandoned; lease expired without release "
+                    "or matching fire not observed job=%s", job_name,
+                )
+        except Exception:
+            logger.exception("[scheduler] follower refresh wait failed job=%s", job_name)
+
+    worker = Thread(target=wait_and_refresh, name=f"follower-refresh-{job_name}", daemon=True)
+    worker.start()
+    return worker
+
+
+def _run_scheduled_job(
+    job_name: str, body: Callable[[], None], lease: JobLease,
+    fire_times: _SubmittedFireTimes | None,
+) -> None:
+    # Ingest calls can commit internally; cooperative lease checks at this
+    # wrapper's checkpoints cannot preempt a publication already in progress.
+    scheduled_at = fire_times.take(job_name) if fire_times is not None else None
+
+    def record_skip(observed_generation: int | None) -> None:
+        if observed_generation is None:
+            logger.warning("[scheduler] job lease acquisition stayed locked; skipping job=%s", job_name)
+            _record_run(job_name, "skipped_lease_db_locked", "DB lease 잠금으로 획득 확인 불가")
+        else:
+            logger.info("[scheduler] job lease held by another replica; skipping job=%s", job_name)
+            _record_run(job_name, "skipped_not_leader", "다른 scheduler replica가 실행 중")
+        _start_follower_refresh(job_name, lease, observed_generation, scheduled_at)
+
+    def record_lost() -> None:
+        logger.error("[scheduler] job lease lost before completion job=%s", job_name)
+        _record_run(job_name, "lease_lost", "DB lease를 잃어 작업 완료를 중단함")
+
+    lease.run(
+        job_name, body, on_skip=record_skip, on_lost=record_lost,
+        scheduled_at=scheduled_at,
+    )
 
 
 def start_scheduler():
@@ -972,6 +1102,20 @@ def start_scheduler():
         return None
 
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
+    lease = (
+        JobLease(
+            SessionLocal,
+            ttl_seconds=RAG_SCHEDULER_JOB_LEASE_TTL_SECONDS,
+            renew_seconds=RAG_SCHEDULER_JOB_LEASE_RENEW_SECONDS,
+        )
+        if RAG_SCHEDULER_JOB_LEASE_ENABLED else None
+    )
+    fire_times = _SubmittedFireTimes() if lease else None
+    if fire_times is not None:
+        from apscheduler.events import EVENT_JOB_SUBMITTED
+
+        scheduler.add_listener(fire_times.on_submitted, EVENT_JOB_SUBMITTED)
+
     # 부팅 시 따라잡기(catch-up) 실행을 막기 위해 misfire 유예를 짧게 둔다.
     # → 컨테이너를 켜도 '정해진 시각'이 아니면 수집하지 않는다.
     job_defaults = dict(max_instances=1, coalesce=True, misfire_grace_time=120)
@@ -985,36 +1129,17 @@ def start_scheduler():
     meals_cron = os.getenv("RAG_MEALS_REFRESH_CRON", "30 4 * * *")
     courses_cron = os.getenv("RAG_COURSES_REFRESH_CRON", "0 3 * * 0")
     staff_cron = os.getenv("RAG_STAFF_REFRESH_CRON", "0 4 * * 0")
-    scheduler.add_job(
-        refresh_notices_job,
-        CronTrigger.from_crontab(notices_cron, timezone="Asia/Seoul"),
-        id="refresh_notices", **job_defaults,
-    )
-    scheduler.add_job(
-        refresh_rules_job,
-        CronTrigger.from_crontab(rules_cron, timezone="Asia/Seoul"),
-        id="refresh_rules", **job_defaults,
-    )
-    scheduler.add_job(
-        refresh_schedule_job,
-        CronTrigger.from_crontab(schedule_cron, timezone="Asia/Seoul"),
-        id="refresh_schedule", **job_defaults,
-    )
-    scheduler.add_job(
-        refresh_meals_job,
-        CronTrigger.from_crontab(meals_cron, timezone="Asia/Seoul"),
-        id="refresh_meals", **job_defaults,
-    )
-    scheduler.add_job(
-        refresh_courses_job,
-        CronTrigger.from_crontab(courses_cron, timezone="Asia/Seoul"),
-        id="refresh_courses", **job_defaults,
-    )
-    scheduler.add_job(
-        refresh_staff_job,
-        CronTrigger.from_crontab(staff_cron, timezone="Asia/Seoul"),
-        id="refresh_staff", **job_defaults,
-    )
+    def add_cron(job_name: str, body: Callable[[], None], cron: str) -> None:
+        trigger = CronTrigger.from_crontab(cron, timezone="Asia/Seoul")
+        scheduled = partial(_run_scheduled_job, job_name, body, lease, fire_times) if lease else body
+        scheduler.add_job(scheduled, trigger, id=job_name, **job_defaults)
+
+    add_cron("refresh_notices", refresh_notices_job, notices_cron)
+    add_cron("refresh_rules", refresh_rules_job, rules_cron)
+    add_cron("refresh_schedule", refresh_schedule_job, schedule_cron)
+    add_cron("refresh_meals", refresh_meals_job, meals_cron)
+    add_cron("refresh_courses", refresh_courses_job, courses_cron)
+    add_cron("refresh_staff", refresh_staff_job, staff_cron)
     scheduler.start()
     _scheduler = scheduler
     logger.info(

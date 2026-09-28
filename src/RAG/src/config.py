@@ -332,6 +332,19 @@ RAG_SELECTOR_REFUSAL_MIN_COVERAGE = float(
 # 이미 로드된 임베딩 모델을 재사용하고 Chroma 클라이언트를 단일 프로세스가 소유하므로
 # 별도 워커 컨테이너 대비 메모리·동시성 안전성이 좋다. 기본 비활성(배포 env에서 1로 켠다).
 RAG_SCHEDULER_ENABLED = os.getenv("RAG_SCHEDULER_ENABLED", "0") == "1"
+# Scheduler replicas sharing the same RAG SQLite database coordinate each job.
+RAG_SCHEDULER_JOB_LEASE_ENABLED = os.getenv(
+    "RAG_SCHEDULER_JOB_LEASE_ENABLED", "1" if RAG_SCHEDULER_ENABLED else "0"
+) == "1"
+# 24 hours leaves a conservative margin for the full curriculum crawl and corpus
+# rebuild; confirm the longest observed production run before rollout. A crashed
+# owner's lease expires after this limit, while an active owner keeps renewing.
+RAG_SCHEDULER_JOB_LEASE_TTL_SECONDS = float(
+    os.getenv("RAG_SCHEDULER_JOB_LEASE_TTL_SECONDS", "86400")
+)
+RAG_SCHEDULER_JOB_LEASE_RENEW_SECONDS = float(
+    os.getenv("RAG_SCHEDULER_JOB_LEASE_RENEW_SECONDS", "60")
+)
 # 공지 갱신 주기(시간). 기본 6시간 = 하루 4회.
 RAG_NOTICES_REFRESH_HOURS = float(os.getenv("RAG_NOTICES_REFRESH_HOURS", "6"))
 # 학식 갱신 주기(시간). 기본 24시간 = 매일.
