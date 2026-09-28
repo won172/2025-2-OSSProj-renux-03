@@ -1,8 +1,10 @@
 """Pre-retrieval decisions and endpoint transport parity, without network calls."""
 import asyncio
+import csv
 import json
 from dataclasses import FrozenInstanceError
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
@@ -14,6 +16,7 @@ from api import rag_service as service
 from src.database import Base, RagQueryLog, RagRetrievalLog
 from src.services.direct_answer import DirectAnswer
 from src.services.grounding import GroundingResult
+from tests.measure_simple_query_bypass import baseline_analysis_skip
 
 AS_OF = date(2026, 9, 28)
 QUESTION = "동국대학교 질문"
@@ -85,11 +88,16 @@ def response_from_events(events, response, *, expected_grounding_reason=None):
     }
 
 
-async def assert_endpoint_parity(monkeypatch, question=QUESTION, *, expected_grounding_reason=None):
+async def assert_endpoint_parity(monkeypatch, question=QUESTION, *, expected_grounding_reason=None,
+                                 saved_stages=None):
     temporal_context = service.TemporalContext(
         as_of=AS_OF, academic_year=2026, semester=2, phase="학기중")
     monkeypatch.setattr(service, "_request_temporal_context", lambda _req: temporal_context)
-    monkeypatch.setattr(service, "_save_rag_evaluation_log", lambda *_a, **_kw: None)
+    def save(*args, **_kwargs):
+        if saved_stages is not None:
+            saved_stages.append(next(value.copy() for value in args
+                                     if isinstance(value, dict) and "query_plan" in value))
+    monkeypatch.setattr(service, "_save_rag_evaluation_log", save)
     monkeypatch.setattr(service, "append_manual_history", lambda *_a: None)
     monkeypatch.setattr(service, "_update_observability_log", lambda *_a: None)
     original = service._plan_query
@@ -281,6 +289,138 @@ async def test_typo_correction_records_the_audience_of_each_search_query(monkeyp
     assert plan.filters["audience_by_query"][question] == "common"
     assert plan.filters["audience_by_query"]["수강신청 어떻게 해?"] == "undergraduate"
     assert "audience" not in plan.filters
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question", "history"),
+    [
+        ("교내 등록끔 고지서 알려줘", ""),
+        ("통계학과 희망 강의 개설학과 알려줘", ""),
+        ("교내 시간표짜 알려줘", ""),
+        ("올해 교내 등록끔 고지서 알려줘", ""),
+        ("교내 등록끔 고지서와 장학금 지급일 비교해줘", ""),
+        ("컴퓨터공학과 사무실 전화번호 02-2260-0000 알려줘", ""),
+        ("02-2260-0000 담당자 알려줘", ""),
+        ("CSC2007 과목 개설학과 알려줘", ""),
+        ("CSC2007 개설학과 알려줘", ""),
+        ("CSC2007이랑 데이터베이스 개설학과 알려줘", ""),
+        ("교내 등록끔 고지서와 학생식당 메뉴 알려줘", ""),
+        ("최근 등록끔 공지 알려줘", ""),
+        ("교내 등록끔 고지서 신청 공지 알려줘", ""),
+        ("컴퓨터공학과 사무실 전화번호 02-2260-0000와 신청 공지 알려줘", ""),
+        ("02-2260-0000와 02-2260-1111 담당자를 비교해줘", ""),
+        ("02-2260-0000 담당자와 소속을 비교해줘", ""),
+        ("02-2260-0000 담당자 및 부서 알려줘", ""),
+        ("CSC2007 및 CSC2008 개설학과 알려줘", ""),
+        ("CSC2007 개설학과와 담당학과 차이 알려줘", ""),
+        ("CSC2007과 개설학과별 과목을 각각 알려줘", ""),
+        ("CSC2007 과목 개설학과와 수강신청 변경 공지 알려줘", ""),
+        ("CSC2007 과목 개설학과 알려줘", "직전 질문과 답변"),
+        ("이번 학기 CSC2007 과목 개설학과 알려줘", ""),
+        ("2024학번 교양 이수 기준 알려줘", ""),
+    ],
+)
+async def test_analysis_skip_decision_and_log_match_head(
+    monkeypatch, question, history,
+):
+    configure(monkeypatch, None)
+    monkeypatch.setattr(service, "USE_QUERY_ANALYSIS", True)
+    monkeypatch.setattr(service, "get_recent_history_text", lambda _session: history)
+    calls = []
+    async def analyze(*args, **_kwargs):
+        calls.append(args)
+        return service.QueryAnalysisResult(normalized_question=question, intent="courses")
+    monkeypatch.setattr(service, "analyze_query", analyze)
+    route = service._resolve_retrieval_route(
+        question, service.QueryAnalysisMeta(result=None, used=False, failed=False),
+    )
+    expected_skip = not history and baseline_analysis_skip(
+        question, service._query_for_analysis(question), route,
+    )
+    stages = {}
+    plan = await service._plan_query(
+        req=service.AskRequest(question=question), raw_query=question,
+        temporal_context=SimpleNamespace(as_of=AS_OF), request_id="skip-decision",
+        session_id="session", stage_timings=stages, llm_usage=[], mode="ask",
+    )
+    assert bool(calls) is not expected_skip
+    assert plan.analysis_meta.used is not expected_skip
+    assert stages["query_analysis_decision"] == {
+        "skipped": expected_skip,
+        "reason": "single_explicit_route" if expected_skip else "llm_required",
+    }
+
+
+def test_analysis_skip_decisions_equal_head_for_every_golden_question():
+    matrix = Path(__file__).with_name("golden_matrix.csv")
+    with matrix.open(encoding="utf-8-sig", newline="") as source:
+        questions = [case["question"] for case in csv.DictReader(source)]
+    assert len(questions) == 190
+    for question in questions:
+        normalized = service._query_for_analysis(question)
+        route = service._resolve_retrieval_route(
+            question, service.QueryAnalysisMeta(result=None, used=False, failed=False),
+        )
+        assert service._can_skip_query_analysis(question, normalized, "") is baseline_analysis_skip(
+            question, normalized, route,
+        ), question
+
+
+@pytest.mark.asyncio
+async def test_sql_scoped_bypass_has_json_stream_parity_and_still_checks_grounding(monkeypatch):
+    configure(monkeypatch, None)
+    async def structured_plan(**_kwargs):
+        return service._RetrievalPlan(
+            ["rules"], service.RetrievalStrategy("structured", "rules"), {},
+            {"rules": ("rules:one",)},
+        )
+    monkeypatch.setattr(service, "_plan_retrieval", structured_plan)
+    frame = pd.DataFrame([{
+        "candidate_id": "c1", "chunk_id": "rule-chunk", "document_key": "rules:one",
+        "dataset": "rules", "source": "official", "title": "2024학번 교양 이수 기준",
+        "chunk_text": "2024학번 교양 이수 기준 공식 자료", "hybrid_score": 0.9,
+        "vector_score": 0.9, "sparse_score": 0.9, "dataset_rank": 1,
+        "structured_match": 1,
+    }])
+    async def retrieve(**_kwargs):
+        return [frame.copy()], False, []
+    async def enrich(**kwargs):
+        return kwargs["frames"], []
+    async def unexpected_selector(*_args, **_kwargs):
+        pytest.fail("LLM selector called")
+    async def generate(**_kwargs):
+        return "2024학번 교양 이수 기준입니다. [문서1]"
+    async def generate_stream(**_kwargs):
+        yield "2024학번 교양 이수 기준입니다. [문서1]"
+    checked = []
+    async def ground(*args, **_kwargs):
+        checked.append(args)
+        return GroundingResult(checked=True, grounded=True, score=0.95,
+                               relevance_score=0.9, reason="official source")
+    monkeypatch.setattr(service, "_retrieve_frames_for_queries", retrieve)
+    monkeypatch.setattr(service, "_enrich_staff_lookup_frames", enrich)
+    monkeypatch.setattr(service, "_build_balanced_shortlist", lambda *_a, **_kw: frame.copy())
+    monkeypatch.setattr(service, "_apply_cross_encoder_rerank", lambda rows, _q: rows)
+    monkeypatch.setattr(service, "select_evidence_groups", unexpected_selector)
+    monkeypatch.setattr(service, "generate_langchain_answer", generate)
+    monkeypatch.setattr(service, "generate_langchain_answer_stream", generate_stream)
+    monkeypatch.setattr(service, "check_answer_grounding", ground)
+    monkeypatch.setattr(service, "RAG_GROUNDING_CHECK_ENABLED", True)
+    monkeypatch.setattr(service, "RAG_STREAM_BUFFER_UNTIL_GROUNDED", True)
+
+    saved_stages = []
+    plan, answer, events = await assert_endpoint_parity(
+        monkeypatch, "2024학번 교양 이수 기준 알려줘", saved_stages=saved_stages,
+    )
+    assert plan.direct_handler is None
+    assert answer.verification_status == "passed"
+    assert len(checked) == 2
+    assert len(saved_stages) == 2
+    assert all(stages["evidence_selection_decision"] == {
+        "skipped": True, "reason": "structured_sql_document",
+    } for stages in saved_stages)
+    assert [event["type"] for event in events] == ["metadata", "text", "completion", "done"]
 
 
 @pytest.mark.asyncio
