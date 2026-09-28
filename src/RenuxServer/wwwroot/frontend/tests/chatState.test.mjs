@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   finalizeStoppedAssistant,
+  getVerificationNoteKind,
   normalizeAssistantRuns,
   parseGuestChatRecords,
   prepareRegeneration,
@@ -153,6 +154,28 @@ test('재생성은 질문을 추가하지 않고 기존 assistant 슬롯만 비�
   assert.equal(prepared.assistant.id, latestAnswer.id)
   assert.equal(prepared.assistant.content, '')
   assert.equal(prepared.messages.filter((message) => message.isAsk).length, 1)
+})
+
+test('검증 상태에 따른 안내는 신규 상태를 우선하고 이전 기록은 grounded를 따른다', () => {
+  for (const grounded of [true, false, undefined]) {
+    assert.equal(getVerificationNoteKind({ verificationStatus: 'passed', grounded }), null)
+    assert.equal(getVerificationNoteKind({ verificationStatus: 'not_required', grounded }), null)
+    assert.equal(getVerificationNoteKind({ verificationStatus: 'failed', grounded }), 'failed')
+    assert.equal(getVerificationNoteKind({ verificationStatus: 'unavailable', grounded }), 'unavailable')
+  }
+  assert.equal(getVerificationNoteKind({ grounded: false }), 'failed')
+  assert.equal(getVerificationNoteKind({ grounded: true }), null)
+  assert.equal(getVerificationNoteKind({}), null)
+})
+
+test('재생성·중단 시 이전 답변의 검증 상태를 지운다', () => {
+  const verified = { ...latestAnswer, verificationStatus: 'unavailable', relevanceScore: 0.4 }
+  const regenerated = prepareRegeneration([question, verified], verified.id)
+  assert.equal(regenerated.assistant.verificationStatus, undefined)
+  assert.equal(regenerated.assistant.relevanceScore, undefined)
+  const stopped = finalizeStoppedAssistant([question, verified], verified.id)[1]
+  assert.equal(stopped.verificationStatus, undefined)
+  assert.equal(stopped.relevanceScore, undefined)
 })
 
 test('스트림 중단은 임시 상태로 표시하되 완료 답변 메타데이터를 제거한다', () => {

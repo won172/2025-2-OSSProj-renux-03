@@ -10,6 +10,11 @@ export const FALLBACK_REASON_LABELS: Readonly<Record<string, string>> = Object.f
   dataset_unavailable: '일시적으로 자료를 불러오지 못함',
   score_below_threshold: '관련 근거 부족',
   campus_out_of_scope: '서비스 범위 밖 캠퍼스',
+  future_unannounced: '아직 발표되지 않은 정보',
+  stale_data: '최신 자료 확인 필요',
+  clarification_needed: '질문에 추가 조건 필요',
+  out_of_domain: '지원 범위 밖 질문',
+  selector_refused: '답변을 뒷받침할 근거를 선택하지 못함',
 })
 
 /** 사유가 없거나(클라이언트 연결 오류 등) 알 수 없는 사유일 때 쓰는 일반 문구. */

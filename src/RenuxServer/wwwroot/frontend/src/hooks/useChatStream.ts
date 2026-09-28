@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { resolveApiUrl, withNgrokHeader } from '../api/client'
 import { withGuestTokenHeader } from '../chat/guestToken'
+import { getCompletionVerification, getGroundingFromEvent, parseChatStreamLine } from '../chat/streamEvents'
+import type { ChatVerificationStatus } from '../chat/chatState'
 import type { ChatSource } from '../components/chat/SourceCards'
 
 export interface ChatStreamPayload {
@@ -16,6 +18,8 @@ export interface ChatStreamMetadata {
   requestId?: string
   isFallback?: boolean
   fallbackReason?: string | null
+  verificationStatus?: ChatVerificationStatus
+  relevanceScore?: number | null
 }
 
 export interface ChatStreamGrounding {
@@ -109,28 +113,8 @@ export const useChatStream = () => {
         let completedGrounded: boolean | undefined
 
         const processLine = (rawLine: string) => {
-          const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
-          if (!line.startsWith('data: ')) return
-          let data: {
-            type?: string
-            request_id?: string
-            sources?: ChatSource[] | null
-            fallback_triggered?: boolean
-            fallback_reason?: string | null
-            content?: string
-            message?: string
-            questions?: string[]
-            grounded?: boolean
-            score?: number
-            grounding_score?: number | null
-            suggested_questions?: string[]
-          }
-          try {
-            data = JSON.parse(line.substring(6))
-          } catch (e) {
-            console.warn('Failed to parse SSE data', e)
-            return
-          }
+          const data = parseChatStreamLine(rawLine)
+          if (!data) return
 
           if (data.type === 'metadata') {
             completedRequestId = data.request_id ?? completedRequestId
@@ -146,30 +130,30 @@ export const useChatStream = () => {
           } else if (data.type === 'suggestions') {
             handlers.onSuggestions?.(data.questions ?? [])
           } else if (data.type === 'grounding') {
-            handlers.onGrounding?.({
-              grounded: data.grounded ?? true,
-              groundingScore: typeof data.score === 'number' ? data.score : undefined,
-            })
+            const grounding = getGroundingFromEvent(data)
+            if (grounding.grounded !== undefined) {
+              completedGrounded = grounding.grounded
+              handlers.onGrounding?.({ ...grounding, grounded: grounding.grounded })
+            }
           } else if (data.type === 'completion') {
             receivedCompletion = true
             completedRequestId = data.request_id ?? completedRequestId
-            completedGrounded = typeof data.grounded === 'boolean'
-              ? data.grounded
-              : completedGrounded
+            const verification = getCompletionVerification(data)
+            const grounding = getGroundingFromEvent(data)
             handlers.onMetadata?.({
               sources: data.sources,
               requestId: data.request_id,
               isFallback: Boolean(data.fallback_reason),
               fallbackReason: data.fallback_reason,
+              ...verification,
             })
             handlers.onSuggestions?.(data.suggested_questions ?? [])
-            if (typeof data.grounded === 'boolean') {
-              handlers.onGrounding?.({
-                grounded: data.grounded,
-                groundingScore: typeof data.grounding_score === 'number'
-                  ? data.grounding_score
-                  : undefined,
-              })
+            if (verification.verificationStatus === 'failed') {
+              completedGrounded = false
+              handlers.onGrounding?.({ ...grounding, grounded: false })
+            } else if (grounding.grounded !== undefined) {
+              completedGrounded = grounding.grounded
+              handlers.onGrounding?.({ ...grounding, grounded: grounding.grounded })
             }
           } else if (data.type === 'done') {
             receivedDone = true
