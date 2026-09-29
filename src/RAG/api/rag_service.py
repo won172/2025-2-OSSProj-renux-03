@@ -8188,6 +8188,10 @@ def _notice_to_ingest_frame(notice: Notice) -> pd.DataFrame:
             "상세URL": notice.detail_url or "",
             "본문": notice.content or "",
             "첨부파일": notice.attachments or "[]",
+            # Same scope inputs as build_notice_index_frame_from_session, so
+            # department-only notices never enter Chroma as public metadata.
+            "department": clean_department(notice.department),
+            "visibility": notice.visibility,
             "db_id": notice.id,
         }
     ])
@@ -8278,14 +8282,34 @@ def _index_pending_item(session, item: PendingItem, target_collection: str) -> t
     chunks_df = build_notice_chunks(ingest_frame)
     if chunks_df.empty:
         raise HTTPException(status_code=400, detail="청크를 생성할 수 없습니다(본문이 비어 있음).")
+    # The live/DB frame reads these document fields from the stored Notice row;
+    # use the same values so the 기준일 header and deadline match a later refresh.
+    chunks_df["published_at"] = notice.published_date
+    chunks_df["apply_deadline"] = _extract_notice_apply_deadline(
+        notice.title,
+        notice.content,
+        notice.published_date,
+    )
 
     chunk_ids = chunks_df["chunk_id"].astype(str).tolist()
-    texts = chunks_df["chunk_text"].astype(str).tolist()
+    # Live ingest embeds retrieval_text with a certified input hash; store the
+    # same vector input here so later notice refreshes can reuse it.
+    from src.pipelines.ingest import (
+        EMBEDDING_INPUT_FIELD_COLUMN,
+        EMBEDDING_INPUT_HASH_COLUMN,
+        _embedding_input_hash,
+    )
+
+    enriched = enrich_retrieval_fields(chunks_df)
+    texts = enriched["retrieval_text"].fillna("").astype(str).tolist()
 
     # 3. 색인 부작용을 DB commit 전에 먼저 수행 (실패 시 롤백 가능) — K3
     embeddings = encode_texts(texts)
-    metadatas = chunks_df.drop(columns=["chunk_text"]).to_dict(orient="records")
+    metadatas = enriched.drop(columns=["chunk_text", "retrieval_text"], errors="ignore").to_dict(orient="records")
     metadatas = [{k: (v if v is not None else "") for k, v in m.items()} for m in metadatas]
+    for metadata, text in zip(metadatas, texts):
+        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(text)
+        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "retrieval_text"
     upsert_items(
         name=target_collection,
         ids=chunk_ids,
