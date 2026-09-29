@@ -41,6 +41,9 @@ from src.database import (
 from src.models.embedding import encode_texts
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
+    EMBEDDING_INPUT_FIELD_COLUMN,
+    EMBEDDING_INPUT_HASH_COLUMN,
+    _embedding_input_hash,
     _persist_replacing_collection,
     build_notice_chunks,
     build_notice_index_frame_from_db,
@@ -48,6 +51,7 @@ from src.pipelines.ingest import (
     update_collection_metadata_from_frame,
 )
 from src.services.ingest_runtime import serialized_ingest
+from src.services.retrieval_context import enrich_retrieval_fields
 from src.pipelines.canonical import canonical_hash, canonical_json, source_document_key
 from src.utils.notice_visibility import (
     DEPARTMENT_NOTICE_BOARDS,
@@ -621,13 +625,22 @@ def _upsert_notice_chunks(session, notice_rows: list[dict[str, Any]], source_doc
         chunk_df[["chunk_id", "chunk_text", "doc_id", "position", "notice_id"]].to_dict(orient="records"),
     )
 
-    metadatas = chunk_df.drop(columns=["chunk_text"]).to_dict(orient="records")
+    # Embed exactly what live ingest (_persist_chunks) embeds: retrieval_text,
+    # certified by the same input hash so a later full refresh can reuse it.
+    enriched = enrich_retrieval_fields(chunk_df)
+    texts = enriched["retrieval_text"].fillna("").astype(str).tolist()
+    metadatas = enriched.drop(
+        columns=["chunk_text", "retrieval_text"], errors="ignore"
+    ).to_dict(orient="records")
     metadatas = [{k: (v if v is not None else "") for k, v in item.items()} for item in metadatas]
-    embeddings = encode_texts(chunk_df["chunk_text"].tolist())
+    for metadata, text in zip(metadatas, texts):
+        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(text)
+        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "retrieval_text"
+    embeddings = encode_texts(texts)
     upsert_items(
         NOTICE_COLLECTION,
         ids=chunk_df["chunk_id"].astype(str).tolist(),
-        documents=chunk_df["chunk_text"].tolist(),
+        documents=texts,
         metadatas=metadatas,
         embeddings=embeddings,
     )
