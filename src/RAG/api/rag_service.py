@@ -8294,22 +8294,12 @@ def _index_pending_item(session, item: PendingItem, target_collection: str) -> t
     chunk_ids = chunks_df["chunk_id"].astype(str).tolist()
     # Live ingest embeds retrieval_text with a certified input hash; store the
     # same vector input here so later notice refreshes can reuse it.
-    from src.pipelines.ingest import (
-        EMBEDDING_INPUT_FIELD_COLUMN,
-        EMBEDDING_INPUT_HASH_COLUMN,
-        _embedding_input_hash,
-    )
+    from src.pipelines.ingest import chroma_embedding_payload
 
-    enriched = enrich_retrieval_fields(chunks_df)
-    texts = enriched["retrieval_text"].fillna("").astype(str).tolist()
+    texts, metadatas = chroma_embedding_payload(chunks_df)
 
     # 3. 색인 부작용을 DB commit 전에 먼저 수행 (실패 시 롤백 가능) — K3
     embeddings = encode_texts(texts)
-    metadatas = enriched.drop(columns=["chunk_text", "retrieval_text"], errors="ignore").to_dict(orient="records")
-    metadatas = [{k: (v if v is not None else "") for k, v in m.items()} for m in metadatas]
-    for metadata, text in zip(metadatas, texts):
-        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(text)
-        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "retrieval_text"
     upsert_items(
         name=target_collection,
         ids=chunk_ids,

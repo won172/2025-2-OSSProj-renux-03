@@ -41,12 +41,10 @@ from src.database import (
 from src.models.embedding import encode_texts
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
-    EMBEDDING_INPUT_FIELD_COLUMN,
-    EMBEDDING_INPUT_HASH_COLUMN,
-    _embedding_input_hash,
     _persist_replacing_collection,
     build_notice_chunks,
     build_notice_index_frame_from_db,
+    chroma_embedding_payload,
     persist_dataset_artifacts_only,
     update_collection_metadata_from_frame,
 )
@@ -627,15 +625,7 @@ def _upsert_notice_chunks(session, notice_rows: list[dict[str, Any]], source_doc
 
     # Embed exactly what live ingest (_persist_chunks) embeds: retrieval_text,
     # certified by the same input hash so a later full refresh can reuse it.
-    enriched = enrich_retrieval_fields(chunk_df)
-    texts = enriched["retrieval_text"].fillna("").astype(str).tolist()
-    metadatas = enriched.drop(
-        columns=["chunk_text", "retrieval_text"], errors="ignore"
-    ).to_dict(orient="records")
-    metadatas = [{k: (v if v is not None else "") for k, v in item.items()} for item in metadatas]
-    for metadata, text in zip(metadatas, texts):
-        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(text)
-        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "retrieval_text"
+    texts, metadatas = chroma_embedding_payload(chunk_df)
     embeddings = encode_texts(texts)
     upsert_items(
         NOTICE_COLLECTION,
