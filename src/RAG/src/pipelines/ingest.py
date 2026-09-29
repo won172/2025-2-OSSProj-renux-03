@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Literal, Tuple
 import json
 import argparse
 import inspect
@@ -159,6 +159,57 @@ def with_embedding_input(frame: pd.DataFrame) -> pd.DataFrame:
         ],
         errors="ignore",
     ))
+
+
+def chroma_embedding_payload(
+    frame: pd.DataFrame,
+    *,
+    preparation: Literal["enrich", "rebuild", "prepared"] = "enrich",
+    metadata_value: Callable[[Any], object] | None = None,
+) -> tuple[list[str], list[dict]]:
+    """Build the exact documents and certified metadata for a Chroma write.
+
+    Rebuilds refresh legacy retrieval fields and normalize non-scalar metadata;
+    live ingest passes its already enriched, revision-stamped frame instead.
+    """
+    if preparation == "enrich":
+        frame = enrich_retrieval_fields(frame)
+    elif preparation == "rebuild":
+        frame = with_embedding_input(frame)
+    elif preparation != "prepared":
+        raise ValueError(f"unknown embedding payload preparation: {preparation}")
+
+    passage = frame[EMBEDDING_INPUT_FIELD]
+    documents = (
+        passage.astype(str).tolist()
+        if preparation == "rebuild"
+        else passage.fillna("").astype(str).tolist()
+    )
+    metadata_frame = frame.drop(columns=["chunk_text", EMBEDDING_INPUT_FIELD], errors="ignore")
+    if preparation == "rebuild":
+        metadata_frame = metadata_frame.drop(
+            columns=[EMBEDDING_INPUT_HASH_COLUMN, EMBEDDING_INPUT_FIELD_COLUMN], errors="ignore"
+        )
+    if metadata_value is None:
+        metadatas = [
+            {key: (value if value is not None else "") for key, value in row.items()}
+            for row in metadata_frame.to_dict(orient="records")
+        ]
+    else:
+        metadatas = [
+            {str(key): metadata_value(value) for key, value in row.items()}
+            for row in metadata_frame.to_dict(orient="records")
+        ]
+    for document, metadata in zip(documents, metadatas):
+        if preparation == "rebuild":
+            metadata[EMBEDDING_INPUT_FIELD_COLUMN] = EMBEDDING_INPUT_FIELD
+            metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(
+                document, field=EMBEDDING_INPUT_FIELD
+            )
+        else:
+            metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(document)
+            metadata[EMBEDDING_INPUT_FIELD_COLUMN] = EMBEDDING_INPUT_FIELD
+    return documents, metadatas
 
 
 def _reusable_vectors(
@@ -342,21 +393,9 @@ def _persist_chunks_unlocked(key: str, collection: str, chunks_df: pd.DataFrame)
         columns=[EMBEDDING_INPUT_HASH_COLUMN, EMBEDDING_INPUT_FIELD_COLUMN], errors="ignore"
     ))
     chunks_df, corpus_revision = stamp_corpus_revision(key, chunks_df)
-    retrieval_text = chunks_df["retrieval_text"].fillna("").astype(str)
-
-    # 메타데이터 준비
-    metadatas = chunks_df.drop(
-        columns=["chunk_text", "retrieval_text"],
-        errors="ignore",
-    ).to_dict(orient="records")
-    metadatas = [{k: (v if v is not None else "") for k, v in m.items()} for m in metadatas]
-
+    texts, metadatas = chroma_embedding_payload(chunks_df, preparation="prepared")
     target_ids = chunks_df["chunk_id"].astype(str).tolist()
-    texts = retrieval_text.tolist()
-    hashes = [_embedding_input_hash(text) for text in texts]
-    for metadata, digest in zip(metadatas, hashes):
-        metadata[EMBEDDING_INPUT_HASH_COLUMN] = digest
-        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "retrieval_text"
+    hashes = [metadata[EMBEDDING_INPUT_HASH_COLUMN] for metadata in metadatas]
     context_dataset, run_id = current_ingestion_context(key)
     logging.info(
         "ingest_stage_started dataset=%s run_id=%s stage=embedding rows=%s",
@@ -407,7 +446,7 @@ def _persist_chunks_unlocked(key: str, collection: str, chunks_df: pd.DataFrame)
 
     vectorizer, matrix = _train_lexical_indices(
         key,
-        retrieval_text.tolist(),
+        texts,
         chunks_df["chunk_id"].astype(str).tolist(),
         corpus_revision=corpus_revision,
     )

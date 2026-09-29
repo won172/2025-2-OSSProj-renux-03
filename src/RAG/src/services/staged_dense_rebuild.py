@@ -30,10 +30,8 @@ from src import config
 from src.models.embedding import encode_queries, encode_texts
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
-    EMBEDDING_INPUT_FIELD_COLUMN,
     EMBEDDING_INPUT_FIELD,
-    EMBEDDING_INPUT_HASH_COLUMN,
-    _embedding_input_hash,
+    chroma_embedding_payload,
     with_embedding_input,
 )
 
@@ -555,24 +553,10 @@ def _metadata_value(value: Any) -> str | int | float | bool:
 def _batch_payload(frame: pd.DataFrame) -> tuple[list[str], list[str], list[dict[str, object]]]:
     # Embed exactly what live ingest embeds (retrieval_text), and certify the
     # reuse hash over that same text so live ingest can reuse these vectors.
-    frame = with_embedding_input(frame)
     ids = frame["chunk_id"].astype(str).tolist()
-    documents = frame[EMBEDDING_INPUT_FIELD].astype(str).tolist()
-    metadatas = [
-        {str(key): _metadata_value(value) for key, value in row.items()}
-        for row in frame.drop(
-            columns=[
-                "chunk_text",
-                EMBEDDING_INPUT_FIELD,
-                EMBEDDING_INPUT_HASH_COLUMN,
-                EMBEDDING_INPUT_FIELD_COLUMN,
-            ],
-            errors="ignore",
-        ).to_dict(orient="records")
-    ]
-    for document, metadata in zip(documents, metadatas):
-        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = EMBEDDING_INPUT_FIELD
-        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(document, field=EMBEDDING_INPUT_FIELD)
+    documents, metadatas = chroma_embedding_payload(
+        frame, preparation="rebuild", metadata_value=_metadata_value
+    )
     return ids, documents, metadatas
 
 
