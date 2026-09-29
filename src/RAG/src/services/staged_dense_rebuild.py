@@ -31,8 +31,10 @@ from src.models.embedding import encode_queries, encode_texts
 from src.pipelines.ingest import (
     DATASET_ARTIFACTS,
     EMBEDDING_INPUT_FIELD_COLUMN,
+    EMBEDDING_INPUT_FIELD,
     EMBEDDING_INPUT_HASH_COLUMN,
     _embedding_input_hash,
+    with_embedding_input,
 )
 
 
@@ -400,6 +402,10 @@ def load_dataset_snapshot(
     blanks = frame.loc[frame["chunk_text"].str.strip() == "", "chunk_id"].tolist()
     if blanks:
         raise StagedDenseBuildError(f"{dataset} artifact has blank text: {blanks[:20]}")
+    frame = with_embedding_input(frame)
+    blank_inputs = frame.loc[frame[EMBEDDING_INPUT_FIELD].str.strip() == "", "chunk_id"].tolist()
+    if blank_inputs:
+        raise StagedDenseBuildError(f"{dataset} artifact has blank embedding input: {blank_inputs[:20]}")
     ids = frame["chunk_id"].tolist()
     return DatasetSnapshot(
         dataset=dataset,
@@ -408,9 +414,13 @@ def load_dataset_snapshot(
         frame=frame,
         artifact_sha256=artifact_sha256,
         expected_ids_sha256=_hash_values(sorted(ids)),
+        # Covers the embedded text too, so an enrichment change between pause
+        # and resume (or build and verify) is refused.
         expected_rows_sha256=_hash_values(
-            f"{chunk_id}\0{text}"
-            for chunk_id, text in zip(ids, frame["chunk_text"].tolist())
+            f"{chunk_id}\0{text}\0{embedding_input}"
+            for chunk_id, text, embedding_input in zip(
+                ids, frame["chunk_text"].tolist(), frame[EMBEDDING_INPUT_FIELD].tolist()
+            )
         ),
     )
 
@@ -423,6 +433,10 @@ def _embedding_configuration() -> dict[str, Any]:
         "passage_prefix": config.EMBED_PASSAGE_PREFIX,
         "query_prefix": config.EMBED_QUERY_PREFIX,
         "normalize": True,
+        # Checkpoints/build IDs from the former chunk_text representation must
+        # not be resumed into or verified as a retrieval_text build
+        # (_validate_resume, also called by verify_staged_dataset, refuses them).
+        "input_field": EMBEDDING_INPUT_FIELD,
     }
 
 
@@ -539,18 +553,26 @@ def _metadata_value(value: Any) -> str | int | float | bool:
 
 
 def _batch_payload(frame: pd.DataFrame) -> tuple[list[str], list[str], list[dict[str, object]]]:
+    # Embed exactly what live ingest embeds (retrieval_text), and certify the
+    # reuse hash over that same text so live ingest can reuse these vectors.
+    frame = with_embedding_input(frame)
     ids = frame["chunk_id"].astype(str).tolist()
-    documents = frame["chunk_text"].astype(str).tolist()
+    documents = frame[EMBEDDING_INPUT_FIELD].astype(str).tolist()
     metadatas = [
         {str(key): _metadata_value(value) for key, value in row.items()}
         for row in frame.drop(
-            columns=["chunk_text", EMBEDDING_INPUT_HASH_COLUMN, EMBEDDING_INPUT_FIELD_COLUMN],
+            columns=[
+                "chunk_text",
+                EMBEDDING_INPUT_FIELD,
+                EMBEDDING_INPUT_HASH_COLUMN,
+                EMBEDDING_INPUT_FIELD_COLUMN,
+            ],
             errors="ignore",
         ).to_dict(orient="records")
     ]
     for document, metadata in zip(documents, metadatas):
-        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = "chunk_text"
-        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(document, field="chunk_text")
+        metadata[EMBEDDING_INPUT_FIELD_COLUMN] = EMBEDDING_INPUT_FIELD
+        metadata[EMBEDDING_INPUT_HASH_COLUMN] = _embedding_input_hash(document, field=EMBEDDING_INPUT_FIELD)
     return ids, documents, metadatas
 
 

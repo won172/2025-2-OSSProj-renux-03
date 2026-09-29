@@ -294,7 +294,9 @@ def test_all_records_dataset_failure_and_continues_other_datasets(tmp_path: Path
 
     def fail_staff(texts):
         values = list(texts)
-        if values and values[0].startswith("staff "):
+        # Staged builds embed retrieval_text (context header + body), so match
+        # the staff body rather than the text prefix.
+        if values and "staff 테스트 본문" in values[0]:
             raise RuntimeError("synthetic staff failure")
         return _encode(values)
 
