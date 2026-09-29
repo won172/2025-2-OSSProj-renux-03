@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-09-28
+Last Updated: 2026-09-29
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -38,7 +38,7 @@ Last Updated: 2026-09-28
 | RAG Server | Active Development | 질문별 검색 경로 개선 중. 스트리밍·일반 응답의 검색 계획 공통화 완료 |
 | Crawler | Manual Catch-up Verified / Scheduler Off | 9월 28일 수동 소급 수집 확인. 교직원 승인 대기·교과과정 한 원천 부분 실패 |
 | SourceDocument | Active / Strict Lineage Passed | 운영 사본 및 운영 RAG에서 6개 데이터셋 정본·Parquet·Chroma 검사 통과 |
-| Dense Retrieval | Active / Notices Verified | 공지 14,852개 청크를 포함한 Chroma lineage 통과. 질의 품질 전체 평가는 별도 필요 |
+| Dense Retrieval | Active / Notices Verified / Reindex Pending | 공지 14,852개 청크를 포함한 Chroma lineage 통과. 모든 재구축 경로가 live와 같은 `retrieval_text`를 임베딩하도록 통일 중(#50 merge, #51 Review). 데이터 변경으로 재색인할 때 반영됨(재색인은 MPS 사용). 질의 품질 전체 평가는 별도 필요 |
 | Lexical Retrieval | Active | FTS5/BM25. SQL로 좁힌 규정 문서 내부 청크 재정렬에도 사용 |
 | Reranking | Rule-based Active / Model Disabled | 최신성·필터·후보 융합 적용. Cross-encoder는 `RERANKER_ENABLED=0`이 기본값 |
 | Ontology Retrieval | Scoped SQL Active / Broad Expansion Experimental | `RAG_STRUCTURED_RETRIEVAL_ENABLED=1`. 명시적 연락처·과목·학번 질문만 관계 근거 우선 조회. Shadow·광범위한 후보 보강은 기본 OFF |
@@ -91,9 +91,8 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| 단순 질문 LLM 호출 축소 (audit 03/04 P1) | P1 | RAG/Backend | `perf/simple-query-llm-bypass` | `simple-query-llm-bypass` | In Progress | QA codex2 2회 CHANGES REQUESTED(시점 표현 우회, 다중 대상 우회, 정규화 점수 기반 단일 문서 우회) → 안전한 규칙만 남기는 3차 진행 | 단일 고신뢰 문서·식별자 기반 우회는 사람 판정 qrels 이후로 보류 | QA 통과 후 PR |
-| 변경 청크만 재임베딩 (audit 09 P2, 01 성능) | P2 | RAG/Backend | `perf/incremental-reembed` | `incremental-reembed` | In Progress | codex 구현 중 | #17·#26·#27·#29 재색인 비용 절감 목적 | QA 통과 후 PR |
-| 공지 Chroma 복구·수집 revision 수정 (P0) | P0 | RAG/Backend | `chore/ingestion-catchup-publish` | `ingestion-catchup-publish` | Review | 운영 strict lineage 통과, 빈 DB RAG 1,422 passed/1 skipped | 운영 데이터 복구 완료. 자동 갱신 코드는 미배포, 스케줄러 OFF | PR #45 검토 후 배포 승인 |
+| 공지 증분 동기화·관리자 upsert 임베딩 입력 통일 | P1 | RAG/Backend | `fix/notice-live-embed-retrieval-text` | `~/dongttok-work/notice-live-embed-retrieval-text`(임시, 아래 Git State) | Review | 로컬 RAG 1,453 passed/1 skipped(main 711744e 병합 후), QA 재리뷰 APPROVE, PR CI 대기 | 관리자 승인 학과 한정 공지가 Chroma에 public으로 들어가던 공개범위 결함 수정. 실제 데이터 검색 영향 미확인 | PR #51 human 검토·merge |
+| 운영 공지 자동 갱신 재개 (P0) | P0 | Orchestrator | - | - | Blocked | revision 수정 코드 merge(PR #45) | 운영 이미지 미배포, `RAG_SCHEDULER_ENABLED=0` | human 배포·스케줄러 재개 승인 |
 | 실제 후보 골든 평가 190문항 (P0) | P0 | QA | - | - | Blocked | release gate는 fail-closed로 전환(PR #14) | 후보 endpoint·모델 비용 승인 필요 | human이 endpoint 제공 |
 | Orchestrator·Codex 실행 설정 후보 적용 | P1 | Orchestrator | `chore/agent-orchestration` | `agent-orchestration` | Blocked | runner 단위 테스트 22/22(2026-09-27 재실행) | staged 상태. 에이전트 권한 설정 commit이 auto mode에서 차단됨. base `cffe3e3`로 오래됨 | human이 commit·PR 여부 결정 |
 
@@ -105,7 +104,7 @@ Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 2026-09-28 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
 
 - Remote: `origin` = `github.com/won172/2025-2-OSSProj-renux-03` (fork, upstream `CSID-DGU/2025-2-OSSProj-renux-03`).
-- `origin/main` = `b82473a` (2026-09-28 18:23 KST 확인, PR #44까지 merge). branch protection 없음(human 설정 필요).
+- `origin/main` = `711744e` (2026-09-29 KST 확인, PR #50까지 merge, main CI 4개 job success). branch protection 없음(human 설정 필요).
 - 새 task의 base branch는 `origin/main`이다. PR #13 이후 task PR은 STATUS.md를 수정하지 않는다.
 - merge된 task의 worktree·local branch는 정리했다. remote branch(`chore/golden-release-gate`,
   `fix/grounding-verification-status`, `chore/build-lineage-gate`, `fix/chunk-representation`,
@@ -115,6 +114,10 @@ Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
   `docs/*-20260927`)는 정리하지 않고 유지한다.
 - 구현은 Codex 우선(`codex` Pro Lite 구현, `codex2` Plus 읽기 전용 QA, PR #20). 계약·보고는 git 밖
   `../dongttok-worktrees/.codex-runs/`에 둔다.
+- 2026-09-29 로컬 개발 환경 제약: Desktop 폴더(primary checkout·`dongttok-worktrees/`)에 대한 macOS
+  파일 접근 권한이 agent 프로세스에 적용되지 않아, 임시로 `~/dongttok-work/`의 별도 clone에서 worktree를
+  만든다. 같은 이유로 Codex 명령 도구가 타임아웃되어 PR #50·#51은 Claude subagent가 구현·QA를 대체했다.
+  Desktop 쪽 merge 완료 worktree 정리는 권한 복구 후 수행한다.
 
 ## In Progress
 
@@ -161,11 +164,12 @@ Impact: High / P0
 
 9월 28일 MPS 재색인과 포인터 복구 후 운영 공지 Chroma의 strict lineage가 통과했다.
 소급 수집 사본에서 증분 경로가 새 Parquet revision을 Chroma 메타데이터에
-전달하지 않는 결함을 발견했고, 수정 후 동일 수집을 다시 실행해 통과했다.
-운영 데이터는 복구됐지만 수정 코드는 아직 운영 이미지에 배포되지 않았다.
+전달하지 않는 결함을 발견했고, 수정 코드는 PR #45로 `main`에 merge됐다(9월 28일).
+운영 이미지에는 아직 배포되지 않았고 스케줄러는 OFF다.
 
 Next Action:
-PR #45를 검토·병합하고 배포 승인 후 스케줄러 재개를 검토한다.
+배포 승인 후 스케줄러 재개를 검토한다. 재개 전 PR #51(공지 증분 경로 임베딩 입력·공개범위)도
+함께 반영하는 것을 권장한다.
 
 ### ISSUE-003 — 실제 후보 릴리스 검증 증거 미확보
 
@@ -183,11 +187,12 @@ Next Action:
 
 Impact: Medium
 
-스트리밍·일반 응답의 검색 계획은 공통화했지만 근거 선택·생성·fallback은 중복이 남아 있다.
-로컬 후보 검색의 p50 개선을 전체 endpoint 또는 동시 요청의 p95 개선으로 볼 수 없다.
+검색 계획(#30)과 실행 코어(#37 `execute_query`)는 공통화했다. 데이터셋 검색은 제한 동시성(#49,
+`RAG_RETRIEVAL_CONCURRENCY` 기본 2)으로 실행하며, 합성 mock 벤치마크 p50/p95는 동시성 1에서
+164.70/171.35ms, 2에서 89.05/99.94ms였다(9월 28일 로컬). 실제 endpoint·동시 요청의 p95는 미확인이다.
 
 Next Action:
-응답 계약을 유지하며 실행 코어를 단계적으로 통합하고 실제 endpoint·동시 요청을 측정한다.
+후보 환경에서 `scripts/report_stage_latency.py`로 단계별 p50/p95/p99를 측정한다.
 
 ## Recently Completed
 
@@ -232,6 +237,14 @@ Next Action:
 - 9월 28일 스트리밍 렌더링 프레임 단위 묶음·상태 전환만 스크린리더 안내 (PR #39).
 - 9월 28일 `retrieval_mode`/`degraded_datasets` 응답·query log 노출, `/ready` heartbeat·복구 힌트 (PR #40).
 - 9월 28일 검색 제한 상태 메인 서버 저장·프런트 표시 (PR #42, **DB migration 포함**).
+- 9월 28일 SQL이 근거 문서를 확정한 경우 근거 선택 LLM 우회, 우회 사유 stage metadata 기록 (PR #44).
+  질의 분석 우회 판단은 기존과 동일(190문항 53→53). 실제 selector 호출률은 미측정.
+- 9월 28일 소급 수집 보조 도구와 공지 증분 revision 수정 (PR #45, 운영 미배포). 수집 기록 (PR #46).
+- 9월 28일 main CI 불안정 테스트 수정: hybrid float 비교, relay timeout, proxy 누수, 프런트 fake clock (PR #47).
+- 9월 28일 재색인 시 변경되지 않은 청크 벡터 재사용(임베딩 입력·모델 해시, Chroma 메타데이터) (PR #48).
+  실제 artifact 재색인 시간 절감은 미측정.
+- 9월 28일 데이터셋 검색 제한 동시성·단계별 지연 백분위 보고 스크립트 (PR #49).
+- 9월 29일 staged·공지 재구축이 live와 같은 `retrieval_text`를 임베딩 (PR #50, 재색인 후 반영).
 
 ## Agent Tasks
 
@@ -241,12 +254,13 @@ Next Action:
 ### RAG Agent
 
 Current:
-- 검색 전략·평가 도구 구현 완료 부분을 정리하고 회귀 검증 근거를 확보 중.
-- 공지 lineage 복구 및 소급 수집 완료. 자동 갱신 수정 PR 검토 대기.
+- 공지 증분 동기화·관리자 upsert 임베딩 입력 통일 PR #51 검토 대기.
 
 Next:
 - 공지 수정 코드 배포 후 자동 갱신과 strict gate 재검증.
-- 같은 revision의 baseline/candidate 평가와 남은 실행 코어 공통화.
+- 데이터가 바뀌어 재색인할 때(MPS 사용) #17·#26·#27·#29·#50·#51이 함께 반영되므로, 그때 전후 retrieval을 비교한다.
+  코드 변경만을 위한 재색인은 하지 않는다(human 결정, 9월 29일).
+- 재구축 경로의 "enrich → 텍스트 제거 → 해시" 중복 블록 공통 helper화(선택).
 
 ### Client Agent
 
@@ -269,7 +283,10 @@ Next:
 
 - 실로그 변경 후보의 relevance·관계 정확성 사람 판정 및 검토 담당자 확정.
 - 실제 평가에 사용할 후보 endpoint/검증 환경과 모델 호출 비용 승인.
-- 공지 revision 수정 코드 배포와 자동 스케줄러 재개 여부 승인.
+- 공지 revision 수정 코드(PR #45, merge됨) 배포와 자동 스케줄러 재개 여부 승인.
+- 재색인 방침(9월 29일 human 결정): 데이터가 바뀌지 않으면 재색인하지 않고, 할 때는 MPS로 한다.
+  청크 표현·임베딩 입력 변경(#17·#26·#27·#29·#50·#51)은 다음 데이터 변경 재색인 때 반영된다.
+  전후 비교용 읽기 전용 데이터 사본은 human이 제공한다(개인정보 포함 DB라 agent가 임의로 복사하지 않음).
 - 운영 DB migration 적용 승인(백업 선행): #31(verification_status), #32(scheduler lease 테이블), #36(heartbeat 테이블), #42(retrieval_mode).
 - 모든 replica 중단 감지용 외부 cron(`report_telemetry_heartbeat.py --alert`) 구성.
 - GitHub `main` branch protection(직접 push·force push 차단, PR·CI 필수) 적용 여부.
