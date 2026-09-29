@@ -796,6 +796,13 @@ internal static class RagRelayTimeoutTests
                 _content = new ObservableContent(_body);
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = _content };
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The token's Register callback can still be pending when the
+                // cancelled delay resumes here, so record it before signalling.
+                Interlocked.Exchange(ref _cancelled, 1);
+                throw;
+            }
             finally
             {
                 _requestCompleted.TrySetResult();
