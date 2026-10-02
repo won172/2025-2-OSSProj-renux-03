@@ -3771,7 +3771,12 @@
 
 @media (max-width: 640px) {
     .policy-page {
-        padding: calc(24px + env(safe-area-inset-top, 0px)) 16px calc(48px + env(safe-area-inset-bottom, 0px));
+        position: fixed;
+        inset: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
+        padding: 24px 16px 48px;
     }
 
     .policy-page__header {
