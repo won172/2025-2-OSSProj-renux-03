@@ -2115,6 +2115,7 @@ def _load_schedule_rows_for_direct_answer() -> list[ScheduleRow]:
                 row_id=row.get("db_id"),
                 department=str(row.get("department", "") or "").strip(),
                 url=str(row.get("source_url", "") or "").strip() or None,
+                campus_scope=str(row.get("campus_scope", "") or "").strip().lower(),
             ))
         return result
     except Exception:
