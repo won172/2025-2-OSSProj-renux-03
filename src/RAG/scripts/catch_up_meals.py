@@ -26,6 +26,7 @@ from src.database import DATABASE_FILE, IngestionRun, SessionLocal, kst_now
 from src.pipelines.ingest import ingest_meals, load_meals_from_db
 
 MEAL_COLUMNS = ("date", "weekday", "restaurant", "menu_text", "is_closed")
+MEAL_SOURCE_COLUMNS = ("source_url", "source_type")
 
 
 def _start_run() -> int:
@@ -90,11 +91,11 @@ def last_success_date() -> date:
 
 def _meal_rows(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
-        return pd.DataFrame(columns=MEAL_COLUMNS)
+        return pd.DataFrame(columns=(*MEAL_COLUMNS, *MEAL_SOURCE_COLUMNS))
     missing = set(MEAL_COLUMNS) - set(frame.columns)
     if missing:
         raise ValueError(f"Meal frame missing columns: {', '.join(sorted(missing))}")
-    return frame.loc[:, list(MEAL_COLUMNS)].fillna("").astype(str).reset_index(drop=True)
+    return frame.reindex(columns=[*MEAL_COLUMNS, *MEAL_SOURCE_COLUMNS], fill_value="").fillna("").astype(str).reset_index(drop=True)
 
 
 def validate_crawl(frame: pd.DataFrame, since: date, today: date, *, coop_only: bool) -> dict:
