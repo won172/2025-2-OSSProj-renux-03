@@ -13,6 +13,7 @@ import logging
 import os
 import sqlite3
 import tempfile
+from urllib.parse import urlsplit
 
 import numpy as np
 import pandas as pd
@@ -683,7 +684,9 @@ def _store_source_documents(
     return len(seen)
 
 
-def _canonical_source_payloads(session: Session, dataset: str) -> list[dict]:
+def _canonical_source_payloads(
+    session: Session, dataset: str, *, include_source_url: bool = False,
+) -> list[dict]:
     """Read active canonical source payloads; never reads a CSV artifact."""
     documents = (
         session.query(SourceDocument)
@@ -702,6 +705,13 @@ def _canonical_source_payloads(session: Session, dataset: str) -> list[dict]:
             continue
         if isinstance(payload, dict):
             payload.setdefault("document_key", document.document_key)
+            if include_source_url and dataset == "schedule":
+                source_url = (
+                    _verified_schedule_source_url(document.source_url)
+                    if document.source_type == "academic_schedule" else ""
+                )
+                payload["source_type"] = "official_academic_schedule" if source_url else "academic_schedule"
+                payload["source_url"] = source_url
             payloads.append(payload)
     return payloads
 
@@ -764,6 +774,13 @@ def reconcile_rule_source_statuses(session: Session) -> int:
     return changed
 
 
+def _verified_schedule_source_url(value: object) -> str:
+    from src.crawlers.dongguk_schedule import SCHEDULE_URL
+
+    url = str(value or "").strip()
+    return url if url == SCHEDULE_URL else ""
+
+
 def _store_schedule_source_documents(session: Session, frame: pd.DataFrame) -> int:
     seen: dict[str, int] = {}
     records = []
@@ -789,9 +806,14 @@ def _store_schedule_source_documents(session: Session, frame: pd.DataFrame) -> i
             ) if part
         )
         source_id = _unique_source_id(base, payload, seen)
+        source_url = (
+            _verified_schedule_source_url(row.get("source_url"))
+            if row.get("source_type") == "official_academic_schedule" else ""
+        )
         records.append({
             "source_id": source_id,
             "source_type": "academic_schedule",
+            "source_url": source_url,
             "title": payload["title"],
             "category": payload["category"] or "schedule",
             "published_at": payload["start_date"],
@@ -940,11 +962,13 @@ def _backfill_static_source_documents(session: Session, dataset: str) -> int:
     raise ValueError(f"Unsupported static canonical dataset: {dataset}")
 
 
-def load_canonical_source_frame(session: Session, dataset: str) -> pd.DataFrame:
+def load_canonical_source_frame(
+    session: Session, dataset: str, *, include_source_url: bool = False,
+) -> pd.DataFrame:
     """Return a dataset frame sourced only from active SourceDocument payloads."""
     if not session.query(SourceDocument.id).filter(SourceDocument.dataset == dataset).first():
         _backfill_static_source_documents(session, dataset)
-    payloads = _canonical_source_payloads(session, dataset)
+    payloads = _canonical_source_payloads(session, dataset, include_source_url=include_source_url)
     return pd.DataFrame(payloads).fillna("") if payloads else pd.DataFrame()
 
 
@@ -1768,7 +1792,7 @@ def build_schedule_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 "department": department,
                 "topics": category or "schedule",
                 "source": "schedule",
-                "url": "",
+                "url": _verified_schedule_source_url(row.get("source_url")),
                 "published_at": start_date,
                 "schedule_id": schedule_id,
             }
@@ -1877,7 +1901,7 @@ def ingest_schedule(
         # 정본으로부터 파생 청크를 만든다.  수집 프레임을 바로 투영하면
         # 학년도가 다른 동일 일정의 fallback make_doc_id가 충돌하고,
         # 파생 doc_id와 canonical lineage도 서로 달라진다.
-        canonical_frame = load_canonical_source_frame(session, "schedule")
+        canonical_frame = load_canonical_source_frame(session, "schedule", include_source_url=True)
         chunks_df = build_schedule_chunks(canonical_frame)
     finally:
         session.close()
@@ -2529,7 +2553,9 @@ def build_meal_chunks(df: pd.DataFrame) -> pd.DataFrame:
                 "schedule_start": meal_date,
                 "schedule_end": meal_date,
                 "published_at": meal_date,
-                "url": "https://dgucoop.dongguk.edu/store/store.php?w=4",
+                "url": _verified_meal_source_url(
+                    meal_date, restaurant, row.get("source_type"), row.get("source_url"),
+                ),
             }
         )
 
@@ -2541,6 +2567,37 @@ def build_meal_chunks(df: pd.DataFrame) -> pd.DataFrame:
 
 def _meal_document_key(row: pd.Series) -> str:
     return f"meals:{str(row.get('date', '')).strip()}:{str(row.get('restaurant', '')).strip()}"
+
+
+def _verified_meal_source_url(
+    meal_date: object, restaurant: object, source_type: object, value: object,
+) -> str:
+    """Only expose a row's fetched official page, never a cross-restaurant fallback."""
+    url = str(value or "").strip()
+    if not url:
+        return ""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return ""
+    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.fragment:
+        return ""
+    is_dflex = str(restaurant or "").strip() == "경영관 D-Flex식당"
+    if is_dflex:
+        return url if (
+            source_type == "official_dflex_pdf_meal"
+            and parsed.netloc == "www.dongguk.edu"
+            and parsed.path == "/cmmn/fileDown.do"
+        ) else ""
+    if source_type != "official_coop_meal" or parsed.hostname != "dgucoop.dongguk.edu":
+        return ""
+    try:
+        target = date.fromisoformat(str(meal_date))
+    except ValueError:
+        return ""
+    from src.crawlers.dongguk_meals import _meal_page_url
+
+    return url if url == _meal_page_url(target) else ""
 
 
 def store_meals_in_db(df: pd.DataFrame) -> int:
@@ -2558,6 +2615,11 @@ def store_meals_in_db(df: pd.DataFrame) -> int:
         seen: set[str] = set()
         for _, raw_row in df.fillna("").astype(str).iterrows():
             row = raw_row.to_dict()
+            source_type = row.pop("source_type", "")
+            source_url = _verified_meal_source_url(
+                row.get("date"), row.get("restaurant"), source_type,
+                row.pop("source_url", ""),
+            )
             source_id = f"{row.get('date', '').strip()}:{row.get('restaurant', '').strip()}"
             if not source_id.strip(":"):
                 continue
@@ -2573,7 +2635,7 @@ def store_meals_in_db(df: pd.DataFrame) -> int:
             if document is None:
                 document = SourceDocument(
                     dataset="meals",
-                    source_type="html_meal",
+                    source_type=source_type if source_url else "html_meal",
                     source_id=source_id,
                     document_key=document_key,
                 )
@@ -2584,7 +2646,8 @@ def store_meals_in_db(df: pd.DataFrame) -> int:
                     source_id,
                     document.document_key,
                 )
-            document.source_url = "https://dgucoop.dongguk.edu/store/store.php?w=4"
+            document.source_type = source_type if source_url else "html_meal"
+            document.source_url = source_url
             document.title = f"{row.get('date', '').strip()} {row.get('restaurant', '').strip()} 학식"
             document.category = "meals"
             document.published_at = row.get("date", "").strip()
@@ -2608,7 +2671,7 @@ def store_meals_in_db(df: pd.DataFrame) -> int:
         session.close()
 
 
-def load_meals_from_db() -> pd.DataFrame:
+def load_meals_from_db(*, include_source_url: bool = True) -> pd.DataFrame:
     session = SessionLocal()
     try:
         rows: list[dict] = []
@@ -2625,6 +2688,12 @@ def load_meals_from_db() -> pd.DataFrame:
                 continue
             if isinstance(payload, dict):
                 payload.setdefault("document_key", document.document_key)
+                if include_source_url:
+                    payload["source_type"] = document.source_type or ""
+                    payload["source_url"] = _verified_meal_source_url(
+                        payload.get("date"), payload.get("restaurant"),
+                        document.source_type, document.source_url,
+                    )
                 rows.append(payload)
         return pd.DataFrame(rows).fillna("").astype(str) if rows else pd.DataFrame()
     finally:
@@ -2728,7 +2797,7 @@ def reindex_from_db(target: str | None = None) -> Dict[str, Tuple[pd.DataFrame, 
         # 3. Schedule
         if not target or target == "schedule":
             print("🔄 Re-indexing schedule from DB...")
-            schedule_frame = load_canonical_source_frame(session, "schedule")
+            schedule_frame = load_canonical_source_frame(session, "schedule", include_source_url=True)
             if not schedule_frame.empty:
                 df = _canonicalize_campus_scope_frame(
                     build_schedule_chunks(schedule_frame)

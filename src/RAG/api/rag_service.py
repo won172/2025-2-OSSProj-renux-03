@@ -2100,7 +2100,7 @@ def _load_schedule_rows_for_direct_answer() -> list[ScheduleRow]:
     """학사일정 정본을 구조화 시점 조회가 쓰는 형태로 읽는다."""
     session = SessionLocal()
     try:
-        frame = load_canonical_source_frame(session, "schedule")
+        frame = load_canonical_source_frame(session, "schedule", include_source_url=True)
         result: list[ScheduleRow] = []
         for row in frame.to_dict(orient="records"):
             start = parse_flexible_date(row.get("start_date"))
@@ -2114,6 +2114,7 @@ def _load_schedule_rows_for_direct_answer() -> list[ScheduleRow]:
                 category=str(row.get("category", "") or "").strip(),
                 row_id=row.get("db_id"),
                 department=str(row.get("department", "") or "").strip(),
+                url=str(row.get("source_url", "") or "").strip() or None,
             ))
         return result
     except Exception:
@@ -2145,6 +2146,7 @@ def _load_meal_rows_for_direct_answer() -> list[MealRow]:
             restaurant=str(row.get("restaurant", "")).strip() or "학생식당",
             menu_text=menu_text,
             is_closed=is_closed_row(row.get("is_closed", ""), menu_text),
+            source_url=str(row.get("source_url", "") or "").strip() or None,
         ))
     return rows
 

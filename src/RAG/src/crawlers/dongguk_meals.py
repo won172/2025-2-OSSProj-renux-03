@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
 from typing import Iterable, List, Optional
+from urllib.parse import urlencode
 
 import pandas as pd
 import requests
@@ -111,10 +112,7 @@ def fetch_day_html(
     retries: int = DEFAULT_REQUEST_RETRIES,
 ) -> str:
     """특정 날짜의 식단표 페이지 HTML을 가져옵니다."""
-    # 사이트가 KST 기준 자정 타임스탬프로 날짜를 식별하므로 KST 자정으로 계산한다.
-    midnight_kst = datetime(target.year, target.month, target.day, tzinfo=KST)
-    sday = int(midnight_kst.timestamp())
-    params = {**MEALS_QUERY_BASE, "sday": sday, "sdate": target.weekday()}
+    params = _meal_page_params(target)
     response = _get_with_retry(
         MEALS_URL,
         params=params,
@@ -123,6 +121,17 @@ def fetch_day_html(
     )
     response.encoding = response.apparent_encoding
     return response.text
+
+
+def _meal_page_params(target: date) -> dict[str, int]:
+    # 사이트가 KST 기준 자정 타임스탬프로 날짜를 식별한다.
+    midnight_kst = datetime(target.year, target.month, target.day, tzinfo=KST)
+    sday = int(midnight_kst.timestamp())
+    return {**MEALS_QUERY_BASE, "sday": sday, "sdate": target.weekday()}
+
+
+def _meal_page_url(target: date) -> str:
+    return f"{MEALS_URL}?{urlencode(_meal_page_params(target))}"
 
 
 def _find_menu_table(soup: BeautifulSoup):
@@ -400,7 +409,10 @@ def crawl_dflex_meals(
                 timeout=request_timeout,
                 retries=request_retries,
             )
-            records.extend(parse_dflex_pdf(resp.content, ref_date))
+            for row in parse_dflex_pdf(resp.content, ref_date):
+                row["source_url"] = pdf_atts[0]["url"]
+                row["source_type"] = "official_dflex_pdf_meal"
+                records.append(row)
         except Exception as exc:  # noqa: BLE001
             print(f"⚠️ D-Flex PDF 다운로드/파싱 실패 (article_id={article_id}): {exc}")
         if delay:
@@ -509,6 +521,8 @@ def crawl_dflex_meals_range(
                 except (KeyError, TypeError, ValueError) as exc:
                     raise ValueError("D-Flex PDF has an invalid meal date") from exc
                 if since <= row_date <= through:
+                    row["source_url"] = pdf_atts[0]["url"]
+                    row["source_type"] = "official_dflex_pdf_meal"
                     records.append(row)
                     covered.add(row_date.isoformat())
             if weekdays <= covered:
@@ -565,6 +579,9 @@ def crawl_meals(
             )
             fetched += 1
             day_records = parse_day_menus(html, cur)
+            for row in day_records:
+                row["source_url"] = _meal_page_url(cur)
+                row["source_type"] = "official_coop_meal"
             if day_records:
                 parsed_days_with_rows += 1
             else:
@@ -602,7 +619,7 @@ def crawl_meals(
         except Exception as exc:  # noqa: BLE001 — D-Flex 실패가 전체 수집을 막지 않도록
             print(f"⚠️ D-Flex 식단 병합 실패: {exc}")
 
-    columns = ["date", "weekday", "restaurant", "menu_text", "is_closed"]
+    columns = ["date", "weekday", "restaurant", "menu_text", "is_closed", "source_url", "source_type"]
     requested_days = (end - start).days + 1
     diagnostics = {
         "requested_days": requested_days,
@@ -617,7 +634,7 @@ def crawl_meals(
         empty = pd.DataFrame(columns=columns)
         empty.attrs["crawl_diagnostics"] = diagnostics
         return empty
-    df = pd.DataFrame(records)[columns]
+    df = pd.DataFrame(records).reindex(columns=columns, fill_value="")
     # (날짜, 식당) 중복 제거 후 정렬.
     df.drop_duplicates(subset=["date", "restaurant"], keep="first", inplace=True)
     df.sort_values(by=["date", "restaurant"], inplace=True)

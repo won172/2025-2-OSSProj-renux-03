@@ -845,11 +845,13 @@ def refresh_schedule_job() -> None:
             )
             return
         output = frame[["학년도", "구분", "내용", "주관부서", "start", "end"]].copy()
+        output["source_url"] = SCHEDULE_URL
+        output["source_type"] = "official_academic_schedule"
         # Past academic years are merged from canonical SourceDocument payloads.
         # The legacy schedule CSV is not consulted during a scheduled refresh.
         session = SessionLocal()
         try:
-            canonical = load_canonical_source_frame(session, "schedule")
+            canonical = load_canonical_source_frame(session, "schedule", include_source_url=True)
         finally:
             session.close()
         if not canonical.empty and "academic_year" in canonical.columns:
@@ -860,6 +862,8 @@ def refresh_schedule_job() -> None:
                 "주관부서": canonical.get("department", ""),
                 "start": canonical.get("start_date", ""),
                 "end": canonical.get("end_date", ""),
+                "source_url": canonical.get("source_url", ""),
+                "source_type": canonical.get("source_type", ""),
             }).fillna("").astype(str)
             output = _merge_schedule_snapshots(existing, output)
         with ingestion_run_context("schedule", run_id):
