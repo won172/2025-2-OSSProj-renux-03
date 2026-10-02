@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Iterable
 
+from src.services.campus_scope import CampusScope, campus_scope_for_row, classify_campus_scope
 from src.utils.audience import compact_text, derive_audience, query_audience
 
 
@@ -434,6 +435,7 @@ class ScheduleRow:
     row_id: str | int | None = None
     department: str = ""
     url: str | None = None
+    campus_scope: str = ""
 
 
 def _compact(value: str) -> str:
@@ -442,6 +444,26 @@ def _compact(value: str) -> str:
 
 def _schedule_audience(value: str) -> str:
     return derive_audience(value)
+
+
+def _schedule_campus_scope(row: ScheduleRow) -> CampusScope:
+    """Classify direct-answer rows with the same WISE signals as retrieval rows.
+
+    Old schedule payloads lack campus metadata. A stale ``shared`` label must
+    not hide WISE evidence in the title, department, category, or source URL.
+    """
+    fields = {
+        "title": row.title,
+        "department": row.department,
+        "category": row.category,
+        "source_url": row.url,
+    }
+    detected = classify_campus_scope(fields)
+    if detected is CampusScope.WISE or row.campus_scope == CampusScope.WISE.value:
+        return CampusScope.WISE
+    if detected is not CampusScope.UNKNOWN:
+        return detected
+    return campus_scope_for_row({**fields, "source": "schedule", "campus_scope": row.campus_scope})
 
 
 def _query_audience(query: str, terms: tuple[str, ...]) -> str:
@@ -502,7 +524,7 @@ def _schedule_source(row: ScheduleRow) -> dict:
             "schedule_end": end,
             "department": row.department or None,
             "audience": _schedule_audience(f"{row.title} {row.category} {row.department}"),
-            "campus_scope": "shared",
+            "campus_scope": _schedule_campus_scope(row).value,
         },
     }
 
@@ -524,7 +546,10 @@ def answer_schedule_when(
     if not window and not terms:
         return None
 
-    candidates = [row for row in rows if row.start or row.end]
+    candidates = [
+        row for row in rows
+        if (row.start or row.end) and _schedule_campus_scope(row) is not CampusScope.WISE
+    ]
     if terms:
         normalized = [(row, _compact(f"{row.title} {row.category}")) for row in candidates]
         candidates = [

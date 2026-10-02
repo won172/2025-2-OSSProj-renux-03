@@ -65,6 +65,33 @@ def test_schedule_unknown_or_nonofficial_provenance_has_no_url(source_db):
     assert all(row.url is None for row in rag_service._load_schedule_rows_for_direct_answer())
 
 
+def test_canonical_schedule_loader_keeps_wise_identity_for_direct_answer(source_db):
+    with source_db() as session:
+        ingest._store_schedule_source_documents(session, pd.DataFrame([
+            {
+                "title": "WISE캠퍼스 정규학기 학점교류 신청",
+                "department": "WISE캠퍼스/학사지원팀",
+                "start_date": "2026-10-22", "end_date": "2026-10-23",
+            },
+            {
+                "title": "서울캠퍼스 중간시험",
+                "start_date": "2026-10-20", "end_date": "2026-10-21",
+                "source_url": SCHEDULE_URL, "source_type": "official_academic_schedule",
+            },
+        ]))
+
+    result = answer_schedule_when(
+        "이번 달 학사일정 알려줘",
+        rag_service._load_schedule_rows_for_direct_answer(),
+        date(2026, 10, 2),
+    )
+
+    assert result is not None and result.kind == "schedule_window"
+    assert "WISE" not in result.answer
+    assert [source["metadata"]["campus_scope"] for source in result.sources] == ["seoul"]
+    assert result.sources[0]["url"] == SCHEDULE_URL
+
+
 def test_schedule_refresh_keeps_historical_url_metadata():
     historical = pd.DataFrame([{
         "학년도": "2025", "내용": "개강", "start": "2025-03-01", "end": "2025-03-01",
