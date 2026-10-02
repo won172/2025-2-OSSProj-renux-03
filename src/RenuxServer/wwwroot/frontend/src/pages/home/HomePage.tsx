@@ -182,7 +182,7 @@ const HomePage = () => {
   const authStatusRef = useRef<AuthStatus>('checking')
   const streamAnnouncementRef = useRef(createChatStreamAnnouncementTracker())
 
-  const { streamMessage, stopStream } = useChatStream()
+  const { streamMessage, stopStream } = useChatStream(routeChatId)
   const { canInstall, install, dismiss: dismissInstall } = useInstallPrompt()
   const isAuthenticated = authStatus === 'authenticated'
 
@@ -314,7 +314,6 @@ const HomePage = () => {
   // 추천 질문 요청은 새 질문 시작, 대화 전환, 화면 이탈 시 취소한다.
   const followupRequestsRef = useRef(createFollowupRequestTracker())
 
-  useEffect(() => () => stopStream(), [routeChatId, stopStream])
   useEffect(() => {
     const followupRequests = followupRequestsRef.current
     return () => followupRequests.cancel()
