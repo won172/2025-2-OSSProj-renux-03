@@ -338,6 +338,86 @@ def test_모두_지난_일정이면_마지막_기록을_밝힌다():
     assert "가장 최근 기록은" in result.answer
 
 
+def test_october_schedule_excludes_wise_rows_and_preserves_source_scope():
+    rows = [
+        ScheduleRow(
+            "WISE캠퍼스 정규학기 학점교류 신청", date(2026, 10, 22), date(2026, 10, 23),
+            department="WISE캠퍼스/학사지원팀", row_id=1,
+        ),
+        ScheduleRow(
+            "서울캠퍼스 중간시험", date(2026, 10, 20), date(2026, 10, 21),
+            row_id=2, url="https://www.dongguk.edu/schedule/seoul",
+        ),
+        ScheduleRow(
+            "바이오메디캠퍼스 학사 안내", date(2026, 10, 24), date(2026, 10, 24),
+            row_id=3,
+        ),
+        ScheduleRow("정규학기 학사 일정", date(2026, 10, 30), date(2026, 10, 30), row_id=4),
+    ]
+
+    result = answer_schedule_when("이번 달 학사일정 알려줘", rows, date(2026, 10, 2))
+
+    assert result is not None and result.kind == "schedule_window"
+    assert "WISE" not in result.answer
+    assert [source["metadata"]["schedule_id"] for source in result.sources] == ["2", "3", "4"]
+    assert [source["metadata"]["campus_scope"] for source in result.sources] == [
+        "seoul", "bmc", "shared",
+    ]
+    assert result.sources[0]["url"] == "https://www.dongguk.edu/schedule/seoul"
+    assert result.sources[1]["url"] is None
+
+
+def test_wise_schedule_rows_cannot_win_event_or_nearest_fallback():
+    rows = [
+        ScheduleRow("WISE캠퍼스 개강", date(2026, 10, 3), None, row_id=1),
+        ScheduleRow("서울캠퍼스 개강", date(2026, 10, 5), None, row_id=2),
+        ScheduleRow("WISE캠퍼스 정규학기 학점교류 신청", date(2026, 10, 4), None, row_id=3),
+        ScheduleRow("바이오메디캠퍼스 학사 안내", date(2026, 11, 1), None, row_id=4),
+    ]
+
+    event = answer_schedule_when("개강 언제야?", rows, date(2026, 10, 2))
+    nearest = answer_schedule_when("이번 달 학사일정 알려줘", rows[2:], date(2026, 9, 2))
+
+    assert event is not None and event.kind == "schedule_event"
+    assert "WISE" not in event.answer
+    assert [source["metadata"]["schedule_id"] for source in event.sources] == ["2"]
+    assert nearest is not None and nearest.kind == "schedule_nearest"
+    assert "WISE" not in nearest.answer
+    assert nearest.sources[0]["metadata"]["schedule_id"] == "4"
+    assert nearest.sources[0]["metadata"]["campus_scope"] == "bmc"
+
+
+def test_wise_only_schedule_preserves_no_answer_and_past_fallback_scope():
+    wise = ScheduleRow("WISE캠퍼스 종강", date(2026, 10, 30), None, row_id=1)
+    seoul = ScheduleRow("서울캠퍼스 종강", date(2026, 9, 30), None, row_id=2)
+
+    assert answer_schedule_when("이번 달 학사일정 알려줘", [wise], date(2026, 10, 2)) is None
+    past = answer_schedule_when("종강일이 언제야?", [seoul, wise], date(2026, 11, 1))
+
+    assert past is not None and past.kind == "schedule_past"
+    assert "WISE" not in past.answer
+    assert past.sources[0]["metadata"]["campus_scope"] == "seoul"
+
+
+def test_stale_shared_scope_cannot_hide_wise_department_or_category():
+    rows = [
+        ScheduleRow(
+            "정규학기 학점교류 신청", date(2026, 10, 22), None,
+            department="WISE캠퍼스/학사지원팀", campus_scope="shared",
+        ),
+        ScheduleRow(
+            "학위수여식", date(2026, 10, 23), None,
+            category="WISE캠퍼스", campus_scope="shared",
+        ),
+        ScheduleRow("중간시험", date(2026, 10, 24), None, row_id=3),
+    ]
+
+    result = answer_schedule_when("이번 달 학사일정 알려줘", rows, date(2026, 10, 2))
+
+    assert result is not None
+    assert [source["metadata"]["schedule_id"] for source in result.sources] == ["3"]
+
+
 def test_일치하는_일정이_없으면_None을_돌려_기존_폴백에_맡긴다():
     result = answer_schedule_when("졸업식 언제야?", SCHEDULE, TODAY)
     assert result is None
