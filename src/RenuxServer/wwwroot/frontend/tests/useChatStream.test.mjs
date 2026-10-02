@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import React from 'react'
+import { flushSync } from 'react-dom'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { DOMImplementation } from '@xmldom/xmldom'
 import { createServer } from 'vite'
 
 test('훅이 completion 검증 상태를 전달하고 누락된 grounded를 성공으로 만들지 않는다', async () => {
@@ -224,6 +227,82 @@ test('스트림 텍스트는 프레임별로 합치고 모든 종료 경로에�
       })
     })
   } finally {
+    await server.close()
+  }
+})
+
+test('새 대화 경로로 이동해도 같은 대화의 스트림을 유지하고 다른 대화로 이동하면 중단한다', async () => {
+  const server = await createServer({
+    configFile: false,
+    root: new URL('../', import.meta.url).pathname,
+    server: { middlewareMode: true },
+    appType: 'custom',
+    logLevel: 'silent',
+  })
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  const document = new DOMImplementation().createDocument('http://www.w3.org/1999/xhtml', 'html')
+  const window = { document, HTMLIFrameElement: class {} }
+  document.defaultView = window
+  document.addEventListener = () => {}
+  document.removeEventListener = () => {}
+  globalThis.window = window
+  globalThis.document = document
+  let root
+  try {
+    const { useChatStream } = await server.ssrLoadModule('/src/hooks/useChatStream.ts')
+    let streamMessage
+    const Harness = ({ routeChatId }) => {
+      ({ streamMessage } = useChatStream(routeChatId))
+      return null
+    }
+    const container = document.createElement('div')
+    container.addEventListener = () => {}
+    container.removeEventListener = () => {}
+    root = createRoot(container)
+    const renderRoute = (routeChatId) => flushSync(() => root.render(React.createElement(Harness, { routeChatId })))
+    renderRoute(undefined)
+
+    const streams = []
+    globalThis.fetch = async (_url, options) => new Response(new ReadableStream({
+      start(controller) { streams.push({ controller, signal: options.signal }) },
+    }), { status: 200 })
+    const payload = { id: 'q-1', chatId: 'new-chat', content: '이번 달 학사일정 알려줘', createdTime: '2026-10-02T00:00:00Z' }
+    const firstResult = streamMessage(payload, { onText: () => {} })
+    await new Promise(setImmediate)
+
+    // / 에서 새 방 생성 직후 /chat/new-chat 으로 전환해도 진행 중인 요청은 같은 방에 속한다.
+    renderRoute('new-chat')
+    assert.equal(streams[0].signal.aborted, false)
+    streams[0].controller.enqueue(new TextEncoder().encode([
+      { type: 'text', content: '학사일정 답변' },
+      { type: 'completion', request_id: 'request-1' },
+      { type: 'done' },
+    ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')))
+    streams[0].controller.close()
+    assert.equal((await firstResult).answer, '학사일정 답변')
+
+    const secondResult = streamMessage({ ...payload, id: 'q-2' }, { onText: () => {} })
+    const secondRejected = assert.rejects(secondResult, { name: 'AbortError' })
+    await new Promise(setImmediate)
+    renderRoute('another-chat')
+    assert.equal(streams[1].signal.aborted, true)
+    await secondRejected
+
+    const thirdResult = streamMessage({ ...payload, id: 'q-3', chatId: 'another-chat' }, { onText: () => {} })
+    const thirdRejected = assert.rejects(thirdResult, { name: 'AbortError' })
+    await new Promise(setImmediate)
+    flushSync(() => root.unmount())
+    root = null
+    assert.equal(streams[2].signal.aborted, true)
+    await thirdRejected
+  } finally {
+    if (root) flushSync(() => root.unmount())
+    globalThis.fetch = originalFetch
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
     await server.close()
   }
 })

@@ -52,9 +52,10 @@ export interface ChatStreamResult {
  * 네트워크 청크가 줄 중간에서 잘려도 토큰이 유실되지 않도록 버퍼로 이월하며,
  * 언마운트 시 진행 중인 reader를 취소해 누수를 막는다.
  */
-export const useChatStream = () => {
+export const useChatStream = (routeChatId?: string) => {
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
+  const activeChatIdRef = useRef<string | null>(null)
   const pendingDeliveryRef = useRef<{ flush: () => void; discard: () => void } | null>(null)
 
   const stopStream = useCallback(() => {
@@ -62,6 +63,12 @@ export const useChatStream = () => {
     controllerRef.current?.abort()
     readerRef.current?.cancel().catch(() => {})
   }, [])
+
+  // 새 방의 첫 요청은 / 에서 시작해 /chat/:id 로 이동할 수 있다.
+  // 경로가 바뀌어도 진행 중인 요청이 같은 방에 속하면 취소하지 않는다.
+  useEffect(() => {
+    if (controllerRef.current && activeChatIdRef.current !== routeChatId) stopStream()
+  }, [routeChatId, stopStream])
 
   useEffect(() => {
     return () => {
@@ -81,6 +88,7 @@ export const useChatStream = () => {
       pendingDeliveryRef.current?.flush()
       controllerRef.current?.abort()
       controllerRef.current = controller
+      activeChatIdRef.current = payload.chatId
 
       const openStream = async () => {
         const response = await fetch(url, {
@@ -257,6 +265,7 @@ export const useChatStream = () => {
       } finally {
         if (controllerRef.current === controller) {
           controllerRef.current = null
+          activeChatIdRef.current = null
         }
       }
     },
