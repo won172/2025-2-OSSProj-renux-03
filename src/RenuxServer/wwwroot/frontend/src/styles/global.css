@@ -84,22 +84,48 @@
 }
 
 .auth-page {
-    min-height: 100vh;
-    min-height: 100dvh;
+    height: 100vh;
+    height: 100dvh;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    overflow: hidden;
+    box-sizing: border-box;
     background-color: var(--background-color);
-    padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
+    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+}
+
+.auth-page__scroll {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
+    padding: 24px;
 }
 
 .auth-container {
+    margin: auto;
     background-color: var(--container-bg);
     padding: 30px 40px;
     border-radius: 10px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     width: 100%;
     max-width: 720px;
+}
+
+.auth-home-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--primary-color);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.auth-home-link:hover {
+    text-decoration: underline;
 }
 
 .auth-container h2 {
@@ -3516,6 +3542,9 @@
 /* ── 개인정보처리방침 등 법적 고지 문서 ───────────────────────────── */
 
 .policy-page {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
     max-width: 860px;
     margin: 0 auto;
     padding: 40px 24px 64px;
@@ -3561,6 +3590,8 @@
 }
 
 .policy-doc {
+    min-width: 0;
+    overflow-wrap: anywhere;
     padding: 32px;
     background-color: white;
     border-radius: 8px;
