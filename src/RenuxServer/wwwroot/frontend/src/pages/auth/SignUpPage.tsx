@@ -224,6 +224,7 @@ const SignUpPage = () => {
 
   return (
     <div className="auth-page">
+      <div className="auth-page__scroll">
       <div className="auth-container">
         <h2>회원가입</h2>
         <div className="auth-mode-tabs" role="group" aria-label="가입 유형">
@@ -401,6 +402,7 @@ const SignUpPage = () => {
             <Link to="/privacy">개인정보처리방침</Link>
           </p>
         </div>
+      </div>
       </div>
     </div>
   )

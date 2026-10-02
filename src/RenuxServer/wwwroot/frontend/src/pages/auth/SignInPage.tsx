@@ -46,7 +46,9 @@ const SignInPage = () => {
 
   return (
     <div className="auth-page">
+      <div className="auth-page__scroll">
       <div className="auth-container">
+        <Link className="auth-home-link" to="/">← 홈으로</Link>
         <h2>로그인</h2>
         {signupSuccess && (
           <div className="auth-success">회원가입이 완료되었습니다. 로그인해주세요.</div>
@@ -88,6 +90,7 @@ const SignInPage = () => {
             계정이 없으신가요? <Link to="/auth/up">회원가입</Link>
           </p>
         </div>
+      </div>
       </div>
     </div>
   )

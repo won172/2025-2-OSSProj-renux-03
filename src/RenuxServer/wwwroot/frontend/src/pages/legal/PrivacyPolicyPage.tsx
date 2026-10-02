@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 // 방침 개정 시 이 두 값을 함께 갱신한다. 개정 시행 7일 전 공지 의무(제12조)가 있으므로
@@ -8,6 +9,10 @@ const COUNCIL_INSTAGRAM_URL =
 
 const PrivacyPolicyPage = () => {
   const navigate = useNavigate()
+
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0)
+  }, [])
 
   return (
     <div className="policy-page">
