@@ -27,6 +27,7 @@ import {
   syncNotifications,
 } from '../../chat/chatApi'
 import { createFollowupRequestTracker, loadFollowups } from '../../chat/followups'
+import { getChatStreamFailureMessage, getFailedAssistantContent } from '../../chat/streamFailure'
 import {
   finalizeStoppedAssistant,
   isAbortError,
@@ -723,11 +724,12 @@ const HomePage = () => {
           streamAnnouncementRef.current.terminal(request, 'error')
         }
         console.error('Failed to send message', error)
-        if (streamAnnouncementRef.current.isCurrent(request)) setChatError('메시지를 전송하지 못했습니다.')
+        const failureMessage = getChatStreamFailureMessage(error, authStatus === 'authenticated')
+        if (streamAnnouncementRef.current.isCurrent(request)) setChatError(failureMessage)
         setChatMessages((previous) =>
           previous.map((message) =>
             message.id === assistantId
-              ? { ...message, content: '응답 연결이 끊겼습니다. 다시 생성 버튼으로 시도해주세요.', isFallback: true }
+              ? { ...message, content: getFailedAssistantContent(message.content, failureMessage) }
               : message,
           ),
         )
