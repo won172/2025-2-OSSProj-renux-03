@@ -581,7 +581,28 @@ static public class ChatRequestApis
             return Results.Ok(chatDto);
         });
 
-        app.MapPost("/stream", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, ILogger<Program> logger, IConfiguration configuration, IHttpClientFactory httpClientFactory, IDataProtectionProvider dataProtectionProvider) =>
+        app.MapPost("/stream-ticket", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, ChatStreamTicketService tickets) =>
+        {
+            if (!TryGetUserId(context, out Guid userId)) return Results.Unauthorized();
+            if (!ChatStreamTicketService.IsValidRequest(askDto))
+                return Results.BadRequest(new { message = "유효한 질문과 채팅 ID가 필요합니다." });
+            if (!await db.Users.AnyAsync(user => user.Id == userId, context.RequestAborted))
+                return Results.Unauthorized();
+            if (!await UserOwnsChatAsync(db, askDto.ChatId, userId))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            ChatMessage? existing = await db.ChatMessages.AsNoTracking()
+                .FirstOrDefaultAsync(message => message.Id == askDto.Id, context.RequestAborted);
+            if (existing is not null && (existing.ChatId != askDto.ChatId || !existing.IsAsk
+                    || !string.Equals(existing.Content, askDto.Content, StringComparison.Ordinal)))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            if (!tickets.TryIssue(userId, askDto, out var issued))
+                return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Pragma = "no-cache";
+            return Results.Ok(new { ticket = issued!.Ticket, expiresAt = issued.ExpiresAt });
+        }).RequireAuthorization();
+
+        app.MapPost("/stream", async (ServerDbContext db, HttpContext context, ChatMessageDto askDto, ILogger<Program> logger, IConfiguration configuration, IHttpClientFactory httpClientFactory, IDataProtectionProvider dataProtectionProvider, ChatStreamTicketService tickets) =>
         {
             if (string.IsNullOrWhiteSpace(askDto.Content))
             {
@@ -598,6 +619,37 @@ static public class ChatRequestApis
             }
 
             bool isAuthenticated = TryGetUserId(context, out Guid authenticatedStreamUserId);
+            // An explicit ticket attempt has precedence over web/guest cookies:
+            // malformed, replayed, mismatched, or expired capabilities fail closed.
+            if (context.Request.Headers.TryGetValue(ChatStreamTicketService.HeaderName, out var ticketValues))
+            {
+                Guid? cookieUserId = isAuthenticated ? authenticatedStreamUserId : null;
+                if (ticketValues.Count != 1
+                    || !tickets.TryConsume(ticketValues[0], askDto, cookieUserId, out Guid ticketUserId))
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await context.Response.WriteAsJsonAsync(new { message = "유효한 스트리밍 인증이 필요합니다." });
+                    return;
+                }
+                var ticketUser = await db.Users.AsNoTracking().Include(user => user.Major).Include(user => user.Role)
+                    .SingleOrDefaultAsync(user => user.Id == ticketUserId, context.RequestAborted);
+                if (ticketUser is null)
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
+                }
+                // Identity and current role/major come from the authoritative DB,
+                // never from client body fields or a reusable general JWT.
+                context.User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                {
+                    new Claim(Microsoft.IdentityModel.JsonWebTokens.JwtRegisteredClaimNames.Sub, ticketUser.Id.ToString()),
+                    new Claim(Microsoft.IdentityModel.JsonWebTokens.JwtRegisteredClaimNames.Name, ticketUser.Username),
+                    new Claim("Role", ticketUser.Role?.Rolename ?? "Unknown"),
+                    new Claim("Major", ticketUser.Major?.Majorname ?? "Unknown")
+                }, "native-stream-ticket"));
+                authenticatedStreamUserId = ticketUserId;
+                isAuthenticated = true;
+            }
             string? validatedGuestSubjectId = null;
             if (!isAuthenticated && !GuestIdentity.TryValidate(context.Request, dataProtectionProvider, out validatedGuestSubjectId))
             {
