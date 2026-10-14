@@ -38,12 +38,29 @@ Last Updated: 2026-10-15 (모바일 UX 후보 상태 갱신)
   개인정보 화면을 확인했다. 동일 fixture의 설정 첫 화면 높이는 390px 폭에서 14,737px → 1,280px다.
 - API fixture와 화면 증거는 저장소 밖에 보존하며 운영 인증·데이터를 사용하지 않는다.
   시뮬레이터/fixture 검증을 실제 기기·운영 API·배포 검증으로 해석하지 않는다.
-- 최종 통합 앱의 화면 재확인은 Mac 잠금으로 대기 중이다. 잠금 이전에 독립 iOS 키보드 후보의 게스트·로그인 상태 동작을 확인했다.
-  실제 API 주소를 사용하는 통합 후보 앱(version 1.0/build 6)의 시뮬레이터 설치까지 성공했다. 설치 후 화면·실제 API 통신은 미확인이다.
+- Mac 잠금 해제 후 실제 API 주소를 사용하는 통합 앱 1.0(7)을 시뮬레이터에서 실행했다.
+  실제 홈 브리핑 표시, 게스트 키보드 위 입력창·전송 버튼 노출, 화면 탭으로 키보드 닫힘과 여백 복원을 확인했다.
+  로그인 후 설정·관리자 화면의 최종 네이티브 확인은 테스트 계정 로그인 대기다. 해당 화면의 로컬 fixture·웹 검증은 통과했다.
   PR #60·#61·#62의 원격 frontend/backend/rag-python/secret-scan 검사는 모두 통과했다.
 - 웹 precache는 1,248,456 / 1,250,000B로 여유가 작다. 공개 화면·React·라우터는 계속 precache하며,
   관리자 전용 코드·스타일만 지연 로드한다. 기존 예산을 완화하지 않았다.
-- main merge, 운영 배포, App Store 업로드는 수행하지 않았다. 완료된 변경은 기능 브랜치에만 push했다.
+- main merge, 운영 웹/서버 배포, App Store 공개 출시는 수행하지 않았다. 변경은 작업 브랜치에 push했고 아래 TestFlight 내부 배포만 반영했다.
+
+## 2026-10-15 TestFlight 1.0(7)
+
+- `chore/mobile-ux-testflight`의 `6d36470`, [PR #64](https://github.com/won172/2025-2-OSSProj-renux-03/pull/64).
+  최신 `origin/main`에서 만든 전용 worktree에 세 검증된 기능 후보를 조합하고 빌드 번호를 6 → 7로 올렸다.
+  기존 통합 트리와의 직접 비교는 Debug/Release 빌드 번호 두 줄뿐이다.
+- 배포용 iPhoneOS Release archive/export, 릴리스 사전 검사, 실제 API 주소·비fixture·서명 확인이 통과했다.
+  독립 패키지 QA의 정적 검사도 통과했다. 리뷰 sandbox의 서명 신뢰 체인 확인 제약은 root의
+  `codesign --verify --deep --strict` 통과 및 Apple 검증·처리 성공으로 별도 확인했다.
+- Apple 업로드 검증과 업로드가 오류 없이 완료됐다. Build/Delivery ID는 `97114306-4c30-4040-998b-0bcdc317224a`다.
+  App Store Connect API의 `processingState=VALID`, `internalBuildState=IN_BETA_TESTING`,
+  기존 내부 그룹 ‘똑똑이’ 포함을 확인했고 웹 화면에서도 **1.0(7) · 테스트 중**을 확인했다.
+- 한국어 TestFlight 테스트 안내를 추가했다. 기존 내부 테스터의 화면에 1.0(7) 설치됨이 표시되지만,
+  이것을 실제 기기 UI 동작 검증으로 해석하지 않는다.
+- IPA SHA-256: `9e164d148f42bf7d4b4650124df963c75322f4ddb2faea85ab47bfd9658a5c30`.
+- 외부 테스트 그룹은 기존과 같이 빌드 0개이며, 외부 Beta App Review와 App Store 공개 심사는 제출하지 않았다.
 
 ## 2026-09-28 운영 수집 확인
 
@@ -126,10 +143,11 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
+| 모바일 UX TestFlight 1.0(7) | P1 | Orchestrator / QA | `chore/mobile-ux-testflight` | `mobile-ux-testflight` | Review | Release archive/export, 독립 패키지 QA, Apple VALID·내부 IN_BETA_TESTING·그룹 UI 확인 | TestFlight 내부 배포 완료. main 미병합·운영 웹/서버 미배포 | PR #64 human 검토; 로그인 후 최종 앱 UI 확인 |
 | iOS 키보드 입력창 가림 | P0 | Client | `fix/ios-keyboard-resize` | `ios-keyboard-resize` | Review | lint, 78 tests, native build, iOS 26.5 fixture 키보드 검증, 독립 QA | 실제 기기·운영 인증 미확인 | PR #60 통합 확인 후 human merge 검토 |
 | 저장 답변 출처 식별자·번호 보존 | P1 | RAG/Backend | `fix/chat-source-identity` | `chat-source-identity` | Review | Release build, 전체 계약 테스트, 8 scenarios/160 assertions, 독립 QA | PostgreSQL 실제 저장·운영 RAG 미확인 | PR #61과 출처 UI 통합 확인 |
-| 설정·관리자 모바일 사용성 | P1 | Client | `fix/mobile-interaction-layout` | `mobile-interaction-layout` | Review | 109 tests, lint/build, bundle budget, 독립 재리뷰, Chrome 360/390/1280px fixture, PR #62 CI 통과 | 최종 통합 앱 화면 확인 대기 | Mac 잠금 해제 후 최종 확인 |
-| 모바일 UX 후보 통합 | P1 | Orchestrator / QA | `test/mobile-ux-integration` | `mobile-ux-integration` | Review | 프런트 109 tests·웹/native bundle, 서버 Release·계약, Xcode sim build | Mac 잠금으로 최종 앱 UI 대기. main merge·운영 배포 승인 없음 | 최종 앱 확인 후 human merge 검토 |
+| 설정·관리자 모바일 사용성 | P1 | Client | `fix/mobile-interaction-layout` | `mobile-interaction-layout` | Review | 109 tests, lint/build, bundle budget, 독립 재리뷰, Chrome 360/390/1280px fixture, PR #62 CI 통과 | 로그인 후 최종 네이티브 화면 확인 대기 | 테스트 계정 로그인 후 최종 확인 |
+| 모바일 UX 후보 통합 | P1 | Orchestrator / QA | `test/mobile-ux-integration` | `mobile-ux-integration` | Review | 프런트 109 tests·웹/native bundle, 서버 Release·계약, Xcode sim build, 최종 build7 게스트 키보드 검증 | 로그인 후 앱 UI 대기. main merge·운영 웹/서버 배포 승인 없음 | 최종 앱 확인 후 human merge 검토 |
 | 공지 증분 동기화·관리자 upsert 임베딩 입력 통일 | P1 | RAG/Backend | `fix/notice-live-embed-retrieval-text` | `~/dongttok-work/notice-live-embed-retrieval-text`(임시, 아래 Git State) | Review | 로컬 RAG 1,453 passed/1 skipped(main 711744e 병합 후), QA 재리뷰 APPROVE, PR CI 대기 | 관리자 승인 학과 한정 공지가 Chroma에 public으로 들어가던 공개범위 결함 수정. 실제 데이터 검색 영향 미확인 | PR #51 human 검토·merge |
 | 운영 공지 자동 갱신 재개 (P0) | P0 | Orchestrator | - | - | Blocked | revision 수정 코드 merge(PR #45) | 운영 이미지 미배포, `RAG_SCHEDULER_ENABLED=0` | human 배포·스케줄러 재개 승인 |
 | 실제 후보 골든 평가 190문항 (P0) | P0 | QA | - | - | Blocked | release gate는 fail-closed로 전환(PR #14) | 후보 endpoint·모델 비용 승인 필요 | human이 endpoint 제공 |
@@ -141,7 +159,7 @@ Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 ## Git State
 
 2026-10-15 모바일 UX 작업 시작 시 `git fetch origin`으로 `origin/main = b559b966`을 확인했다.
-신규 브랜치는 모두 이 기준에서 별도 worktree로 생성했다. PR #60·#61·#62는 아직 merge되지 않은 후보다.
+신규 브랜치는 모두 이 기준에서 별도 worktree로 생성했다. PR #60·#61·#62 및 통합 릴리스 PR #64는 아직 merge되지 않은 후보다.
 
 2026-09-28 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
 
