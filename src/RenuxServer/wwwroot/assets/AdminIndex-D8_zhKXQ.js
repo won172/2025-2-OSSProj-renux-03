@@ -1,0 +1,1 @@
+import{j as t}from"./react-vendor-DolCvLs_.js";import{u as r}from"./adminConsoleContext-BT9ipnyK.js";import{N as o}from"./router-3Vkstz-n.js";const m=()=>{const{isUniversityLevel:e}=r();return t.jsx(o,{to:e?"/admin/dashboard":"/admin/department",replace:!0})};export{m as default};
