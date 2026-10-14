@@ -1,3 +1,4 @@
+import { isModuleLoadError } from '../moduleRecovery'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 
 interface Props {
@@ -6,6 +7,7 @@ interface Props {
 
 interface State {
   hasError: boolean
+  moduleError: boolean
 }
 
 /**
@@ -14,10 +16,10 @@ interface State {
  * (향후 Sentry 등 오류 수집 SDK와 연동할 수 있도록 componentDidCatch에 훅 지점을 둔다.)
  */
 class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false }
+  state: State = { hasError: false, moduleError: false }
 
-  static getDerivedStateFromError(): State {
-    return { hasError: true }
+  static getDerivedStateFromError(error: unknown): State {
+    return { hasError: true, moduleError: isModuleLoadError(error) }
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
@@ -46,9 +48,9 @@ class ErrorBoundary extends Component<Props, State> {
           textAlign: 'center',
         }}
       >
-        <h1 style={{ fontSize: '1.25rem', margin: 0 }}>일시적인 오류가 발생했어요</h1>
+        <h1 style={{ fontSize: '1.25rem', margin: 0 }}>{this.state.moduleError ? '새 화면 파일을 불러오지 못했어요' : '일시적인 오류가 발생했어요'}</h1>
         <p style={{ color: '#6b7280', margin: 0 }}>
-          페이지를 새로고침하면 대부분 해결됩니다. 문제가 계속되면 잠시 후 다시 시도해 주세요.
+          {this.state.moduleError ? '업데이트된 화면을 가져오지 못했습니다. 연결을 확인하고 새로고침해 주세요. 문제가 계속되면 잠시 후 다시 시도해 주세요.' : '페이지를 새로고침하면 대부분 해결됩니다. 문제가 계속되면 잠시 후 다시 시도해 주세요.'}
         </p>
         <button
           type="button"
@@ -57,7 +59,7 @@ class ErrorBoundary extends Component<Props, State> {
             padding: '10px 20px',
             borderRadius: '8px',
             border: 'none',
-            background: '#1f2937',
+            background: '#c2410c',
             color: '#fff',
             cursor: 'pointer',
           }}

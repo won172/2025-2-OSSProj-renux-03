@@ -53,6 +53,14 @@ const UsersPage = () => {
   const tabParam = searchParams.get('tab')
   const tab: Tab = tabParam === 'signup' || tabParam === 'orgs' ? tabParam : 'accounts'
 
+  const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 960px)').matches)
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 960px)')
+    const update = () => setCompact(media.matches)
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+
   const [users, setUsers] = useState<AdminUserAccount[]>([])
   const [roles, setRoles] = useState<AdminRoleOption[]>([])
   const [majors, setMajors] = useState<MajorOption[]>([])
@@ -165,7 +173,8 @@ const UsersPage = () => {
     })
   }, [users, search, roleFilter, majorFilter, sortKey, sortAsc])
 
-  const pagedUsers = filteredUsers.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const safePage = Math.min(page, Math.max(0, Math.ceil(filteredUsers.length / PAGE_SIZE) - 1))
+  const pagedUsers = filteredUsers.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
   const pageCount = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE))
 
   useEffect(() => { setPage(0) }, [search, roleFilter, majorFilter])
@@ -352,24 +361,31 @@ const UsersPage = () => {
             <EmptyState>{users.length === 0 ? '관리할 계정이 없습니다.' : '검색 결과가 없습니다.'}</EmptyState>
           ) : (
             <>
-              <TableScroll minWidth={900}>
-                <table className="ac-table">
-                  <thead>
-                    <tr>
-                      <th><button type="button" onClick={() => toggleSort('userId')}>아이디 {sortKey === 'userId' ? (sortAsc ? '▲' : '▼') : ''}</button></th>
-                      <th><button type="button" onClick={() => toggleSort('username')}>이름 {sortKey === 'username' ? (sortAsc ? '▲' : '▼') : ''}</button></th>
-                      <th>전공</th>
-                      <th><button type="button" onClick={() => toggleSort('roleName')}>역할 {sortKey === 'roleName' ? (sortAsc ? '▲' : '▼') : ''}</button></th>
-                      <th><button type="button" onClick={() => toggleSort('updatedTime')}>수정일 {sortKey === 'updatedTime' ? (sortAsc ? '▲' : '▼') : ''}</button></th>
-                      <th className="actions">관리</th>
+              <div className="ac-mobile-sort">
+                <label htmlFor="user-sort">정렬 기준</label>
+                <select id="user-sort" className="ac-select" value={sortKey} onChange={(event) => { setSortKey(event.target.value as SortKey); setPage(0) }}>
+                  <option value="userId">아이디</option><option value="username">이름</option><option value="roleName">역할</option><option value="updatedTime">수정일</option>
+                </select>
+                <button type="button" className="ac-btn" onClick={() => setSortAsc((value) => !value)}>{sortAsc ? '오름차순 ↑' : '내림차순 ↓'}</button>
+              </div>
+              <TableScroll mobileCards minWidth={900}>
+                <table className="ac-table" role="table">
+                  <thead role="rowgroup">
+                    <tr role="row">
+                      <th role="columnheader" scope="col"><button type="button" tabIndex={compact ? -1 : 0} onClick={() => toggleSort('userId')}>아이디 {sortKey === 'userId' ? (sortAsc ? '▲' : '▼') : ''}</button></th>
+                      <th role="columnheader" scope="col"><button type="button" tabIndex={compact ? -1 : 0} onClick={() => toggleSort('username')}>이름 {sortKey === 'username' ? (sortAsc ? '▲' : '▼') : ''}</button></th>
+                      <th role="columnheader" scope="col">전공</th>
+                      <th role="columnheader" scope="col"><button type="button" tabIndex={compact ? -1 : 0} onClick={() => toggleSort('roleName')}>역할 {sortKey === 'roleName' ? (sortAsc ? '▲' : '▼') : ''}</button></th>
+                      <th role="columnheader" scope="col"><button type="button" tabIndex={compact ? -1 : 0} onClick={() => toggleSort('updatedTime')}>수정일 {sortKey === 'updatedTime' ? (sortAsc ? '▲' : '▼') : ''}</button></th>
+                      <th role="columnheader" scope="col" className="actions">관리</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody role="rowgroup">
                     {pagedUsers.map((user) => (
-                      <tr key={user.id}>
-                        <td>{user.userId}</td>
-                        <td>{user.username}</td>
-                        <td>
+                      <tr role="row" key={user.id}>
+                        <td role="cell" data-label="아이디">{user.userId}</td>
+                        <td role="cell" data-label="이름">{user.username}</td>
+                        <td role="cell" data-label="전공">
                           <select
                             className="ac-select"
                             value={user.majorId}
@@ -388,7 +404,7 @@ const UsersPage = () => {
                             ))}
                           </select>
                         </td>
-                        <td>
+                        <td role="cell" data-label="역할">
                           <select
                             className="ac-select"
                             value={user.roleId}
@@ -405,8 +421,8 @@ const UsersPage = () => {
                             ))}
                           </select>
                         </td>
-                        <td className="num">{formatDateTime(user.updatedTime)}</td>
-                        <td className="actions" onClick={(event) => event.stopPropagation()}>
+                        <td role="cell" data-label="수정일" className="num">{formatDateTime(user.updatedTime)}</td>
+                        <td role="cell" data-label="관리" className="actions" onClick={(event) => event.stopPropagation()}>
                           <RowMenu
                             open={openMenuId === user.id}
                             onToggle={() => setOpenMenuId(openMenuId === user.id ? null : user.id)}
@@ -435,11 +451,11 @@ const UsersPage = () => {
 
               {pageCount > 1 && (
                 <div className="ac-filterbar" style={{ justifyContent: 'center', borderTop: '1px solid var(--ac-line)', borderBottom: 0 }}>
-                  <button type="button" className="ac-btn ac-btn--sm" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
+                  <button type="button" className="ac-btn ac-btn--sm" onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage === 0}>
                     이전
                   </button>
-                  <span className="ac-hint">{page + 1} / {pageCount} · 총 {filteredUsers.length}개</span>
-                  <button type="button" className="ac-btn ac-btn--sm" onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={page >= pageCount - 1}>
+                  <span className="ac-hint">{safePage + 1} / {pageCount} · 총 {filteredUsers.length}개</span>
+                  <button type="button" className="ac-btn ac-btn--sm" onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))} disabled={safePage >= pageCount - 1}>
                     다음
                   </button>
                 </div>
@@ -458,35 +474,35 @@ const UsersPage = () => {
           ) : signupRequests.length === 0 ? (
             <EmptyState>학생회 가입 요청이 없습니다.</EmptyState>
           ) : (
-            <TableScroll minWidth={860}>
-              <table className="ac-table">
-                <thead>
-                  <tr>
-                    <th>아이디</th>
-                    <th>이름</th>
-                    <th>전공</th>
-                    <th>신청일</th>
-                    <th>상태</th>
-                    <th>처리 메모</th>
-                    <th className="actions">처리</th>
+            <TableScroll mobileCards minWidth={860}>
+              <table className="ac-table" role="table">
+                <thead role="rowgroup">
+                  <tr role="row">
+                    <th role="columnheader" scope="col">아이디</th>
+                    <th role="columnheader" scope="col">이름</th>
+                    <th role="columnheader" scope="col">전공</th>
+                    <th role="columnheader" scope="col">신청일</th>
+                    <th role="columnheader" scope="col">상태</th>
+                    <th role="columnheader" scope="col">처리 메모</th>
+                    <th role="columnheader" scope="col" className="actions">처리</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody role="rowgroup">
                   {signupRequests.map((request) => (
-                    <tr key={request.id}>
-                      <td>{request.userId}</td>
-                      <td>{request.username}</td>
-                      <td>{request.majorName ?? '-'}</td>
-                      <td className="num">{formatDateTime(request.createdTime)}</td>
-                      <td>
+                    <tr role="row" key={request.id}>
+                      <td role="cell" data-label="아이디">{request.userId}</td>
+                      <td role="cell" data-label="이름">{request.username}</td>
+                      <td role="cell" data-label="전공">{request.majorName ?? '-'}</td>
+                      <td role="cell" data-label="신청일" className="num">{formatDateTime(request.createdTime)}</td>
+                      <td role="cell" data-label="상태">
                         <StatusPill tone={getRequestStatusTone(request.status)}>
                           {getRequestStatusLabel(request.status)}
                         </StatusPill>
                       </td>
-                      <td className="truncate" title={request.reviewNote ?? ''}>
+                      <td role="cell" data-label="처리 메모" className="truncate" title={request.reviewNote ?? ''}>
                         {request.reviewNote?.trim() || (request.reviewedTime ? `${formatDateTime(request.reviewedTime)} 처리` : '-')}
                       </td>
-                      <td className="actions">
+                      <td role="cell" data-label="처리" className="actions">
                         {request.status === 'pending' ? (
                           <>
                             <button
@@ -526,25 +542,25 @@ const UsersPage = () => {
           ) : organizations.length === 0 ? (
             <EmptyState>등록된 조직이 없습니다.</EmptyState>
           ) : (
-            <TableScroll minWidth={720}>
-              <table className="ac-table">
-                <thead>
-                  <tr>
-                    <th>조직명</th>
-                    <th>담당자</th>
-                    <th>대기 요청</th>
-                    <th>최근 갱신</th>
-                    <th>상태</th>
+            <TableScroll mobileCards minWidth={720}>
+              <table className="ac-table" role="table">
+                <thead role="rowgroup">
+                  <tr role="row">
+                    <th role="columnheader" scope="col">조직명</th>
+                    <th role="columnheader" scope="col">담당자</th>
+                    <th role="columnheader" scope="col">대기 요청</th>
+                    <th role="columnheader" scope="col">최근 갱신</th>
+                    <th role="columnheader" scope="col">상태</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody role="rowgroup">
                   {organizations.map((org) => (
-                    <tr key={org.id}>
-                      <td>{org.name}</td>
-                      <td>{org.manager}</td>
-                      <td className="num">{org.pendingRequests > 0 ? `${org.pendingRequests}건` : '-'}</td>
-                      <td className="num">{org.updatedAt ? formatDateTime(org.updatedAt) : '-'}</td>
-                      <td><StatusPill tone="success">{org.status}</StatusPill></td>
+                    <tr role="row" key={org.id}>
+                      <td role="cell" data-label="조직명">{org.name}</td>
+                      <td role="cell" data-label="담당자">{org.manager}</td>
+                      <td role="cell" data-label="대기 요청" className="num">{org.pendingRequests > 0 ? `${org.pendingRequests}건` : '-'}</td>
+                      <td role="cell" data-label="최근 갱신" className="num">{org.updatedAt ? formatDateTime(org.updatedAt) : '-'}</td>
+                      <td role="cell" data-label="상태"><StatusPill tone="success">{org.status}</StatusPill></td>
                     </tr>
                   ))}
                 </tbody>

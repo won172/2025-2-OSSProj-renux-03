@@ -127,6 +127,7 @@ export const sourceTypeLabels: Record<string, string> = {
   custom_knowledge: 'FAQ',
   event: '행사',
   announcement: '공지',
+  staff_refresh: '교직원 갱신',
 }
 
 export const getSourceTypeLabel = (sourceType?: string | null) => {

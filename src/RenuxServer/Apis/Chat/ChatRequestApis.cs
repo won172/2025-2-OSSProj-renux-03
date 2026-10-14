@@ -32,7 +32,9 @@ public record RagSource(
     [property: JsonPropertyName("sparse_score")] double? SparseScore,
     [property: JsonPropertyName("hybrid_score")] double? HybridScore,
     [property: JsonPropertyName("recency_score")] double? RecencyScore,
-    [property: JsonPropertyName("final_score")] double? FinalScore
+    [property: JsonPropertyName("final_score")] double? FinalScore,
+    [property: JsonPropertyName("source_ref")] string? SourceRef = null,
+    [property: JsonPropertyName("citation_number")] int? CitationNumber = null
 );
 public record FeedbackDto(string RequestId, int Rating, string? Reason, string? Comment);
 public record FollowupRequestDto(string RequestId);
@@ -1446,6 +1448,8 @@ static public class ChatRequestApis
         {
             Source = source.Source,
             ChunkId = source.ChunkId,
+            SourceRef = source.SourceRef,
+            CitationNumber = source.CitationNumber,
             Title = source.Title,
             Url = source.Url,
             PublishedAt = source.PublishedAt,

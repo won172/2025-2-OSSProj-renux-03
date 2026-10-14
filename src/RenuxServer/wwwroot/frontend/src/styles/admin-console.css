@@ -1015,3 +1015,80 @@
 @media (prefers-reduced-motion: reduce) {
   .ac-sidebar { transition: none; }
 }
+
+/* Mobile cards retain every field and action from their desktop table. */
+.ac-cell-details { white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.ac-cell-details summary, .ac-staff-review summary { cursor: pointer; padding: 8px 0; color: #9a4000; }
+.ac-cell-details p { margin: 6px 0; white-space: pre-wrap; }
+.ac-table .truncate:has(details[open]) { white-space: normal; }
+.ac-staff-review { min-width: 0; overflow-wrap: anywhere; }
+.ac-staff-review h3 { font-size: 17px; }
+.ac-staff-review h4 { font-size: 15px; }
+.ac-staff-review h5 { font-size: 13px; font-weight: 700; }
+.ac-staff-samples { display: grid; gap: 12px; margin-top: 16px; }
+.ac-staff-sample { padding: 14px; border: 1px solid var(--ac-line); border-radius: 10px; }
+.ac-staff-contacts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ac-staff-contacts ul { padding-left: 18px; }
+.ac-detail-back, .ac-sidebar__close, .ac-mobile-sort { display: none; }
+.ac-detail { min-width: 0; scroll-margin-top: calc(85px + env(safe-area-inset-top, 0px)); }
+.ac-detail :focus-visible, .ac-shell summary:focus-visible { outline: 2px solid var(--ac-accent); outline-offset: 3px; }
+.ac-chart__label { font-size: 12px; }
+.ac-chart-data { margin-top: 12px; font-size: 13px; }
+.ac-chart-data summary { cursor: pointer; min-height: 44px; padding: 10px 0; }
+.ac-chart-data table { width: 100%; }
+.ac-chart-data th, .ac-chart-data td { padding: 5px; text-align: left; }
+@media (max-width: 960px) {
+  .ac-sidebar { height: 100dvh; padding-top: calc(18px + env(safe-area-inset-top, 0px)); padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); visibility: hidden; }
+  .ac-shell--nav-open .ac-sidebar { visibility: visible; }
+  .ac-sidebar__close { display: block; align-self: flex-end; }
+  .ac-detail-back { display: inline-flex; margin-bottom: 14px; }
+  .ac-master-detail > .ac-detail { display: none; }
+  .ac-master-detail--open > .ac-list { display: none; }
+  .ac-master-detail--open > .ac-detail { display: block; }
+  .ac-mobile-sort { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 12px; }
+  .ac-table-cards { overflow: visible; padding: 12px; }
+  .ac-table-cards > div { min-width: 0 !important; }
+  .ac-table-cards table, .ac-table-cards tbody { display: block; width: 100%; }
+  .ac-table-cards thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .ac-table-cards tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 14px; padding: 16px; margin-bottom: 12px; border: 1px solid var(--ac-line); border-radius: 12px; background: #fff; }
+  .ac-table-cards td, .ac-table-cards td.num, .ac-table-cards td.truncate {
+    display: block; padding: 0; min-width: 0; max-width: none; border: 0; white-space: normal;
+    overflow: visible; text-overflow: clip; word-break: normal; overflow-wrap: anywhere; color: var(--ac-ink);
+  }
+  .ac-table-cards td::before { content: attr(data-label); display: block; margin-bottom: 3px; font-size: 12px; font-weight: 600; color: var(--ac-muted); word-break: keep-all; }
+  .ac-table-cards td:first-child, .ac-table-cards td.actions,
+  .ac-table-cards td[data-label='질문·답변'], .ac-table-cards td[data-label='코멘트'],
+  .ac-table-cards td[data-label='메시지'], .ac-table-cards td[data-label='결과'], .ac-table-cards td[data-label='주기'],
+  .ac-table-cards td[data-label='처리 메모'], .ac-table-cards td[data-label='컬렉션'],
+  .ac-table-cards td[data-label='전공'], .ac-table-cards td[data-label='역할'] { grid-column: 1 / -1; }
+  .ac-table-cards td:first-child { font-size: 15px; font-weight: 650; }
+  .ac-table-cards td.actions { text-align: left; white-space: normal; border-top: 1px solid var(--ac-line); padding-top: 10px; }
+  .ac-table-cards .actions .ac-btn { margin: 2px; }
+  .ac-table-cards td .ac-select { min-height: 44px; max-width: 100%; font-size: 14px; }
+  .ac-rowmenu__panel { position: static; margin-top: 8px; min-width: 0; box-shadow: none; }
+  .ac-pill { white-space: normal; word-break: keep-all; }
+  .ac-staff-contacts { grid-template-columns: 1fr; }
+  .ac-modal-backdrop { padding-top: calc(16px + env(safe-area-inset-top, 0px)); padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .ac-modal { max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px); }
+  .ac-modal__actions { flex-wrap: wrap; }
+}
+@media (hover: none), (pointer: coarse), (max-width: 960px) {
+  .ac-shell .ac-btn, .ac-shell .ac-chip, .ac-shell .ac-tab, .ac-shell .ac-topbar__menu,
+  .ac-shell .ac-rowmenu button, .ac-shell .ac-nav__item, .ac-shell .ac-tabbar__item,
+  .ac-modal .ac-btn, .ac-modal input, .ac-modal select, .ac-shell summary { min-height: 44px; }
+  .ac-shell .ac-btn--icon, .ac-shell .ac-rowmenu > button, .ac-shell .ac-topbar__menu { min-width: 44px; }
+  .ac-shell .ac-select, .ac-shell .ac-input { min-height: 44px; }
+  .ac-list-item .ac-checkbox { min-width: 24px; min-height: 24px; margin: 10px; }
+}
+
+@media (max-width: 960px) {
+  .ac-table-cards td:first-child { order: -4; }
+  .ac-table-cards td[data-label='질문·답변'] { order: -5; }
+  .ac-table-cards td[data-label='상태'], .ac-table-cards td[data-label='평가'], .ac-table-cards td[data-label='역할'] { order: -3; }
+  .ac-table-cards td.actions { order: -2; }
+  .ac-table-cards td[data-label='결과'] { order: -3; }
+}
+@media (hover: none), (pointer: coarse), (max-width: 960px) {
+  .ac-row-check { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+  .ac-list-item .ac-row-check .ac-checkbox { margin: 0; min-width: 20px; min-height: 20px; }
+}

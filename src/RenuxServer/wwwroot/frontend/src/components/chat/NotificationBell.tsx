@@ -59,7 +59,7 @@ const NotificationBell = ({
       if (!anchorRef.current?.contains(event.target as Node)) setOpen(false)
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setOpen(false); return }
+      if (event.key === 'Escape') { setOpen(false); anchorRef.current?.querySelector<HTMLButtonElement>('.ch-bell')?.focus(); return }
       if (!listRef.current) return
 
       // 방향키로 항목 사이를 이동한다 — 마우스 없이도 알림을 훑을 수 있게.
@@ -113,8 +113,8 @@ const NotificationBell = ({
       <button
         type="button"
         className="ch-bell"
-        aria-label={unreadCount > 0 ? `알림 ${unreadCount}건 읽지 않음` : '알림'}
-        aria-haspopup="menu"
+        aria-label={unreadCount > 0 ? `읽지 않은 다가오는 마감 ${unreadCount}건` : '알림'}
+        aria-haspopup="dialog"
         aria-expanded={open}
         onClick={toggleOpen}
       >
@@ -128,7 +128,7 @@ const NotificationBell = ({
       </span>
 
       {open && (
-        <div className="ch-menu ch-menu--right ch-menu--notifications" role="menu">
+        <div className="ch-menu ch-menu--right ch-menu--notifications" role="dialog" aria-label="마감 알림">
           <div className="ch-menu__header ch-notif__head">
             <div>
               <span className="ch-menu__name">알림</span>
@@ -147,7 +147,11 @@ const NotificationBell = ({
             )}
           </div>
 
-          <div ref={listRef}>
+          <div className="ch-notif__settings">
+            <button type="button" className="ch-btn ch-btn--sm" onClick={() => { setOpen(false); navigate('/settings') }}>알림 설정 · 알림함</button>
+            <span>같은 마감의 여러 리마인드는 1건으로 묶습니다.</span>
+          </div>
+          <div className="ch-notif__list" ref={listRef}>
             {visible.length === 0 ? (
               <div className="ch-notif__empty">
                 {!hasEnabledTopics ? (
@@ -179,7 +183,7 @@ const NotificationBell = ({
                     type="button"
                     className="ch-notif__open"
                     data-notif-item
-                    role="menuitem"
+
                     onClick={() => openGroup(group)}
                     aria-label={`${group.dDayLabel} ${group.primary.title}${group.primary.url ? ' — 원문 열기' : ' — 챗봇에 물어보기'}`}
                   >
@@ -211,7 +215,7 @@ const NotificationBell = ({
           <button
             type="button"
             className="ch-menu__item"
-            role="menuitem"
+
             onClick={() => { setOpen(false); navigate('/settings') }}
           >
             알림 설정

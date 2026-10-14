@@ -1,3 +1,6 @@
+import { useMasterDetail } from '../../hooks/useMasterDetail'
+import { canApproveReview, supportsContentEditing } from '../../admin/staffReview'
+import StaffRefreshPreview from '../../components/admin/StaffRefreshPreview'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
@@ -44,6 +47,7 @@ const SOURCE_FILTERS = [
   { key: 'custom_knowledge', label: 'FAQ' },
   { key: 'event', label: '행사' },
   { key: 'announcement', label: '공지' },
+  { key: 'staff_refresh', label: '교직원 갱신' },
 ]
 
 const matchesStatus = (review: PendingAnswerReview, filter: StatusFilter) => {
@@ -56,6 +60,9 @@ const matchesStatus = (review: PendingAnswerReview, filter: StatusFilter) => {
 const ReviewPage = () => {
   const { showToast, notifyDataChanged, dataVersion } = useAdminConsole()
   const [searchParams, setSearchParams] = useSearchParams()
+
+  const detail = useMasterDetail()
+  const { reveal: revealDetail } = detail
 
   const [reviews, setReviews] = useState<PendingAnswerReview[]>([])
   const [loading, setLoading] = useState(true)
@@ -122,17 +129,6 @@ const ReviewPage = () => {
     void loadReviews()
   }, [loadReviews, dataVersion])
 
-  // 로그·피드백 화면에서 "FAQ로 등록"으로 넘어온 경우 해당 항목을 바로 연다.
-  useEffect(() => {
-    const focusId = searchParams.get('item')
-    if (focusId && reviews.some((review) => review.id === focusId)) {
-      setSelectedId(focusId)
-      setStatusFilter('all')
-      searchParams.delete('item')
-      setSearchParams(searchParams, { replace: true })
-    }
-  }, [reviews, searchParams, setSearchParams])
-
   const departments = useMemo(
     () => Array.from(new Set(reviews.map((review) => review.departmentName))).sort(),
     [reviews],
@@ -151,9 +147,27 @@ const ReviewPage = () => {
     })
   }, [reviews, statusFilter, sourceFilter, departmentFilter, search])
 
+  const focusId = searchParams.get('item')
+  // Resolve the requested item before removing its URL identity. A pending-only render
+  // must never overwrite an approved-history selection while filters are changing.
+  useEffect(() => {
+    if (!focusId || !reviews.some((review) => review.id === focusId)) return
+    setStatusFilter('all')
+    setSourceFilter('all')
+    setDepartmentFilter('all')
+    setSearch('')
+    if (selectedId !== focusId) { setSelectedId(focusId); return }
+    if (statusFilter !== 'all' || sourceFilter !== 'all' || departmentFilter !== 'all' || search
+      || !filtered.some((review) => review.id === focusId)) return
+    revealDetail()
+    const next = new URLSearchParams(searchParams)
+    next.delete('item')
+    setSearchParams(next, { replace: true })
+  }, [focusId, reviews, selectedId, statusFilter, sourceFilter, departmentFilter, search, filtered, searchParams, setSearchParams, revealDetail])
+
   // 필터 결과가 바뀌면 화면에 없는 항목이 선택된 채로 남지 않도록 맞춘다.
   useEffect(() => {
-    setSelectedId((previous) => (
+    if (!focusId) setSelectedId((previous) => (
       previous && filtered.some((review) => review.id === previous) ? previous : filtered[0]?.id ?? null
     ))
     setCheckedIds((previous) => {
@@ -161,7 +175,7 @@ const ReviewPage = () => {
       const next = new Set(Array.from(previous).filter((id) => visible.has(id)))
       return next.size === previous.size ? previous : next
     })
-  }, [filtered])
+  }, [filtered, focusId])
 
   const selected = useMemo(
     () => filtered.find((review) => review.id === selectedId) ?? null,
@@ -195,6 +209,10 @@ const ReviewPage = () => {
   }
 
   const runApprove = async (ids: string[]) => {
+    if (!ids.length || ids.some((id) => { const item = reviews.find((review) => review.id === id); return !item || !canApproveReview(item) })) {
+      showToast('검토에 필요한 내용이 없거나 지원되지 않는 항목은 승인할 수 없습니다.', 'error')
+      return
+    }
     setProcessing(true)
     const results = await Promise.allSettled(ids.map((id) => approveItem(id)))
     const succeeded = ids.filter((_, index) => results[index].status === 'fulfilled')
@@ -239,7 +257,7 @@ const ReviewPage = () => {
   }
 
   const startEditing = () => {
-    if (!selected) return
+    if (!selected || !supportsContentEditing(selected.sourceType)) return
     const fields = getEditableFields(selected.sourceType)
     const draft: Record<string, string> = {}
     fields.forEach((field) => {
@@ -322,14 +340,15 @@ const ReviewPage = () => {
         </FilterBar>
 
         {loadError && <ErrorNote>{loadError}</ErrorNote>}
+        {!loading && focusId && !reviews.some((review) => review.id === focusId) && <ErrorNote>요청한 검수 항목을 찾을 수 없습니다. 링크와 조회 권한을 확인해주세요.</ErrorNote>}
 
         {loading ? (
           <LoadingNote />
         ) : filtered.length === 0 ? (
           <EmptyState>조건에 맞는 검수 항목이 없습니다.</EmptyState>
         ) : (
-          <div className="ac-split">
-            <div className="ac-list">
+          <div className={`ac-split ac-master-detail ${detail.shown ? 'ac-master-detail--open' : ''}`}>
+            <div className="ac-list" ref={detail.listRef} tabIndex={-1} aria-label="검수 목록">
               {checkedPendingIds.length > 0 && (
                 <div className="ac-bulkbar">
                   <span>{checkedPendingIds.length}개 선택됨</span>
@@ -337,7 +356,7 @@ const ReviewPage = () => {
                     type="button"
                     className="ac-btn ac-btn--sm ac-btn--primary"
                     onClick={() => setBulkApproveTarget(checkedPendingIds)}
-                    disabled={processing}
+                    disabled={processing || checkedPendingIds.some((id) => !canApproveReview(reviews.find((item) => item.id === id)!))}
                   >
                     일괄 승인
                   </button>
@@ -364,19 +383,19 @@ const ReviewPage = () => {
                   className={`ac-list-item ${selectedId === review.id ? 'ac-list-item--active' : ''}`}
                 >
                   {review.status === 'pending' && (
-                    <input
+                    <label className="ac-row-check"><input
                       type="checkbox"
                       className="ac-checkbox"
                       checked={checkedIds.has(review.id)}
                       onChange={() => toggleChecked(review.id)}
                       aria-label={`${review.question} 선택`}
-                    />
+                    /></label>
                   )}
                   <button
                     type="button"
                     className="ac-list-item__body"
                     style={{ border: 0, background: 'none', padding: 0, textAlign: 'left', font: 'inherit', cursor: 'pointer' }}
-                    onClick={() => setSelectedId(review.id)}
+                    onClick={() => { setSelectedId(review.id); detail.reveal() }}
                     aria-pressed={selectedId === review.id}
                   >
                     <span className="ac-list-item__title">{review.question}</span>
@@ -391,7 +410,8 @@ const ReviewPage = () => {
               ))}
             </div>
 
-            <div className="ac-detail">
+            <div className="ac-detail" ref={detail.detailRef} tabIndex={-1}>
+              <button type="button" className="ac-btn ac-detail-back" onClick={detail.back}>← 목록으로</button>
               {!selected ? (
                 <EmptyState>목록에서 항목을 선택하세요.</EmptyState>
               ) : (
@@ -399,7 +419,7 @@ const ReviewPage = () => {
                   <p className="ac-detail__eyebrow">
                     {selected.departmentName} · {getSourceTypeLabel(selected.sourceType)}
                   </p>
-                  <h2 className="ac-detail__title">{selected.question}</h2>
+                  <h2 className="ac-detail__title" tabIndex={-1}>{selected.question}</h2>
 
                   <dl className="ac-detail__meta">
                     <div>
@@ -438,7 +458,7 @@ const ReviewPage = () => {
                     </p>
                   )}
 
-                  {editing ? (
+                  {selected.sourceType === 'staff_refresh' ? <StaffRefreshPreview data={selected.raw} /> : editing ? (
                     <div>
                       {getEditableFields(selected.sourceType).map((field) => (
                         <div className="ac-field" key={field.key}>
@@ -475,7 +495,7 @@ const ReviewPage = () => {
                     <div className="ac-detail__content">{selected.answer || '내용이 없습니다.'}</div>
                   )}
 
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                  {supportsContentEditing(selected.sourceType) && <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       className="ac-btn ac-btn--sm"
@@ -489,7 +509,7 @@ const ReviewPage = () => {
                         수정
                       </button>
                     )}
-                  </div>
+                  </div>}
 
                   {showPreview && (
                     <div className="ac-preview">
@@ -498,6 +518,7 @@ const ReviewPage = () => {
                     </div>
                   )}
 
+                  {selected.status === 'pending' && !canApproveReview(selected) && <ErrorNote>내용을 확인할 수 없어 승인이 잠겨 있습니다. 자료를 다시 확인하거나 사유를 적어 반려해주세요.</ErrorNote>}
                   {selected.status === 'pending' && !editing && (
                     <div className="ac-detail__actions">
                       <button
@@ -515,7 +536,7 @@ const ReviewPage = () => {
                         type="button"
                         className="ac-btn ac-btn--primary"
                         onClick={() => { void runApprove([selected.id]) }}
-                        disabled={processing}
+                        disabled={processing || !canApproveReview(selected)}
                       >
                         {processing ? '처리 중...' : '승인'}
                       </button>
