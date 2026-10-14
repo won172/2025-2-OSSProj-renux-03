@@ -40,6 +40,10 @@ public class ChatSourceDto
 
     public string? ChunkId { get; init; }
 
+    public string? SourceRef { get; init; }
+
+    public int? CitationNumber { get; init; }
+
     public string? Title { get; init; }
 
     public string? Url { get; init; }
