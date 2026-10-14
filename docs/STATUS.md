@@ -62,6 +62,27 @@ Last Updated: 2026-10-15 (모바일 UX 후보 상태 갱신)
 - IPA SHA-256: `9e164d148f42bf7d4b4650124df963c75322f4ddb2faea85ab47bfd9658a5c30`.
 - 외부 테스트 그룹은 기존과 같이 빌드 0개이며, 외부 Beta App Review와 App Store 공개 심사는 제출하지 않았다.
 
+## 2026-10-15 최종 후보와 TestFlight 1.0(8)
+
+- 운영 반영 준비 중 API 컨테이너가 `renuxserver-api:native-stream-auth-d826ac9`를 사용하며,
+  해당 `d826ac9`와 대응 클라이언트 `3d758c9`가 `main` 및 빌드 7 후보에 포함되지 않았음을 확인했다.
+  향후 API 교체에서 기존 티켓 기능을 잃지 않고 iOS SSE가 이를 사용하도록 두 변경을 함께 통합했다.
+- 현재 최종 후보는 `chore/mobile-ux-testflight`의 `45535b6`, [PR #64](https://github.com/won172/2025-2-OSSProj-renux-03/pull/64)다.
+  통합 커밋은 `133ce1a`이며 출처 식별자와 인증 티켓 테스트 호출을 모두 보존했다.
+- Root의 frontend lint·123개 테스트·웹/native 빌드, backend Release·전체 계약 테스트가 통과했다.
+  독립 인증 계약 리뷰에서 보고할 P0–P2 구현 결함은 없었다. 원격 PR #64 CI도 모두 통과했다.
+  실제 API의 비로그인 `/chat/stream-ticket`은 401, 앱 Origin의 티켓 헤더 preflight는 204였다.
+  로그인 후 실제 네이티브 HTTP→SSE→저장 전체 경로는 아직 미확인이다.
+- TestFlight 1.0(8)의 Apple 검증·업로드·처리가 성공했다. Build ID는 `d9788bcc-8fd8-4c69-800c-1a4252290483`이며,
+  `VALID`, 내부 그룹 ‘똑똑이’의 `IN_BETA_TESTING`과 웹 화면의 ‘테스트 중’을 확인했다. 한국어 테스트 안내도 반영했다.
+  IPA SHA-256은 `462231bccf837a3502ca12afb02375e172e351ff2e46a1545897d02626b5b2a1`이다.
+- 웹/API 이미지 `renuxserver-api:mobile-ux-45535b6`를 만들었고 이미지의 웹 파일 39개가 후보와 일치했다.
+  운영 API 환경값과 데이터 보호 키 볼륨을 그대로 보존하는 배포 구성을 확인했다. 원래 compose override가
+  실행 시 주입되는 환경변수에 의존하므로, 이를 누락한 일반 compose 실행을 사용하면 안 된다.
+  값은 기존 컨테이너에서 자식 프로세스 환경으로만 전달하며 파일·로그에 복사하지 않는다.
+- 운영 API는 아직 기존 정상 이미지로 실행 중이다. main 병합과 API 서비스 단독 교체는 human approval 대기이며,
+  RAG·PostgreSQL·Redis를 재생성하거나 DB migration을 추가하는 작업은 없다.
+
 ## 2026-09-28 운영 수집 확인
 
 - 마지막 성공 수집일부터 9월 28일까지 공지 9개 게시판을 경계 이전 페이지까지 확인했다.
@@ -143,11 +164,11 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| 모바일 UX TestFlight 1.0(7) | P1 | Orchestrator / QA | `chore/mobile-ux-testflight` | `mobile-ux-testflight` | Review | Release archive/export, 독립 패키지 QA, Apple VALID·내부 IN_BETA_TESTING·그룹 UI 확인 | TestFlight 내부 배포 완료. main 미병합·운영 웹/서버 미배포 | PR #64 human 검토; 로그인 후 최종 앱 UI 확인 |
+| 모바일 UX·네이티브 인증 TestFlight 1.0(8) | P1 | Orchestrator / QA | `chore/mobile-ux-testflight` | `mobile-ux-testflight` | Review | 123 tests, backend 계약, 독립 인증 리뷰, Release archive/export, Apple VALID·내부 IN_BETA_TESTING·그룹 UI, CI 통과 | TestFlight 내부 배포 완료. 로그인 후 native SSE 미확인. main·운영 웹/API 승인 대기 | PR #64 human 검토 및 API 단독 반영; 테스트 계정 로그인 |
 | iOS 키보드 입력창 가림 | P0 | Client | `fix/ios-keyboard-resize` | `ios-keyboard-resize` | Review | lint, 78 tests, native build, iOS 26.5 fixture 키보드 검증, 독립 QA | 실제 기기·운영 인증 미확인 | PR #60 통합 확인 후 human merge 검토 |
 | 저장 답변 출처 식별자·번호 보존 | P1 | RAG/Backend | `fix/chat-source-identity` | `chat-source-identity` | Review | Release build, 전체 계약 테스트, 8 scenarios/160 assertions, 독립 QA | PostgreSQL 실제 저장·운영 RAG 미확인 | PR #61과 출처 UI 통합 확인 |
 | 설정·관리자 모바일 사용성 | P1 | Client | `fix/mobile-interaction-layout` | `mobile-interaction-layout` | Review | 109 tests, lint/build, bundle budget, 독립 재리뷰, Chrome 360/390/1280px fixture, PR #62 CI 통과 | 로그인 후 최종 네이티브 화면 확인 대기 | 테스트 계정 로그인 후 최종 확인 |
-| 모바일 UX 후보 통합 | P1 | Orchestrator / QA | `test/mobile-ux-integration` | `mobile-ux-integration` | Review | 프런트 109 tests·웹/native bundle, 서버 Release·계약, Xcode sim build, 최종 build7 게스트 키보드 검증 | 로그인 후 앱 UI 대기. main merge·운영 웹/서버 배포 승인 없음 | 최종 앱 확인 후 human merge 검토 |
+| 모바일 UX 초기 통합 | P1 | Orchestrator / QA | `test/mobile-ux-integration` | `mobile-ux-integration` | Review | 프런트 109 tests·웹/native bundle, 서버 Release·계약, Xcode sim build, build7 게스트 키보드 검증 | 이 트리에는 운영 native auth 보강이 없음. 최종 후보는 PR #64/45535b6 | 최종 릴리스 후보 증거를 기준으로 검토 |
 | 공지 증분 동기화·관리자 upsert 임베딩 입력 통일 | P1 | RAG/Backend | `fix/notice-live-embed-retrieval-text` | `~/dongttok-work/notice-live-embed-retrieval-text`(임시, 아래 Git State) | Review | 로컬 RAG 1,453 passed/1 skipped(main 711744e 병합 후), QA 재리뷰 APPROVE, PR CI 대기 | 관리자 승인 학과 한정 공지가 Chroma에 public으로 들어가던 공개범위 결함 수정. 실제 데이터 검색 영향 미확인 | PR #51 human 검토·merge |
 | 운영 공지 자동 갱신 재개 (P0) | P0 | Orchestrator | - | - | Blocked | revision 수정 코드 merge(PR #45) | 운영 이미지 미배포, `RAG_SCHEDULER_ENABLED=0` | human 배포·스케줄러 재개 승인 |
 | 실제 후보 골든 평가 190문항 (P0) | P0 | QA | - | - | Blocked | release gate는 fail-closed로 전환(PR #14) | 후보 endpoint·모델 비용 승인 필요 | human이 endpoint 제공 |
