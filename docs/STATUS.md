@@ -39,7 +39,8 @@ Last Updated: 2026-10-15 (모바일 UX 후보 상태 갱신)
 - API fixture와 화면 증거는 저장소 밖에 보존하며 운영 인증·데이터를 사용하지 않는다.
   시뮬레이터/fixture 검증을 실제 기기·운영 API·배포 검증으로 해석하지 않는다.
 - 최종 통합 앱의 화면 재확인은 Mac 잠금으로 대기 중이다. 잠금 이전에 독립 iOS 키보드 후보의 게스트·로그인 상태 동작을 확인했다.
-  PR #60·#61의 원격 CI는 통과했고, PR #62 CI는 진행 중이다.
+  실제 API 주소를 사용하는 통합 후보 앱(version 1.0/build 6)의 시뮬레이터 설치까지 성공했다. 설치 후 화면·실제 API 통신은 미확인이다.
+  PR #60·#61·#62의 원격 frontend/backend/rag-python/secret-scan 검사는 모두 통과했다.
 - 웹 precache는 1,248,456 / 1,250,000B로 여유가 작다. 공개 화면·React·라우터는 계속 precache하며,
   관리자 전용 코드·스타일만 지연 로드한다. 기존 예산을 완화하지 않았다.
 - main merge, 운영 배포, App Store 업로드는 수행하지 않았다. 완료된 변경은 기능 브랜치에만 push했다.
@@ -127,7 +128,7 @@ Status 값:
 |---|---|---|---|---|---|---|---|---|
 | iOS 키보드 입력창 가림 | P0 | Client | `fix/ios-keyboard-resize` | `ios-keyboard-resize` | Review | lint, 78 tests, native build, iOS 26.5 fixture 키보드 검증, 독립 QA | 실제 기기·운영 인증 미확인 | PR #60 통합 확인 후 human merge 검토 |
 | 저장 답변 출처 식별자·번호 보존 | P1 | RAG/Backend | `fix/chat-source-identity` | `chat-source-identity` | Review | Release build, 전체 계약 테스트, 8 scenarios/160 assertions, 독립 QA | PostgreSQL 실제 저장·운영 RAG 미확인 | PR #61과 출처 UI 통합 확인 |
-| 설정·관리자 모바일 사용성 | P1 | Client | `fix/mobile-interaction-layout` | `mobile-interaction-layout` | Review | 109 tests, lint/build, bundle budget, 독립 재리뷰, Chrome 360/390/1280px fixture | PR #62 CI 및 최종 통합 앱 화면 확인 대기 | Mac 잠금 해제 후 최종 확인 |
+| 설정·관리자 모바일 사용성 | P1 | Client | `fix/mobile-interaction-layout` | `mobile-interaction-layout` | Review | 109 tests, lint/build, bundle budget, 독립 재리뷰, Chrome 360/390/1280px fixture, PR #62 CI 통과 | 최종 통합 앱 화면 확인 대기 | Mac 잠금 해제 후 최종 확인 |
 | 모바일 UX 후보 통합 | P1 | Orchestrator / QA | `test/mobile-ux-integration` | `mobile-ux-integration` | Review | 프런트 109 tests·웹/native bundle, 서버 Release·계약, Xcode sim build | Mac 잠금으로 최종 앱 UI 대기. main merge·운영 배포 승인 없음 | 최종 앱 확인 후 human merge 검토 |
 | 공지 증분 동기화·관리자 upsert 임베딩 입력 통일 | P1 | RAG/Backend | `fix/notice-live-embed-retrieval-text` | `~/dongttok-work/notice-live-embed-retrieval-text`(임시, 아래 Git State) | Review | 로컬 RAG 1,453 passed/1 skipped(main 711744e 병합 후), QA 재리뷰 APPROVE, PR CI 대기 | 관리자 승인 학과 한정 공지가 Chroma에 public으로 들어가던 공개범위 결함 수정. 실제 데이터 검색 영향 미확인 | PR #51 human 검토·merge |
 | 운영 공지 자동 갱신 재개 (P0) | P0 | Orchestrator | - | - | Blocked | revision 수정 코드 merge(PR #45) | 운영 이미지 미배포, `RAG_SCHEDULER_ENABLED=0` | human 배포·스케줄러 재개 승인 |
