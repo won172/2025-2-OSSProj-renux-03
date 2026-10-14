@@ -1,16 +1,48 @@
 # Dongttok Current Status
 
-Last Updated: 2026-09-29
+Last Updated: 2026-10-15 (모바일 UX 후보 상태 갱신)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
 설정 상태는 코드 기본값을 기준으로 기록한다.
+아래 9월 운영·RAG 기록은 이번 UI 작업에서 다시 확인하지 않은 당시 기록이다.
 
 ## Current Goal
 
 동똑이 RAG 검색 품질과 서비스 안정성을 개선한다.
 질문에 맞게 구조화 SQL 관계 조회, 키워드 검색, 벡터 검색을 선택하고,
 동국대학교 공식 출처와 정본 데이터에 근거한 답변을 유지한다.
+
+10월 13일 화면 감사에서 확인한 모바일 입력·알림 설정·관리자 화면 문제를
+우선순위에 따라 개선하고, 독립 리뷰와 로컬 웹/iOS 화면 검증을 거쳐 merge 후보로 제공한다.
+
+## 2026-10-15 모바일 UX 개선 후보
+
+- 작업 기준은 `origin/main`의 `b559b966`이다. primary checkout의 기존 RAG 데이터·산출물 변경은 보존했다.
+- iOS 키보드: `fix/ios-keyboard-resize`의 `c145245`, [PR #60](https://github.com/won172/2025-2-OSSProj-renux-03/pull/60).
+  Capacitor Keyboard Native resize와 중복 inset 방지 설정을 추가했다. root의 lint·78개 테스트와
+  Xcode 시뮬레이터 빌드가 통과했다. iOS 26.5 로컬 API fixture에서 로그인 상태와 게스트 홈,
+  여러 줄 입력·전송 버튼 탭·키보드 닫힘 후 여백 복원을 확인했다. 독립 정적 QA의 P0–P2 지적은 없었다.
+- 출처 저장: `fix/chat-source-identity`의 `bb2c56a`, [PR #61](https://github.com/won172/2025-2-OSSProj-renux-03/pull/61).
+  `source_ref`·`citation_number`를 저장·히스토리 DTO까지 보존한다. root의 Release 빌드와 전체 계약 테스트,
+  출처 보존 8개 시나리오·160개 assertion이 통과했다. 독립 정적 QA의 P0–P2 지적은 없었다.
+- 웹 화면: `fix/mobile-interaction-layout`의 소스 `a8d15e0` 및 웹 산출물 `e7b5a3b`,
+  [PR #62](https://github.com/won172/2025-2-OSSProj-renux-03/pull/62). 밝은 설정/로딩 화면, 설정 분리·8건 단위 목록,
+  모바일 목록/상세 전환, 교직원 갱신 diff와 승인 가드, 터치 조작·출처 카드·로딩 복구를 구현했다.
+  독립 QA의 P2 6건을 수정하고 재리뷰에서 추가 P0–P2 지적이 없음을 확인했다.
+  root와 QA 각각 109개 프런트 테스트·lint·타입/번들 검사를 통과했다.
+- `test/mobile-ux-integration`의 `1b68481`에서 세 후보를 조합했다. 프런트 lint·109개 테스트·웹/native bundle,
+  서버 Release 빌드·전체 계약 테스트, Xcode 시뮬레이터 컴파일이 통과했다. 웹 산출물은 재생성해도 Git diff가 없다.
+- 실제 Chrome 360/390/1280px에서 로컬 API fixture의 production bundle을 확인했다. 설정 탭·저장·미저장 이탈 확인,
+  독립 조회 오류·계정 접근, 승인 이력 링크, 학과 폼, staff 검토/차단, 출처 1/3 카드 연결, 관리자 카드·drawer 초점 복귀,
+  개인정보 화면을 확인했다. 동일 fixture의 설정 첫 화면 높이는 390px 폭에서 14,737px → 1,280px다.
+- API fixture와 화면 증거는 저장소 밖에 보존하며 운영 인증·데이터를 사용하지 않는다.
+  시뮬레이터/fixture 검증을 실제 기기·운영 API·배포 검증으로 해석하지 않는다.
+- 최종 통합 앱의 화면 재확인은 Mac 잠금으로 대기 중이다. 잠금 이전에 독립 iOS 키보드 후보의 게스트·로그인 상태 동작을 확인했다.
+  PR #60·#61의 원격 CI는 통과했고, PR #62 CI는 진행 중이다.
+- 웹 precache는 1,248,456 / 1,250,000B로 여유가 작다. 공개 화면·React·라우터는 계속 precache하며,
+  관리자 전용 코드·스타일만 지연 로드한다. 기존 예산을 완화하지 않았다.
+- main merge, 운영 배포, App Store 업로드는 수행하지 않았다. 완료된 변경은 기능 브랜치에만 push했다.
 
 ## 2026-09-28 운영 수집 확인
 
@@ -49,6 +81,7 @@ Last Updated: 2026-09-29
 
 ### P0
 
+- iOS 키보드 수정 후보를 모바일 웹 개선과 통합 확인한 뒤 human merge 승인을 받는다.
 - 공지 증분 갱신의 revision 메타데이터 수정 코드를 검토·배포한 뒤 자동 수집을
   재개한다. 9월 28일 운영 데이터는 수동 복구 후 strict lineage를 통과했다.
 - 실제 후보 endpoint의 전체 골든 평가와 결과·manifest를 확보한다.
@@ -56,6 +89,7 @@ Last Updated: 2026-09-29
 
 ### P1
 
+- 알림 설정의 어두운 화면·긴 목록과 모바일 관리자 조작을 개선하고 화면 회귀를 검증한다.
 - 이미 구현된 regression 평가 도구를 같은 질문·기준일·corpus/model revision으로 반복 실행한다.
 - 실제 질문과 사람 판정 qrels를 확대한다. 관계형 질문 목표는 200건이며 교과목 실사용 표본을 보강한다.
 - Retrieval 품질과 cold/warm 지연, p50/p95, fallback을 함께 측정한다.
@@ -91,6 +125,10 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
+| iOS 키보드 입력창 가림 | P0 | Client | `fix/ios-keyboard-resize` | `ios-keyboard-resize` | Review | lint, 78 tests, native build, iOS 26.5 fixture 키보드 검증, 독립 QA | 실제 기기·운영 인증 미확인 | PR #60 통합 확인 후 human merge 검토 |
+| 저장 답변 출처 식별자·번호 보존 | P1 | RAG/Backend | `fix/chat-source-identity` | `chat-source-identity` | Review | Release build, 전체 계약 테스트, 8 scenarios/160 assertions, 독립 QA | PostgreSQL 실제 저장·운영 RAG 미확인 | PR #61과 출처 UI 통합 확인 |
+| 설정·관리자 모바일 사용성 | P1 | Client | `fix/mobile-interaction-layout` | `mobile-interaction-layout` | Review | 109 tests, lint/build, bundle budget, 독립 재리뷰, Chrome 360/390/1280px fixture | PR #62 CI 및 최종 통합 앱 화면 확인 대기 | Mac 잠금 해제 후 최종 확인 |
+| 모바일 UX 후보 통합 | P1 | Orchestrator / QA | `test/mobile-ux-integration` | `mobile-ux-integration` | Review | 프런트 109 tests·웹/native bundle, 서버 Release·계약, Xcode sim build | Mac 잠금으로 최종 앱 UI 대기. main merge·운영 배포 승인 없음 | 최종 앱 확인 후 human merge 검토 |
 | 공지 증분 동기화·관리자 upsert 임베딩 입력 통일 | P1 | RAG/Backend | `fix/notice-live-embed-retrieval-text` | `~/dongttok-work/notice-live-embed-retrieval-text`(임시, 아래 Git State) | Review | 로컬 RAG 1,453 passed/1 skipped(main 711744e 병합 후), QA 재리뷰 APPROVE, PR CI 대기 | 관리자 승인 학과 한정 공지가 Chroma에 public으로 들어가던 공개범위 결함 수정. 실제 데이터 검색 영향 미확인 | PR #51 human 검토·merge |
 | 운영 공지 자동 갱신 재개 (P0) | P0 | Orchestrator | - | - | Blocked | revision 수정 코드 merge(PR #45) | 운영 이미지 미배포, `RAG_SCHEDULER_ENABLED=0` | human 배포·스케줄러 재개 승인 |
 | 실제 후보 골든 평가 190문항 (P0) | P0 | QA | - | - | Blocked | release gate는 fail-closed로 전환(PR #14) | 후보 endpoint·모델 비용 승인 필요 | human이 endpoint 제공 |
@@ -100,6 +138,9 @@ Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 완료된 행은 다음 갱신 때 Recently Completed로 옮긴다.
 
 ## Git State
+
+2026-10-15 모바일 UX 작업 시작 시 `git fetch origin`으로 `origin/main = b559b966`을 확인했다.
+신규 브랜치는 모두 이 기준에서 별도 worktree로 생성했다. PR #60·#61·#62는 아직 merge되지 않은 후보다.
 
 2026-09-28 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
 
