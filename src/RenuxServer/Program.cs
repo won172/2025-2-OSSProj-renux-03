@@ -103,6 +103,8 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 builder.Services.AddHttpClient();
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<RenuxServer.Services.ChatStreamTicketService>();
 string dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"]
     ?? builder.Configuration["DATA_PROTECTION_KEYS_PATH"]
     ?? Path.Combine(builder.Environment.ContentRootPath, ".data-protection-keys");
@@ -128,25 +130,15 @@ builder.Services.AddRateLimiter(options =>
     // 채팅(RAG) 경로 제한 — 인증 사용자는 JWT sub, 게스트는 IP 단위로 집계.
     options.AddPolicy("chat", httpContext =>
     {
-        var userId = httpContext.User.FindFirstValue("sub");
-        if (httpContext.User.Identity?.IsAuthenticated == true && !string.IsNullOrWhiteSpace(userId))
-        {
-            return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: $"user:{userId}",
-                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = 20,
-                    Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0,
-                });
-        }
-
-        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        // A DP-valid, unexpired, pending ticket supplies only a trusted rate
+        // partition hint. Endpoint body binding, consumption and DB authority
+        // still happen before authenticated stream delivery.
+        string partition = RenuxServer.Services.ChatStreamTicketService.ResolveRateLimitPartition(httpContext);
         return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: $"ip:{ip}",
+            partitionKey: partition,
             factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
-                PermitLimit = 10,
+                PermitLimit = partition.StartsWith("user:", StringComparison.Ordinal) ? 20 : 10,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             });

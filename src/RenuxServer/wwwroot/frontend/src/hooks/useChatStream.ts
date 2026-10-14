@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { resolveApiUrl, withNgrokHeader } from '../api/client'
+import { Capacitor } from '@capacitor/core'
+import { apiFetch, resolveApiUrl, withNgrokHeader, type ApiError } from '../api/client'
 import { withGuestTokenHeader } from '../chat/guestToken'
 import { getCompletionRetrieval, getCompletionVerification, getGroundingFromEvent, parseChatStreamLine } from '../chat/streamEvents'
 import type { ChatRetrievalMode, ChatVerificationStatus } from '../chat/chatState'
@@ -91,27 +92,49 @@ export const useChatStream = (routeChatId?: string) => {
       activeChatIdRef.current = payload.chatId
 
       const openStream = async () => {
+        const requestBody = {
+          id: payload.id,
+          chatId: payload.chatId,
+          isAsk: true,
+          content: payload.content,
+          createdTime: payload.createdTime,
+        }
+        let headers = withGuestTokenHeader({
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        }, payload.guestToken)
+
+        // Native JSON APIs authenticate with URLSession's HttpOnly cookie jar.
+        // WKWebView cannot reliably send that jar's remote cookie on SSE fetch.
+        // Exchange it for one short-lived, request-bound ticket; keep SSE on fetch
+        // because CapacitorHttp buffers responses. Never persist the ticket.
+        if (Capacitor.isNativePlatform() && !payload.guestToken) {
+          const response = await apiFetch<{ ticket?: string }>('/chat/stream-ticket', {
+            method: 'POST',
+            json: requestBody,
+            signal: controller.signal,
+          })
+          if (!response || typeof response.ticket !== 'string' || !response.ticket.trim()) {
+            throw new Error('No chat stream ticket available')
+          }
+          headers = { ...headers, 'X-Dongttok-Stream-Ticket': response.ticket }
+        }
+        if (controller.signal.aborted) {
+          throw new DOMException('The chat stream was stopped.', 'AbortError')
+        }
         const response = await fetch(url, {
           method: 'POST',
-          headers: withNgrokHeader(
-            url,
-            withGuestTokenHeader({
-              'Content-Type': 'application/json',
-              Accept: 'text/event-stream',
-            }, payload.guestToken),
-          ),
-          body: JSON.stringify({
-            id: payload.id,
-            chatId: payload.chatId,
-            isAsk: true,
-            content: payload.content,
-            createdTime: payload.createdTime,
-          }),
+          headers: withNgrokHeader(url, headers),
+          body: JSON.stringify(requestBody),
           credentials: 'include',
           signal: controller.signal,
         })
 
-        if (!response.ok) throw new Error(`Streaming failed (status: ${response.status})`)
+        if (!response.ok) {
+          const error: ApiError = new Error(`Streaming failed (status: ${response.status})`)
+          error.status = response.status
+          throw error
+        }
         return response
       }
 
