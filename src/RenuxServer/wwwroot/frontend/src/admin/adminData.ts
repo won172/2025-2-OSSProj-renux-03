@@ -1,3 +1,5 @@
+import { publicMajorName } from '../auth/publicMajor.ts'
+import { staffRefreshSummary } from './staffReview.ts'
 import type {
   AdminItemResponse,
   DepartmentKnowledge,
@@ -50,8 +52,17 @@ const getItemDisplay = (item: AdminItemResponse) => {
     }
   }
 
+  if (item.source_type === 'staff_refresh') {
+    return {
+      title: '교직원 전화번호부 갱신',
+      content: staffRefreshSummary(data),
+      department: '대학 공통 · 교직원',
+      requester: '교직원 자동 수집',
+    }
+  }
+
   return {
-    title: '제목 없음',
+    title: `지원되지 않는 등록 유형 (${item.source_type})`,
     content: '',
     department: '공통',
     requester: readText(data, 'requester') || '정보 없음',
@@ -153,7 +164,7 @@ export const buildChatPreview = (sourceType: string, data: Record<string, unknow
       text('title') && `${text('title')} 행사 안내`,
       period && `일시: ${period}`,
       text('location') && `장소: ${text('location')}`,
-      text('department') && `주관: ${text('department')}`,
+      publicMajorName(text('department')) && `주관: ${publicMajorName(text('department'))}`,
       text('description'),
     ].filter(Boolean).join('\n')
   }
@@ -163,7 +174,7 @@ export const buildChatPreview = (sourceType: string, data: Record<string, unknow
       text('title'),
       text('date') && `게시일: ${text('date')}`,
       text('category') && `분류: ${text('category')}`,
-      text('department') && `학과: ${text('department')}`,
+      publicMajorName(text('department')) && `학과: ${publicMajorName(text('department'))}`,
       text('content'),
     ].filter(Boolean).join('\n')
   }

@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useId, useRef } from 'react'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
+import { type ReactNode, useId, useRef } from 'react'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -33,56 +34,16 @@ const ConfirmDialog = ({
 }: ConfirmDialogProps) => {
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
-  const previouslyFocused = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    previouslyFocused.current = document.activeElement as HTMLElement | null
-
-    const focusTarget = dialogRef.current?.querySelector<HTMLElement>('input, textarea')
-      ?? dialogRef.current?.querySelector<HTMLElement>('button[data-autofocus]')
-      ?? dialogRef.current?.querySelector<HTMLElement>('button')
-    focusTarget?.focus()
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        onCancel()
-        return
-      }
-      if (event.key !== 'Tab') return
-
-      // 포커스가 다이얼로그 밖(뒤쪽 채팅 화면)으로 새지 않도록 순환시킨다.
-      const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      )
-      if (!focusables || focusables.length === 0) return
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown, true)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown, true)
-      previouslyFocused.current?.focus?.()
-    }
-  }, [open, onCancel])
+  useFocusTrap(open, dialogRef, onCancel, busy)
 
   if (!open) return null
 
   return (
     <div
       className="ch-dialog-backdrop"
-      onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}
+      onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel() }}
     >
-      <div className="ch-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={dialogRef}>
+      <div className="ch-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={dialogRef} tabIndex={-1}>
         <h2 className="ch-dialog__title" id={titleId}>{title}</h2>
         {description && <p className="ch-dialog__desc">{description}</p>}
         {children}
@@ -93,7 +54,7 @@ const ConfirmDialog = ({
           <button
             type="button"
             className={`ch-btn ${tone === 'danger' ? 'ch-btn--danger' : 'ch-btn--primary'}`}
-            onClick={onConfirm}
+            onClick={() => { if (!busy && !confirmDisabled) onConfirm() }}
             disabled={busy || confirmDisabled}
             data-autofocus={children ? undefined : true}
           >

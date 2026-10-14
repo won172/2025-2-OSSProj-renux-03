@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+import { supportsContentEditing } from '../../admin/staffReview'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchAllItems, setItemDisabled, updateItem } from '../../admin/adminApi'
 import { buildChatPreview, getEditableFields, toPendingAnswerReview } from '../../admin/adminData'
@@ -31,6 +33,7 @@ const SOURCE_FILTERS = [
   { key: 'custom_knowledge', label: 'FAQ' },
   { key: 'event', label: '행사' },
   { key: 'announcement', label: '공지' },
+  { key: 'staff_refresh', label: '교직원 갱신' },
 ]
 
 /**
@@ -94,17 +97,19 @@ const ContentPage = () => {
     return items.filter((item) => {
       if (sourceFilter !== 'all' && item.sourceType !== sourceFilter) return false
       if (departmentFilter !== 'all' && item.departmentName !== departmentFilter) return false
-      if (visibility === 'active' && item.disabled) return false
+      if (visibility === 'active' && (item.disabled || !supportsContentEditing(item.sourceType))) return false
       if (visibility === 'disabled' && !item.disabled) return false
       if (term && !item.question.toLowerCase().includes(term) && !item.answer.toLowerCase().includes(term)) return false
       return true
     })
   }, [items, sourceFilter, departmentFilter, visibility, search])
 
-  const activeCount = items.filter((item) => !item.disabled).length
-  const disabledCount = items.length - activeCount
+  const editableItems = items.filter((item) => supportsContentEditing(item.sourceType))
+  const activeCount = editableItems.filter((item) => !item.disabled).length
+  const disabledCount = editableItems.length - activeCount
 
   const startEdit = (item: PendingAnswerReview) => {
+    if (!supportsContentEditing(item.sourceType)) return
     const draft: Record<string, string> = {}
     getEditableFields(item.sourceType).forEach((field) => {
       const value = item.raw[field.key]
@@ -116,7 +121,7 @@ const ContentPage = () => {
   }
 
   const saveEdit = async () => {
-    if (!editTarget) return
+    if (!editTarget || !supportsContentEditing(editTarget.sourceType)) return
     setBusy(true)
     try {
       const nextData = { ...editTarget.raw, ...editDraft }
@@ -133,7 +138,7 @@ const ContentPage = () => {
   }
 
   const applyDisable = async () => {
-    if (!disableTarget) return
+    if (!disableTarget || !supportsContentEditing(disableTarget.item.sourceType)) return
     setBusy(true)
     try {
       await setItemDisabled(disableTarget.item.id, disableTarget.next)
@@ -159,7 +164,7 @@ const ContentPage = () => {
     <>
       <PageHeader
         title="콘텐츠"
-        description="승인되어 챗봇이 사용 중인 지식을 수정하거나 노출에서 내립니다."
+        description="FAQ·행사·공지의 내용을 수정하거나 노출을 관리합니다. 교직원 갱신 승인 이력은 전체 탭에서 확인합니다."
         actions={
           <button type="button" className="ac-btn" onClick={() => { void loadItems() }} disabled={loading}>
             {loading ? '새로고침 중...' : '새로고침'}
@@ -212,36 +217,36 @@ const ContentPage = () => {
         ) : filtered.length === 0 ? (
           <EmptyState>조건에 맞는 승인 콘텐츠가 없습니다.</EmptyState>
         ) : (
-          <TableScroll minWidth={940}>
-            <table className="ac-table">
-              <thead>
-                <tr>
-                  <th>제목</th>
-                  <th>유형</th>
-                  <th>학과</th>
-                  <th>등록자</th>
-                  <th>승인일</th>
-                  <th>노출</th>
-                  <th className="actions">관리</th>
+          <TableScroll mobileCards minWidth={940}>
+            <table className="ac-table" role="table">
+              <thead role="rowgroup">
+                <tr role="row">
+                  <th role="columnheader" scope="col">제목</th>
+                  <th role="columnheader" scope="col">유형</th>
+                  <th role="columnheader" scope="col">학과</th>
+                  <th role="columnheader" scope="col">등록자</th>
+                  <th role="columnheader" scope="col">승인일</th>
+                  <th role="columnheader" scope="col">노출</th>
+                  <th role="columnheader" scope="col" className="actions">관리</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody role="rowgroup">
                 {filtered.map((item) => (
-                  <tr key={item.id}>
-                    <td className="truncate" title={item.question}>{item.question}</td>
-                    <td>{getSourceTypeLabel(item.sourceType)}</td>
-                    <td>{item.departmentName}</td>
-                    <td>{item.handler}</td>
-                    <td className="num" title={formatFullDateTime(item.reviewedAt ?? item.submittedAt)}>
+                  <tr role="row" key={item.id}>
+                    <td role="cell" data-label="제목" className="truncate" title={item.question}><b>{item.question}</b><details className="ac-cell-details"><summary>내용 보기</summary><p>{item.answer || '내용 확인 필요'}</p></details></td>
+                    <td role="cell" data-label="유형">{getSourceTypeLabel(item.sourceType)}</td>
+                    <td role="cell" data-label="학과">{item.departmentName}</td>
+                    <td role="cell" data-label="등록자">{item.handler}</td>
+                    <td role="cell" data-label="승인일" className="num" title={formatFullDateTime(item.reviewedAt ?? item.submittedAt)}>
                       {formatDateTime(item.reviewedAt ?? item.submittedAt)}
                     </td>
-                    <td>
+                    <td role="cell" data-label="상태">
                       <StatusPill tone={item.disabled ? 'neutral' : 'success'}>
-                        {item.disabled ? '중단' : '사용 중'}
+                        {!supportsContentEditing(item.sourceType) ? '승인 이력' : item.disabled ? '중단' : '사용 중'}
                       </StatusPill>
                     </td>
-                    <td className="actions" onClick={(event) => event.stopPropagation()}>
-                      <RowMenu
+                    <td role="cell" data-label="관리" className="actions" onClick={(event) => event.stopPropagation()}>
+                      {!supportsContentEditing(item.sourceType) ? <Link className="ac-btn ac-btn--sm" to={`/admin/review?item=${item.id}`}>변경 검토 보기</Link> : <RowMenu
                         open={openMenuId === item.id}
                         onToggle={() => setOpenMenuId(openMenuId === item.id ? null : item.id)}
                         label={`${item.question} 관리`}
@@ -254,7 +259,7 @@ const ContentPage = () => {
                         >
                           {item.disabled ? '다시 노출' : '노출 중단'}
                         </button>
-                      </RowMenu>
+                      </RowMenu>}
                     </td>
                   </tr>
                 ))}

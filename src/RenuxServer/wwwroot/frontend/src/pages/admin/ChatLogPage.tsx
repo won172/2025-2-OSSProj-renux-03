@@ -1,3 +1,4 @@
+import { routeLabel } from '../../admin/display'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { resolveApiUrl, withNgrokHeader } from '../../api/client'
@@ -193,7 +194,7 @@ const ChatLogPage = () => {
             aria-label="분류(route) 필터"
           >
             <option value="all">전체 분류</option>
-            {routeOptions.map((route) => <option key={route} value={route}>{route}</option>)}
+            {routeOptions.map((route) => <option key={route} value={route}>{routeLabel(route)}</option>)}
           </select>
           <select
             className="ac-select"
@@ -232,13 +233,14 @@ const ChatLogPage = () => {
                         {formatDateTime(log.created_at)}
                       </span>
                       <span className="ac-list-item__meta" style={{ margin: 0 }}>{log.username ?? '게스트'}</span>
-                      <StatusPill tone="pending">{log.route}</StatusPill>
+                      <StatusPill tone="pending">{routeLabel(log.route)}</StatusPill>
                       {log.fallback_triggered && (
                         <StatusPill tone="danger">Fallback: {log.fallback_reason ?? '사유 미상'}</StatusPill>
                       )}
                       <span className="ac-list-item__meta" style={{ margin: 0 }}>참조 {log.source_count}개</span>
                     </div>
 
+                    {expanded && <details className="ac-cell-details"><summary>기술 정보</summary><p>검색 분류: {log.route}</p></details>}
                     <div className="ac-qa">
                       <div className="ac-qa__row">
                         <span className="ac-qa__tag ac-qa__tag--q">Q.</span>

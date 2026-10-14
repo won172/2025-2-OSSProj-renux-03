@@ -1,3 +1,4 @@
+import { cronLabel, datasetLabel, jobLabel, jobStatus } from '../../admin/display'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { reindexDataset } from '../../admin/adminApi'
@@ -136,47 +137,47 @@ const SystemPage = () => {
             title="데이터셋 인덱스"
             description="ChromaDB 컬렉션, 로컬 아티팩트, TF-IDF 벡터라이저 상태입니다."
           >
-            <TableScroll minWidth={1120}>
-              <table className="ac-table">
-                <thead>
-                  <tr>
-                    <th>Dataset</th>
-                    <th>Collection</th>
-                    <th>Chroma</th>
-                    <th>Cache</th>
-                    <th>Chunk</th>
-                    <th>Vectorizer</th>
-                    <th>최신 문서일</th>
-                    <th>마지막 인덱싱</th>
-                    <th>TF-IDF 버전</th>
-                    <th>상태</th>
-                    <th className="actions">동작</th>
+            <TableScroll mobileCards minWidth={1120}>
+              <table className="ac-table" role="table">
+                <thead role="rowgroup">
+                  <tr role="row">
+                    <th role="columnheader" scope="col">자료</th>
+                    <th role="columnheader" scope="col">컬렉션</th>
+                    <th role="columnheader" scope="col">Chroma</th>
+                    <th role="columnheader" scope="col">캐시 청크</th>
+                    <th role="columnheader" scope="col">청크 파일</th>
+                    <th role="columnheader" scope="col">벡터라이저</th>
+                    <th role="columnheader" scope="col">최신 문서일</th>
+                    <th role="columnheader" scope="col">마지막 인덱싱</th>
+                    <th role="columnheader" scope="col">TF-IDF 버전</th>
+                    <th role="columnheader" scope="col">상태</th>
+                    <th role="columnheader" scope="col" className="actions">동작</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody role="rowgroup">
                   {ragStatus.datasets.map((dataset) => (
-                    <tr key={dataset.key}>
-                      <td><b>{dataset.key}</b></td>
-                      <td>{dataset.collection}</td>
-                      <td className="num">{dataset.chroma_count ?? '-'}</td>
-                      <td className="num">{dataset.cached_chunk_count}</td>
-                      <td title={formatFullDateTime(dataset.chunk_artifact_mtime)}>
-                        {dataset.chunk_artifact_exists ? '있음' : '없음'}
+                    <tr role="row" key={dataset.key}>
+                      <td role="cell" data-label="자료"><b>{datasetLabel(dataset.key)}</b></td>
+                      <td role="cell" data-label="컬렉션">{dataset.collection}</td>
+                      <td role="cell" data-label="검색 문서 수" className="num">{dataset.chroma_count ?? '-'}</td>
+                      <td role="cell" data-label="캐시 청크 수" className="num">{dataset.cached_chunk_count}</td>
+                      <td role="cell" data-label="청크 파일" title={formatFullDateTime(dataset.chunk_artifact_mtime)}>
+                        {dataset.chunk_artifact_exists ? '있음' : '없음'}<details className="ac-cell-details"><summary>파일 시각</summary>{formatFullDateTime(dataset.chunk_artifact_mtime)}</details>
                       </td>
-                      <td title={formatFullDateTime(dataset.vectorizer_mtime)}>
-                        {dataset.vectorizer_exists ? '있음' : '없음'}
+                      <td role="cell" data-label="벡터라이저" title={formatFullDateTime(dataset.vectorizer_mtime)}>
+                        {dataset.vectorizer_exists ? '있음' : '없음'}<details className="ac-cell-details"><summary>파일 시각</summary>{formatFullDateTime(dataset.vectorizer_mtime)}</details>
                       </td>
-                      <td className="num">{formatDateTime(dataset.latest_document_published_at)}</td>
-                      <td className="num" title={formatFullDateTime(dataset.last_successful_indexed_at)}>
+                      <td role="cell" data-label="최신 문서일" className="num">{formatDateTime(dataset.latest_document_published_at)}</td>
+                      <td role="cell" data-label="마지막 인덱싱" className="num" title={formatFullDateTime(dataset.last_successful_indexed_at)}>
                         {formatDateTime(dataset.last_successful_indexed_at)}
                       </td>
-                      <td className="num">{dataset.vectorizer_sklearn_version ?? '-'}</td>
-                      <td title={dataset.error ?? undefined}>
+                      <td role="cell" data-label="벡터라이저 버전" className="num">{dataset.vectorizer_sklearn_version ?? '-'}</td>
+                      <td role="cell" data-label="상태" title={dataset.error ?? undefined}>
                         <StatusPill tone={getSystemStatusTone(dataset.status)}>
                           {getSystemStatusLabel(dataset.status)}
                         </StatusPill>
                       </td>
-                      <td className="actions">
+                      <td role="cell" data-label="동작" className="actions">
                         <button
                           type="button"
                           className="ac-btn ac-btn--sm"
@@ -198,7 +199,7 @@ const SystemPage = () => {
               <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '13px' }}>
                 {ragStatus.datasets.filter((dataset) => dataset.error).map((dataset) => (
                   <li key={dataset.key} style={{ marginBottom: '6px' }}>
-                    <b>{dataset.key}</b> — {dataset.error}
+                    <b>{datasetLabel(dataset.key)}</b> — {dataset.error}
                   </li>
                 ))}
               </ul>
@@ -211,15 +212,15 @@ const SystemPage = () => {
         ) : (
           <>
             <Panel
-              title="Notices 수집 상태"
+              title="공지 수집 상태"
               description="raw / normalized / indexed 단계별 수집 결과와 품질 경고입니다."
               actions={
                 <StatusPill tone={
                   ingestion.ingestion_summary.status === 'failed'
                     ? 'danger'
-                    : ingestion.ingestion_summary.documents_failed > 0 ? 'warning' : 'success'
+                    : ingestion.ingestion_summary.documents_failed > 0 ? 'warning' : jobStatus(ingestion.ingestion_summary.status).tone
                 }>
-                  {ingestion.ingestion_summary.status ?? '미실행'}
+                  {jobStatus(ingestion.ingestion_summary.status).label}
                 </StatusPill>
               }
             >
@@ -241,7 +242,7 @@ const SystemPage = () => {
 
             <Panel title="문서 처리 결과" description="마지막 수집 run에서 문서가 어떻게 처리되었는지입니다.">
               <div className="ac-metrics">
-                <MetricCard label="Seen" value={ingestion.ingestion_summary.documents_seen} />
+                <MetricCard label="확인한 문서" value={ingestion.ingestion_summary.documents_seen} />
                 <MetricCard label="신규" value={ingestion.ingestion_summary.documents_new} />
                 <MetricCard label="수정" value={ingestion.ingestion_summary.documents_updated} />
                 <MetricCard label="숨김/삭제" value={ingestion.ingestion_summary.documents_deleted} />
@@ -255,9 +256,9 @@ const SystemPage = () => {
 
             <Panel title="단계별 문서 수" description="수집 → 정규화 → 색인 각 단계에 남아 있는 문서 수입니다.">
               <div className="ac-metrics">
-                <MetricCard label="Raw 문서" value={ingestion.stage_summary.raw_documents} />
-                <MetricCard label="Normalized 문서" value={ingestion.stage_summary.normalized_documents} />
-                <MetricCard label="Indexed 문서" value={ingestion.stage_summary.indexed_documents} />
+                <MetricCard label="수집 원문" value={ingestion.stage_summary.raw_documents} />
+                <MetricCard label="정규화 문서" value={ingestion.stage_summary.normalized_documents} />
+                <MetricCard label="색인 문서" value={ingestion.stage_summary.indexed_documents} />
               </div>
             </Panel>
 
@@ -265,18 +266,18 @@ const SystemPage = () => {
               {ingestion.quality_summary.recent_checks.length === 0 ? (
                 <EmptyState>기록된 품질 검사가 없습니다.</EmptyState>
               ) : (
-                <TableScroll minWidth={860}>
-                  <table className="ac-table">
-                    <thead>
-                      <tr>
-                        <th>문서</th>
-                        <th>검사</th>
-                        <th>심각도</th>
-                        <th>메시지</th>
-                        <th>시각</th>
+                <TableScroll mobileCards minWidth={860}>
+                  <table className="ac-table" role="table">
+                    <thead role="rowgroup">
+                      <tr role="row">
+                        <th role="columnheader" scope="col">문서</th>
+                        <th role="columnheader" scope="col">검사</th>
+                        <th role="columnheader" scope="col">심각도</th>
+                        <th role="columnheader" scope="col">메시지</th>
+                        <th role="columnheader" scope="col">시각</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody role="rowgroup">
                       {[...ingestion.quality_summary.recent_checks]
                         .sort((a, b) => {
                           const rank = (severity: string) => (severityTone(severity) === 'danger' ? 0 : severityTone(severity) === 'warning' ? 1 : 2)
@@ -285,12 +286,12 @@ const SystemPage = () => {
                           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                         })
                         .map((check) => (
-                          <tr key={`${check.document_key}-${check.check_type}-${check.created_at}`}>
-                            <td className="truncate" title={check.document_key}>{check.document_key}</td>
-                            <td>{check.check_type}</td>
-                            <td><StatusPill tone={severityTone(check.severity)}>{check.severity}</StatusPill></td>
-                            <td className="truncate" title={check.message}>{check.message}</td>
-                            <td className="num" title={formatFullDateTime(check.created_at)}>{formatDateTime(check.created_at)}</td>
+                          <tr role="row" key={`${check.document_key}-${check.check_type}-${check.created_at}`}>
+                            <td role="cell" data-label="문서" className="truncate" title={check.document_key}>{check.document_key}</td>
+                            <td role="cell" data-label="검사">{check.check_type}</td>
+                            <td role="cell" data-label="심각도"><StatusPill tone={severityTone(check.severity)}>{check.severity}</StatusPill></td>
+                            <td role="cell" data-label="메시지" className="truncate" title={check.message}>{check.message}</td>
+                            <td role="cell" data-label="시각" className="num" title={formatFullDateTime(check.created_at)}>{formatDateTime(check.created_at)}</td>
                           </tr>
                         ))}
                     </tbody>
@@ -319,32 +320,34 @@ const SystemPage = () => {
             ) : scheduler.jobs.length === 0 ? (
               <EmptyState>등록된 자동 작업이 없습니다.</EmptyState>
             ) : (
-              <TableScroll minWidth={820}>
-                <table className="ac-table">
-                  <thead>
-                    <tr>
-                      <th>작업</th>
-                      <th>주기</th>
-                      <th>다음 실행</th>
-                      <th>마지막 실행</th>
-                      <th>결과</th>
+              <TableScroll mobileCards minWidth={820}>
+                <table className="ac-table" role="table">
+                  <thead role="rowgroup">
+                    <tr role="row">
+                      <th role="columnheader" scope="col">작업</th>
+                      <th role="columnheader" scope="col">주기</th>
+                      <th role="columnheader" scope="col">다음 실행</th>
+                      <th role="columnheader" scope="col">마지막 실행</th>
+                      <th role="columnheader" scope="col">결과</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody role="rowgroup">
                     {scheduler.jobs.map((job) => (
-                      <tr key={job.id}>
-                        <td><b>{job.name ?? job.id}</b></td>
-                        <td className="num">{job.trigger ?? '-'}</td>
-                        <td className="num">{formatDateTime(job.next_run_at)}</td>
-                        <td className="num">{formatDateTime(job.last_run_at)}</td>
-                        <td title={job.last_message ?? undefined}>
+                      <tr role="row" key={job.id}>
+                        <td role="cell" data-label="작업"><b>{jobLabel(job.id, job.name)}</b></td>
+                        <td role="cell" data-label="주기" className="num"><span>{cronLabel(job.trigger)}</span><details className="ac-cell-details"><summary>원본 주기·작업 ID</summary><p>{job.id}</p><p>{job.trigger || '정보 없음'}</p></details></td>
+                        <td role="cell" data-label="다음 실행" className="num">{formatDateTime(job.next_run_at)}</td>
+                        <td role="cell" data-label="마지막 실행" className="num">{formatDateTime(job.last_run_at)}</td>
+                        <td role="cell" data-label="결과" title={job.last_message ?? undefined}>
                           {job.last_status
                             ? (
-                                <StatusPill tone={job.last_status === 'ok' || job.last_status === 'success' ? 'success' : 'danger'}>
-                                  {job.last_status}
+                                <StatusPill tone={jobStatus(job.last_status).tone}>
+                                  {jobStatus(job.last_status).label}
                                 </StatusPill>
                               )
                             : <span className="ac-hint">기록 없음</span>}
+                          {jobStatus(job.last_status).hint && <p>{jobStatus(job.last_status).hint}</p>}
+                          {job.last_message && <details className="ac-cell-details"><summary>실행 메시지</summary><p>{job.last_message}</p><p>서버 상태: {job.last_status}</p></details>}
                         </td>
                       </tr>
                     ))}

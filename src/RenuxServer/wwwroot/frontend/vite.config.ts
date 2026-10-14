@@ -48,7 +48,7 @@ export default defineConfig(({ mode }) => {
           globPatterns: ['**/*.{js,css,html,png,svg}'],
           globIgnores: [
             '**/assets/dongddoki-logo-*.png',
-            '**/assets/{admin*,Admin*,DashboardPage*,ReviewPage*,ContentPage*,ChatLogPage*,FeedbackPage*,UsersPage*,SystemPage*,DepartmentAdminPage*,UniversityOnly*,TrendChart*,QuickFaqModal*,Modal-*,ui-*,format-*}.{js,css}',
+            '**/assets/{admin*,Admin*,DashboardPage*,ReviewPage*,ContentPage*,ChatLogPage*,FeedbackPage*,UsersPage*,SystemPage*,DepartmentAdminPage*,UniversityOnly*,TrendChart*,QuickFaqModal*,StaffRefreshPreview*,display-*,Modal-*,ui-*,format-*}.{js,css}',
           ],
           runtimeCaching: [
             {
@@ -74,6 +74,19 @@ export default defineConfig(({ mode }) => {
         },
       })] : []),
     ],
+    build: {
+      rollupOptions: {
+        output: {
+          // The data-router navigation blocker belongs to a shared router chunk.
+          // Keep React and the application entry independent; all public chunks stay precached.
+          onlyExplicitManualChunks: true,
+          manualChunks(id) {
+            if (/\/node_modules\/(?:react|react-dom|scheduler)\//.test(id) || id.includes('commonjsHelpers.js')) return 'react-vendor'
+            if (/\/node_modules\/(?:react-router|react-router-dom)\//.test(id)) return 'router'
+          },
+        },
+      },
+    },
     server: {
       proxy: {
         '/auth': {

@@ -1,3 +1,4 @@
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
@@ -15,6 +16,7 @@ import type { RagAdminStatus } from '../../types/admin'
 import type { UserRole } from '../../types/auth'
 import { AdminConsoleContext, type AdminConsoleValue } from './adminConsoleContext'
 import ToastStack, { type ToastMessage, type ToastTone } from './Toast'
+import '../../styles/admin-legacy.css'
 import '../../styles/admin-console.css'
 
 /** 요약 지표 자동 갱신 주기 — 대기 건수가 오래 묵지 않을 만큼 자주, 서버 부담은 적게. */
@@ -70,6 +72,15 @@ const AdminLayout = () => {
 
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 960px)').matches)
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 960px)')
+    const update = () => { setMobile(media.matches); if (!media.matches) setMobileNavOpen(false) }
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  useFocusTrap(mobileNavOpen && mobile, sidebarRef, () => setMobileNavOpen(false))
   const [bannerDismissed, setBannerDismissed] = useState(false)
 
   const toastSeq = useRef(0)
@@ -231,7 +242,10 @@ const AdminLayout = () => {
   return (
     <AdminConsoleContext.Provider value={contextValue}>
       <div className={`ac-shell ${mobileNavOpen ? 'ac-shell--nav-open' : ''}`}>
-        <aside className="ac-sidebar" aria-label="관리자 메뉴">
+        <aside id="admin-navigation" className="ac-sidebar" aria-label="관리자 메뉴" ref={sidebarRef}
+          role={mobileNavOpen && mobile ? 'dialog' : undefined} aria-modal={mobileNavOpen && mobile ? true : undefined}
+          inert={mobile && !mobileNavOpen} tabIndex={-1}>
+          <button type="button" className="ac-btn ac-sidebar__close" onClick={() => setMobileNavOpen(false)}>메뉴 닫기 ×</button>
           <div className="ac-sidebar__brand">
             <span className="ac-sidebar__brand-mark" aria-hidden="true">동</span>
             <span>
@@ -258,12 +272,13 @@ const AdminLayout = () => {
           </div>
         </aside>
 
-        <div className="ac-main">
+        <div className="ac-main" inert={mobile && mobileNavOpen}>
           <header className="ac-topbar">
             <button
               type="button"
               className="ac-topbar__menu"
               aria-label="메뉴 열기"
+              aria-controls="admin-navigation"
               aria-expanded={mobileNavOpen}
               onClick={() => setMobileNavOpen((open) => !open)}
             >
@@ -343,12 +358,13 @@ const AdminLayout = () => {
           <button
             type="button"
             className="ac-nav-scrim"
+            tabIndex={-1}
             aria-label="메뉴 닫기"
             onClick={() => setMobileNavOpen(false)}
           />
         )}
 
-        <nav className="ac-tabbar" aria-label="빠른 이동">
+        <nav className="ac-tabbar" aria-label="빠른 이동" inert={mobile && mobileNavOpen}>
           {visibleNavItems.slice(0, 4).map((item) => {
             const count = badgeCount(item.badge)
             return (

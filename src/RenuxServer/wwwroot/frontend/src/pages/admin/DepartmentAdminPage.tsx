@@ -1,3 +1,7 @@
+import { useMasterDetail } from '../../hooks/useMasterDetail'
+import { publicMajorName } from '../../auth/publicMajor'
+import { supportsContentEditing } from '../../admin/staffReview'
+import StaffRefreshPreview from '../../components/admin/StaffRefreshPreview'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { cancelItem, fetchAllItems, submitItem } from '../../admin/adminApi'
 import { buildChatPreview, toDepartmentKnowledge } from '../../admin/adminData'
@@ -58,6 +62,9 @@ const emptyForm = {
 
 const DepartmentAdminPage = () => {
   const { showToast, notifyDataChanged, dataVersion, userName, majorName } = useAdminConsole()
+
+  const detail = useMasterDetail()
+  const displayMajor = publicMajorName(majorName)
 
   const [items, setItems] = useState<DepartmentKnowledge[]>([])
   const [loading, setLoading] = useState(true)
@@ -123,6 +130,8 @@ const DepartmentAdminPage = () => {
   }), [items])
 
   const startCreate = (seed?: DepartmentKnowledge) => {
+    if (seed && !supportsContentEditing(seed.sourceType)) return
+    detail.reveal(true)
     setMode('create')
     setFormError(null)
     setShowPreview(false)
@@ -194,6 +203,10 @@ const DepartmentAdminPage = () => {
         setFormError('시작일을 입력해주세요.')
         return null
       }
+      if (form.endDate && form.endDate < form.startDate) {
+        setFormError('종료일은 시작일보다 빠를 수 없습니다.')
+        return null
+      }
       return {
         title: form.title.trim(),
         start_date: form.startDate,
@@ -232,6 +245,7 @@ const DepartmentAdminPage = () => {
       await submitItem(SOURCE_TYPE_BY_CONTENT[contentType], payload)
       showToast('제출했습니다. 검수 승인 후 챗봇에 반영됩니다.', 'success')
       setMode('view')
+      detail.back()
       setForm(emptyForm)
       setVisibility('department')
       notifyDataChanged()
@@ -291,7 +305,7 @@ const DepartmentAdminPage = () => {
     <>
       <PageHeader
         title="학과 콘솔"
-        description={`${majorName || '학과'} 정보를 등록하고 처리 상태를 확인합니다.`}
+        description={`${displayMajor || '학과'} 정보를 등록하고 처리 상태를 확인합니다.`}
         actions={
           <>
             <button type="button" className="ac-btn" onClick={() => { void loadItems() }} disabled={loading}>
@@ -322,7 +336,7 @@ const DepartmentAdminPage = () => {
               <FilterChip
                 key={filter.key}
                 active={statusFilter === filter.key}
-                onClick={() => { setStatusFilter(filter.key); setMode('view') }}
+                onClick={() => { setStatusFilter(filter.key); setMode('view'); detail.back() }}
               >
                 {filter.label} {count}
               </FilterChip>
@@ -332,8 +346,8 @@ const DepartmentAdminPage = () => {
 
         {loadError && <ErrorNote>{loadError}</ErrorNote>}
 
-        <div className="ac-split">
-          <div className="ac-list">
+        <div className={`ac-split ac-master-detail ${detail.shown ? 'ac-master-detail--open' : ''}`}>
+          <div className="ac-list" ref={detail.listRef} tabIndex={-1} aria-label="등록 목록">
             {loading ? (
               <LoadingNote />
             ) : filtered.length === 0 ? (
@@ -344,7 +358,7 @@ const DepartmentAdminPage = () => {
                   key={item.id}
                   type="button"
                   className={`ac-list-item ${mode === 'view' && selectedId === item.id ? 'ac-list-item--active' : ''}`}
-                  onClick={() => { setSelectedId(item.id); setMode('view') }}
+                  onClick={() => { setSelectedId(item.id); setMode('view'); detail.reveal() }}
                   aria-pressed={mode === 'view' && selectedId === item.id}
                 >
                   <span className="ac-list-item__body">
@@ -359,11 +373,12 @@ const DepartmentAdminPage = () => {
             )}
           </div>
 
-          <div className="ac-detail">
+          <div className="ac-detail" ref={detail.detailRef} tabIndex={-1}>
+            <button type="button" className="ac-btn ac-detail-back" onClick={() => { setMode('view'); detail.back() }} disabled={submitting}>← 목록으로</button>
             {mode === 'create' ? (
               <form onSubmit={handleSubmit}>
                 <p className="ac-detail__eyebrow">새 정보 등록</p>
-                <h2 className="ac-detail__title">정보 입력</h2>
+                <h2 className="ac-detail__title" tabIndex={-1}>정보 입력</h2>
 
                 <div className="ac-field">
                   <label className="ac-label" htmlFor="dept-content-type">등록 유형</label>
@@ -389,7 +404,7 @@ const DepartmentAdminPage = () => {
                     onChange={(event) => setVisibility(event.target.value as Visibility)}
                     disabled={submitting}
                   >
-                    <option value="department">{majorName || '소속 학과'} 학생에게만 공개</option>
+                    <option value="department">{displayMajor || '소속 학과'} 학생에게만 공개</option>
                     <option value="public">전체 사용자에게 공개</option>
                   </select>
                   <span className="ac-hint">
@@ -511,7 +526,7 @@ const DepartmentAdminPage = () => {
                 )}
 
                 <div className="ac-detail__actions">
-                  <button type="button" className="ac-btn" onClick={() => setMode('view')} disabled={submitting}>
+                  <button type="button" className="ac-btn" onClick={() => { setMode('view'); detail.back() }} disabled={submitting}>
                     취소
                   </button>
                   <button type="submit" className="ac-btn ac-btn--primary" disabled={submitting}>
@@ -524,7 +539,7 @@ const DepartmentAdminPage = () => {
             ) : (
               <>
                 <p className="ac-detail__eyebrow">{getSourceTypeLabel(selected.sourceType)}</p>
-                <h2 className="ac-detail__title">{selected.title}</h2>
+                <h2 className="ac-detail__title" tabIndex={-1}>{selected.title}</h2>
 
                 <dl className="ac-detail__meta">
                   <div>
@@ -543,15 +558,15 @@ const DepartmentAdminPage = () => {
                   </div>
                 )}
 
-                <div className="ac-detail__content">{selected.content || '내용이 없습니다.'}</div>
+                {selected.sourceType === 'staff_refresh' ? <StaffRefreshPreview data={selected.raw} /> : <div className="ac-detail__content">{selected.content || '내용이 없습니다.'}</div>}
 
                 <div className="ac-detail__actions">
-                  {selected.status === 'REJECTED' && (
+                  {selected.status === 'REJECTED' && supportsContentEditing(selected.sourceType) && (
                     <button type="button" className="ac-btn ac-btn--primary" onClick={() => startCreate(selected)}>
                       수정 후 재제출
                     </button>
                   )}
-                  {selected.status === 'PENDING' && (
+                  {selected.status === 'PENDING' && supportsContentEditing(selected.sourceType) && (
                     <button
                       type="button"
                       className="ac-btn ac-btn--danger-ghost"
