@@ -33,10 +33,6 @@ namespace RenuxServer.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_time");
 
-                    b.Property<string>("DegradedDatasetsJson")
-                        .HasColumnType("text")
-                        .HasColumnName("degraded_datasets_json");
-
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
@@ -86,6 +82,10 @@ namespace RenuxServer.Migrations
                     b.Property<DateTime>("CreatedTime")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_time");
+
+                    b.Property<string>("DegradedDatasetsJson")
+                        .HasColumnType("text")
+                        .HasColumnName("degraded_datasets_json");
 
                     b.Property<string>("FallbackReason")
                         .HasColumnType("text")

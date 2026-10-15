@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -261,6 +263,11 @@ var dbOptions = new DbContextOptionsBuilder<ServerDbContext>()
     .UseNpgsql("Host=localhost;Database=model_only;Username=model_only;Password=model_only")
     .Options;
 await using var db = new ServerDbContext(dbOptions);
+// Compare in-memory model metadata without opening a database connection.
+Check(db.GetService<IMigrationsAssembly>().ModelSnapshot is not null,
+    "The EF migration snapshot must be discoverable for ServerDbContext.");
+Check(!db.Database.HasPendingModelChanges(),
+    "The EF model must match the committed migration snapshot.");
 var eventEntity = db.Model.FindEntityType(typeof(ProductEvent));
 var messageEntity = db.Model.FindEntityType(typeof(ChatMessage));
 Check(eventEntity?.GetIndexes().Any(index =>
