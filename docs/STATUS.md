@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-10-15 (모바일 UX 병합·운영 반영 기록)
+Last Updated: 2026-10-15 (API 모델 스냅샷 수정 후보 검증)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -112,6 +112,31 @@ Last Updated: 2026-10-15 (모바일 UX 병합·운영 반영 기록)
 - 별도 기존 결함: full-main API를 새로 빌드해 배포하려면 snapshot 속성 위치 교정과 DB 없는 모델 일치 회귀 검사가 필요하다.
   그 뒤 기존 11번째 migration 적용 여부를 별도로 검토해야 한다. 이번 운영 이미지에는 이 migration을 포함하지 않았다.
 
+## 2026-10-15 API 모델 스냅샷 재발 방지 후보
+
+- `fix/api-model-snapshot`의 `b748cf1`, [PR #65](https://github.com/won172/2025-2-OSSProj-renux-03/pull/65).
+  `DegradedDatasetsJson` 스냅샷 선언을 `ActiveChat`에서 실제 모델과 같은 `ChatMessage`로 이동했다.
+  DB 연결 없이 snapshot 존재 및 `Database.HasPendingModelChanges()`를 검사하는 회귀 테스트를 추가했다.
+  runtime 모델·DbContext·기존 migration Up/Down·startup은 변경하지 않았다.
+- 새 검사는 수정 전 exit 1로 정확한 모델 불일치를 검출했고, 수정 후 전체 계약 테스트가 exit 0으로 통과했다.
+  root Release 빌드(0 warnings/errors), 온라인 restore, 전체 계약·secret/diff 검사 및 독립 QA 재실행을 통과했다.
+  출처 식별자 8개 시나리오·160 assertions도 포함한다. 전체 계약 assertion 총수는 실행기가 출력하지 않는다.
+- 최종 후보 이미지 `renuxserver-api:api-model-b748cf1`,
+  `sha256:c6c8f749bc4dfb352d97194f065dfa750038b36c7a5c0a609379aeba1feee8ff`를 준비했다.
+  격리 internal network의 폐기 가능한 PostgreSQL에서 기존 운영과 같은 migration 10개 상태를 만들고,
+  테스트 사용자·대화·출처를 저장한 뒤 새 이미지로 11개 상태까지 전환했다. 기존 행 수·내용 해시가 동일했고
+  API health 200 및 DB 연동 계약 테스트가 통과했다. 기존 이미지로 되돌린 뒤에도 health 200과 추가 데이터 보존을 확인했다.
+- 운영에 적용하면 기존 `20260928010000_AddChatRetrievalModeAndDegradedDatasets`가 실행되어 `chat_messages`에
+  nullable text 열 `retrieval_mode`, `degraded_datasets_json`이 추가된다. EF가 생성한 적용 SQL은 두 ALTER ADD와
+  migration 이력 INSERT뿐이다. 기존 데이터 삭제·열 이름 변경은 없다. 운영 DB migration은 명시적 승인 대기다.
+- 승인 후 실행 계획은 private DB backup 검증 → 짧은 lock/statement timeout을 둔 추가 migration → API 단독 교체 →
+  공개 health/ready·인증 CORS·DB 이력·기존 데이터 서비스 불변 확인이다. 문제가 생기면 API 이미지만 복구하고,
+  추가 열을 삭제하는 Down migration이나 운영 데이터 복원은 자동 실행하지 않는다.
+- 현재 운영 API는 앞서 검증한 `mobile-ux-compatible-bb2c56a`로 유지한다. PR #65 및 이 기록은 아직 main에 병합하지 않았다.
+  앞선 PR #63과 main `12c0887`의 원격 CI는 모두 통과했다.
+- 최종 시뮬레이터 앱을 1.0(8)로 갱신했고 native public 파일 44개가 TestFlight 8 archive와 같음을 확인했다.
+  Mac 잠금·앱 테스트 계정 로그인 대기로 최종 로그인 후 화면 조작은 여전히 미확인이다.
+
 ## 2026-09-28 운영 수집 확인
 
 - 마지막 성공 수집일부터 9월 28일까지 공지 9개 게시판을 경계 이전 페이지까지 확인했다.
@@ -193,6 +218,7 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
+| API 기동 EF 모델·스냅샷 일치 | P0 | RAG/Backend / QA | `fix/api-model-snapshot` | `api-model-snapshot` | Review | 수정 전 실패→후 통과, Release/계약, 독립 QA, 격리 DB 10→11 전환·데이터 보존·이전 이미지 복구 검증 | 운영 DB 두 nullable 열 추가 승인 필요 | PR #65 및 상태 PR 검토; 운영 DB migration 명시적 승인 |
 | 모바일 UX·네이티브 인증 TestFlight 1.0(8) | P1 | Orchestrator / QA | `chore/mobile-ux-testflight` | `mobile-ux-testflight` | Review | 123 tests, backend 계약, 독립 인증 리뷰, Release archive/export, Apple VALID·내부 IN_BETA_TESTING·그룹 UI, CI 통과 | main 병합·웹/API·TestFlight 내부 반영 완료. 로그인 후 native SSE 미확인 | 테스트 계정 로그인 후 최종 검증; 릴리스 worktree·운영 재현 산출물 보존 |
 | iOS 키보드 입력창 가림 | P0 | Client | `fix/ios-keyboard-resize` | 정리 완료 | Completed | lint, 78 tests, native build, iOS 26.5 fixture 키보드 검증, 독립 QA | 실제 기기·운영 인증 미확인 | PR #64에 포함되어 병합 완료; 실제 기기 확인 유지 |
 | 저장 답변 출처 식별자·번호 보존 | P1 | RAG/Backend | `fix/chat-source-identity` | 정리 완료 | Completed | Release build, 전체 계약 테스트, 8 scenarios/160 assertions, 독립 QA | 격리 PostgreSQL 계약 통과. 운영 실제 대화 저장 미확인 | PR #64에 포함되어 병합 완료 |
