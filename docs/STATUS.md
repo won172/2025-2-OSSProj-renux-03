@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-10-15 (모바일 UX 최종 네이티브 검증 완료)
+Last Updated: 2026-10-16 (Compose 단일 명령 기동 후보 검증)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -13,9 +13,35 @@ Last Updated: 2026-10-15 (모바일 UX 최종 네이티브 검증 완료)
 질문에 맞게 구조화 SQL 관계 조회, 키워드 검색, 벡터 검색을 선택하고,
 동국대학교 공식 출처와 정본 데이터에 근거한 답변을 유지한다.
 
+재부팅 후 Compose 단일 명령으로 기동할 수 있는 수정 후보의 구현·격리 검증을 완료했다.
+main 병합과 기존 운영 경로 적용은 human 승인 대기다.
+
 10월 13일 화면 감사에서 확인한 모바일 입력·알림 설정·관리자 화면 문제를
 우선순위에 따라 개선했다. main 병합, 운영 웹/API 및 TestFlight 1.0(8) 반영을 마쳤고,
 iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자·실제 채팅 저장/복원 검증까지 완료했다.
+
+## 2026-10-16 Compose 단일 명령 기동 후보
+
+- `fix/compose-one-command-startup`의 `0e0452d`, [PR #68](https://github.com/won172/2025-2-OSSProj-renux-03/pull/68).
+  최신 `origin/main=1d669c0`에서 만든 별도 worktree에서 구현했다. 기존 primary의 RAG 데이터·산출물 변경은 보존했다.
+- 일반 `src/RenuxServer`의 `docker compose up --build`가 복구 override 없이 RAG를 재생성하면,
+  기본 공지 포인터가 없는 컬렉션을 가리켜 `/ready`가 503이 되는 문제를 확인했다.
+  entrypoint는 명시한 포인터·정상 기본 포인터를 우선하고, 기본 대상이 없을 때에만 기존 복구 포인터의
+  대상이 실제 catalog에 있는지 읽기 전용으로 확인해 프로세스 환경에 전달한다. 포인터·인덱스 변경이나 재색인은 하지 않는다.
+- Redis → RAG, PostgreSQL/RAG → API, API → nginx의 healthy 의존성, API DB readiness healthcheck,
+  5개 서비스 `unless-stopped`, 누락된 SQLite bind의 디렉터리 자동 생성 차단을 추가했다.
+  실행 조건·환경변수 우선순위·재부팅 순서의 제약은 [Compose 시작 문서](compose-startup.md)에 기록했다.
+- 실제 Dockerfile로 RAG/API 후보 이미지를 빌드했다. 새 RAG 이미지의 네트워크 없는 빈 DB 테스트는
+  **1,509 passed / 1 skipped / 기존 경고 10개**다. skip은 ignored 공지 아티팩트가 필요한 기존 평가다.
+  구현 agent의 관련 테스트 65개 및 전체 1,509개, 독립 QA의 관련 테스트 48개가 통과했다.
+  실제 Chroma fixture·nonroot entrypoint에서도 경로 전달·오류 거부·종료 코드·파일 내용 보존을 확인했다.
+- 폐기 가능한 PostgreSQL·Redis·실제 후보 API/nginx와 RAG HTTP readiness fixture를 사용하는
+  격리 Compose에서 최초 기동 및 stop/up의 **2회** 기동을 통과했다. nginx → API → 임시 DB 준비 상태는
+  HTTP 200이며 fixture의 포인터/catalog 내용이 그대로였다. 임시 컨테이너·볼륨은 정리했다.
+  이 검증은 실제 운영 모델·검색 데이터·질문 품질 또는 Docker 엔진 재부팅 전체 검증을 의미하지 않는다.
+- Root의 backend restore·Release 빌드(0 warnings/errors)·전체 계약 테스트, 출처 식별자 8 scenarios/160 assertions,
+  shell·Compose 구성·secret·staged diff 검사와 독립 QA가 통과했다. primary 파일·운영 컨테이너·secret·DB는 변경하지 않았다.
+- 현재 **Review**다. 코드 PR의 main 병합과 기존 경로에서의 운영 재기동은 human 승인 후 진행한다.
 
 ## 2026-10-15 모바일 UX 구현·검증 기록
 
@@ -257,6 +283,7 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
+| Compose 단일 명령 전체 기동 | P0 | RAG/Backend / QA | `fix/compose-one-command-startup` | `compose-one-command-startup` | Review | 새 Docker 이미지·RAG 1,509 passed/1 skipped·QA 48·backend 계약·격리 5서비스 2회 기동 | 운영 모델/데이터 기동·엔진 재부팅 미확인. main·운영 미반영 | PR #68 human 병합·운영 적용 승인 |
 | API 기동 EF 모델·스냅샷 일치 | P0 | RAG/Backend / QA | `fix/api-model-snapshot` | 정리 완료 | Completed | 회귀 실패→통과, Release/계약, 독립 QA·CI, 격리 DB 전환/복구, 운영 백업·migration11·기존753행 보존·health/ready200 | 운영 인증·UI 최종 검증 완료 | PR #65 병합·운영 반영 완료 |
 | 모바일 UX·네이티브 인증 TestFlight 1.0(8) | P1 | Orchestrator / QA | `chore/mobile-ux-testflight` | 정리 완료 | Completed | 123 tests, backend 계약·독립 QA·CI, Apple VALID/IN_BETA_TESTING, native 설정/관리자/키보드, 운영 ticket·SSE·저장/재조회 확인 | 물리적 iPhone/Android 검증과 구분 | 구현·배포·최종 검증 완료; 증거 보존 |
 | iOS 키보드 입력창 가림 | P0 | Client | `fix/ios-keyboard-resize` | 정리 완료 | Completed | lint, 78 tests, native build, iOS 26.5 fixture 키보드 검증, 독립 QA | 물리적 iPhone은 미검증; 운영 인증 시뮬레이터 확인 | PR #64 병합 및 native 키보드 검증 완료 |
