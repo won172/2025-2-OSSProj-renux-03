@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, useRef, type ReactNode } from 'react'
 import type { StatusTone } from '../../admin/format'
 
 /** 화면 제목 + 설명 + 우측 액션. 모든 관리자 페이지의 첫 줄. */
@@ -125,8 +125,8 @@ export const FilterChip = ({
 )
 
 /** 넓은 표가 페이지 전체를 가로 스크롤시키지 않도록 감싸는 래퍼 */
-export const TableScroll = ({ children, minWidth }: { children: ReactNode; minWidth?: number }) => (
-  <div className="ac-table-scroll">
+export const TableScroll = ({ children, minWidth, mobileCards = false }: { children: ReactNode; minWidth?: number; mobileCards?: boolean }) => (
+  <div className={`ac-table-scroll ${mobileCards ? 'ac-table-cards' : ''}`}>
     <div style={minWidth ? { minWidth: `${minWidth}px` } : undefined}>{children}</div>
   </div>
 )
@@ -142,18 +142,23 @@ export const RowMenu = ({
   onToggle: () => void
   children: ReactNode
   label?: string
-}) => (
-  <div className="ac-rowmenu">
+}) => {
+  const id = useId()
+  const trigger = useRef<HTMLButtonElement>(null)
+  return <div className="ac-rowmenu" onKeyDown={(event) => {
+    if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); onToggle(); trigger.current?.focus() }
+  }}>
     <button
+      ref={trigger}
       type="button"
       className="ac-btn ac-btn--sm ac-btn--ghost"
       onClick={onToggle}
-      aria-haspopup="menu"
       aria-expanded={open}
+      aria-controls={id}
       aria-label={label}
     >
       ⋯
     </button>
-    {open && <div className="ac-rowmenu__panel" role="menu">{children}</div>}
+    {open && <div id={id} className="ac-rowmenu__panel" role="group" aria-label={label}>{children}</div>}
   </div>
-)
+}

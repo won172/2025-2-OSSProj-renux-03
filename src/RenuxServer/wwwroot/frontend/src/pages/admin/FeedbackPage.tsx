@@ -135,6 +135,7 @@ const FeedbackPage = () => {
         }
       />
 
+      <p className="ac-hint">상단 요약은 전체 기간 누적 평가입니다. 아래 목록·추이는 선택한 기간과 평가 필터의 최근 최대 300건을 기준으로 합니다.</p>
       <div className="ac-metrics">
         <MetricCard label="만족도" value={satisfaction == null ? '-' : `${satisfaction}%`} hint={`평가 ${summary?.total ?? 0}건`} />
         <MetricCard label="좋아요" value={`👍 ${summary?.up ?? 0}`} tone="success" />
@@ -146,7 +147,7 @@ const FeedbackPage = () => {
 
       <Panel
         title={`평가 추이 (최근 ${TREND_DAYS}일)`}
-        description="면적은 평가 건수, 파란 선은 긍정 비율입니다."
+        description="현재 기간·평가 필터로 불러온 목록의 최근 14일입니다. 면적은 건수, 파란 선은 해당 표본의 긍정 비율입니다. 전체 만족도 추세는 평가 필터를 전체로 바꿔 확인하세요."
       >
         {loading ? <LoadingNote /> : (
           <>
@@ -187,30 +188,30 @@ const FeedbackPage = () => {
         ) : filtered.length === 0 ? (
           <EmptyState>조건에 맞는 피드백이 없습니다.</EmptyState>
         ) : (
-          <TableScroll minWidth={960}>
-            <table className="ac-table">
-              <thead>
-                <tr>
-                  <th>평가</th>
-                  <th>사유</th>
-                  <th>코멘트</th>
-                  <th>질문</th>
-                  <th>학과</th>
-                  <th>시각</th>
-                  <th className="actions">조치</th>
+          <TableScroll mobileCards minWidth={960}>
+            <table className="ac-table" role="table">
+              <thead role="rowgroup">
+                <tr role="row">
+                  <th role="columnheader" scope="col">평가</th>
+                  <th role="columnheader" scope="col">사유</th>
+                  <th role="columnheader" scope="col">코멘트</th>
+                  <th role="columnheader" scope="col">질문</th>
+                  <th role="columnheader" scope="col">학과</th>
+                  <th role="columnheader" scope="col">시각</th>
+                  <th role="columnheader" scope="col" className="actions">조치</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody role="rowgroup">
                 {filtered.map((item) => (
-                  <tr key={item.id}>
-                    <td>
+                  <tr role="row" key={item.id}>
+                    <td role="cell" data-label="평가">
                       <StatusPill tone={item.rating === 1 ? 'success' : 'danger'}>
                         {item.rating === 1 ? '👍 긍정' : '👎 부정'}
                       </StatusPill>
                     </td>
-                    <td>{getFeedbackReasonLabel(item.reason)}</td>
-                    <td className="truncate" title={item.comment ?? ''}>{item.comment?.trim() || '-'}</td>
-                    <td
+                    <td role="cell" data-label="사유">{getFeedbackReasonLabel(item.reason)}</td>
+                    <td role="cell" data-label="코멘트" className="truncate" title={item.comment ?? ''}><details className="ac-cell-details"><summary>{item.comment?.trim().slice(0, 70) || '코멘트 없음'}</summary><p>{item.comment}</p></details></td>
+                    <td role="cell" data-label="질문·답변"
                       className={expandedId === item.id ? '' : 'truncate'}
                       title={item.question ?? ''}
                     >
@@ -219,9 +220,9 @@ const FeedbackPage = () => {
                         <div className="ac-detail__content" style={{ marginTop: '8px' }}>{item.answer}</div>
                       )}
                     </td>
-                    <td>{item.major ?? '-'}</td>
-                    <td className="num" title={formatFullDateTime(item.createdAt)}>{formatDateTime(item.createdAt)}</td>
-                    <td className="actions">
+                    <td role="cell" data-label="학과">{item.major ?? '-'}</td>
+                    <td role="cell" data-label="시각" className="num" title={formatFullDateTime(item.createdAt)}>{formatDateTime(item.createdAt)}</td>
+                    <td role="cell" data-label="조치" className="actions">
                       <button
                         type="button"
                         className="ac-btn ac-btn--sm ac-btn--ghost"

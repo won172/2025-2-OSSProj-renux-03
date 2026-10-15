@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useBlocker, useNavigate } from 'react-router-dom'
 import { apiFetch, type ApiError } from '../../api/client'
+import Pagination from '../../components/Pagination'
+import { cleanDeadlineSnippet, pageSlice, preferenceKey } from '../../chat/settingsState'
+import { countUnreadGroups, formatDDay, getDDay, groupNotifications } from '../../chat/notifications'
 import ConfirmDialog from '../../components/chat/ConfirmDialog'
 import type {
   DeadlineItem,
@@ -19,6 +22,11 @@ const TOPICS: Array<{ topic: NotificationTopic; label: string; description: stri
 ]
 
 const REMIND_DAYS = [7, 1, 0]
+// NotificationApis caps GET /notifications at 100, ordered by target date ascending.
+const INBOX_LIMIT = 100
+const INBOX_URL = `/notifications?includePast=true&limit=${INBOX_LIMIT}`
+const SCREENS = [{ id: 'preferences', label: '관심 주제' }, { id: 'deadlines', label: '내 마감' }, { id: 'inbox', label: '알림함' }, { id: 'account', label: '계정' }] as const
+type Screen = typeof SCREENS[number]['id']
 
 const formatDate = (value: string) => {
   const date = new Date(value)
@@ -42,10 +50,18 @@ const isApiError = (error: unknown): error is ApiError => error instanceof Error
 
 const SettingsPage = () => {
   const navigate = useNavigate()
+  const [screen, setScreen] = useState<Screen>('preferences')
+  const [savedPreferences, setSavedPreferences] = useState<NotificationPreference[]>([])
+  const [notificationBusy, setNotificationBusy] = useState(false)
+  const [deadlinePage, setDeadlinePage] = useState(0)
+  const [notificationPage, setNotificationPage] = useState(0)
   const [preferences, setPreferences] = useState<NotificationPreference[]>([])
   const [deadlines, setDeadlines] = useState<DeadlineItem[]>([])
   const [notifications, setNotifications] = useState<UserNotification[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [preferencesLoading, setPreferencesLoading] = useState(true)
+  const [preferencesError, setPreferencesError] = useState<string | null>(null)
+  const [inboxLoading, setInboxLoading] = useState(true)
+  const [inboxError, setInboxError] = useState<string | null>(null)
   const [deadlinesLoading, setDeadlinesLoading] = useState(true)
   const [deadlinesError, setDeadlinesError] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -54,9 +70,22 @@ const SettingsPage = () => {
   const [notice, setNotice] = useState<string | null>(null)
   const [needsLogin, setNeedsLogin] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deletePassword, setDeletePassword] = useState('')
   const [deleteConfirmation, setDeleteConfirmation] = useState('')
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
+
+  const dirty = preferenceKey(preferences) !== preferenceKey(savedPreferences)
+  const blocker = useBlocker(dirty && !isDeletingAccount)
+  useEffect(() => {
+    if (!dirty || isDeletingAccount) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty, isDeletingAccount])
+  const deadlineSlice = pageSlice(deadlines, deadlinePage)
+  const notificationSlice = pageSlice(notifications, notificationPage)
+  const unreadDeadlines = countUnreadGroups(groupNotifications(notifications))
 
   const preferenceByTopic = useMemo(() => {
     const map = new Map<NotificationTopic, NotificationPreference>()
@@ -66,27 +95,33 @@ const SettingsPage = () => {
 
   const unreadCount = useMemo(() => notifications.filter((item) => !item.isRead).length, [notifications])
 
-  // 관심 주제·알림함은 DB만 조회하므로 빠르다. 화면은 이 코어 로드만 기다린다.
-  const loadCore = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    setNeedsLogin(false)
+  // Each service owns its loading/error state; account access never depends on it.
+  const loadPreferences = useCallback(async () => {
+    setPreferencesLoading(true)
+    setPreferencesError(null)
     try {
-      const [preferenceData, notificationData] = await Promise.all([
-        apiFetch<NotificationPreferenceResponse>('/notifications/preferences'),
-        apiFetch<UserNotification[]>('/notifications'),
-      ])
-      setPreferences(preferenceData.preferences ?? [])
-      setNotifications(Array.isArray(notificationData) ? notificationData : [])
+      const data = await apiFetch<NotificationPreferenceResponse>('/notifications/preferences')
+      setPreferences(data.preferences ?? [])
+      setSavedPreferences(data.preferences ?? [])
     } catch (loadError) {
-      if (isApiError(loadError) && loadError.status === 401) {
-        setNeedsLogin(true)
-        setError('로그인 후 알림 설정을 사용할 수 있습니다.')
-      } else {
-        setError('알림 정보를 불러오지 못했습니다.')
-      }
+      if (isApiError(loadError) && loadError.status === 401) setNeedsLogin(true)
+      else setPreferencesError('관심 주제를 불러오지 못했습니다. 다시 불러온 후 설정을 저장할 수 있습니다.')
     } finally {
-      setIsLoading(false)
+      setPreferencesLoading(false)
+    }
+  }, [])
+
+  const loadInbox = useCallback(async () => {
+    setInboxLoading(true)
+    setInboxError(null)
+    try {
+      const data = await apiFetch<UserNotification[]>(INBOX_URL)
+      setNotifications(Array.isArray(data) ? data : [])
+    } catch (loadError) {
+      if (isApiError(loadError) && loadError.status === 401) setNeedsLogin(true)
+      else setInboxError('알림함을 불러오지 못했습니다.')
+    } finally {
+      setInboxLoading(false)
     }
   }, [])
 
@@ -98,24 +133,20 @@ const SettingsPage = () => {
       const deadlineData = await apiFetch<DeadlineItem[]>('/notifications/deadlines')
       setDeadlines(Array.isArray(deadlineData) ? deadlineData : [])
     } catch (loadError) {
-      // 마감일 실패는 전체 화면을 막지 않는다. 로그인 필요 여부는 코어 로더가 처리한다.
+      // Deadline failures stay within their screen; authorization still guards the page.
       setDeadlines([])
-      if (!(isApiError(loadError) && loadError.status === 401)) {
-        setDeadlinesError(true)
-      }
+      if (isApiError(loadError) && loadError.status === 401) setNeedsLogin(true)
+      else setDeadlinesError(true)
     } finally {
       setDeadlinesLoading(false)
     }
   }, [])
 
-  const loadData = useCallback(async () => {
-    void loadDeadlines()
-    await loadCore()
-  }, [loadCore, loadDeadlines])
-
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    void loadPreferences()
+    void loadInbox()
+    void loadDeadlines()
+  }, [loadPreferences, loadInbox, loadDeadlines])
 
   const updatePreference = (topic: NotificationTopic, updater: (current: NotificationPreference) => NotificationPreference) => {
     setPreferences((current) =>
@@ -151,6 +182,8 @@ const SettingsPage = () => {
   }, [deadlines])
 
   const handleClearRead = async () => {
+    if (notificationBusy) return
+    setNotificationBusy(true)
     setError(null)
     setNotice(null)
     try {
@@ -159,10 +192,12 @@ const SettingsPage = () => {
       setNotice(result.deleted > 0 ? `읽은 알림 ${result.deleted}개를 정리했습니다.` : '정리할 읽은 알림이 없습니다.')
     } catch {
       setError('읽은 알림을 정리하지 못했습니다.')
-    }
+    } finally { setNotificationBusy(false) }
   }
 
   const handleMarkAllRead = async () => {
+    if (notificationBusy) return
+    setNotificationBusy(true)
     const previous = notifications
     setNotifications((current) => current.map((notification) => ({ ...notification, isRead: true })))
     try {
@@ -170,10 +205,11 @@ const SettingsPage = () => {
     } catch {
       setNotifications(previous)
       setError('알림을 모두 읽음으로 표시하지 못했습니다.')
-    }
+    } finally { setNotificationBusy(false) }
   }
 
   const handleSave = async () => {
+    if (preferencesLoading || preferencesError || isSaving) return
     setIsSaving(true)
     setError(null)
     setNotice(null)
@@ -183,8 +219,9 @@ const SettingsPage = () => {
         json: { preferences },
       })
       setPreferences(data.preferences ?? preferences)
+      setSavedPreferences(data.preferences ?? preferences)
       setNotice('알림 설정을 저장했습니다.')
-      await loadData()
+      void loadDeadlines()
     } catch {
       setError('알림 설정 저장에 실패했습니다.')
     } finally {
@@ -198,8 +235,9 @@ const SettingsPage = () => {
     setNotice(null)
     try {
       const result = await apiFetch<{ created: number; upcomingMatched: number }>('/notifications/sync', { method: 'POST' })
-      setNotice(`새 알림 ${result.created}개를 확인했습니다. 관심 마감 ${result.upcomingMatched}개가 매칭되었습니다.`)
-      await loadData()
+      setNotice(`새 리마인드 ${result.created}회를 확인했습니다. 관심 마감 ${result.upcomingMatched}건이 매칭되었습니다.`)
+      await loadInbox()
+      void loadDeadlines()
     } catch {
       setError('마감 알림 동기화에 실패했습니다.')
     } finally {
@@ -208,12 +246,14 @@ const SettingsPage = () => {
   }
 
   const handleMarkRead = async (notificationId: string) => {
+    if (notificationBusy) return
+    setNotificationBusy(true)
     try {
       const updated = await apiFetch<UserNotification>(`/notifications/${notificationId}/read`, { method: 'POST' })
       setNotifications((current) => current.map((item) => (item.id === notificationId ? updated : item)))
     } catch {
       setError('알림 읽음 처리에 실패했습니다.')
-    }
+    } finally { setNotificationBusy(false) }
   }
 
   const closeDeleteDialog = () => {
@@ -221,11 +261,13 @@ const SettingsPage = () => {
     setDeleteDialogOpen(false)
     setDeletePassword('')
     setDeleteConfirmation('')
+    setDeleteError(null)
   }
 
   const handleDeleteAccount = async () => {
+    if (!deletePassword || deleteConfirmation.trim() !== '회원 탈퇴' || isDeletingAccount) return
     setIsDeletingAccount(true)
-    setError(null)
+    setDeleteError(null)
     try {
       await apiFetch<{ message: string }>('/auth/account', {
         method: 'DELETE',
@@ -246,7 +288,7 @@ const SettingsPage = () => {
         && 'message' in deleteError.details
         ? String(deleteError.details.message)
         : '회원 탈퇴를 완료하지 못했습니다.'
-      setError(message)
+      setDeleteError(message)
     } finally {
       setIsDeletingAccount(false)
     }
@@ -257,7 +299,7 @@ const SettingsPage = () => {
       <header className="settings-page__header">
         <div>
           <p className="settings-page__eyebrow">D-day 비서</p>
-          <h1>알림 설정</h1>
+          <h1>설정</h1>
         </div>
         <div className="settings-page__actions">
           <button type="button" className="settings-page__back" onClick={() => navigate('/')}>
@@ -269,8 +311,8 @@ const SettingsPage = () => {
         </div>
       </header>
 
-      {error && <div className="settings-alert settings-alert--danger">{error}</div>}
-      {notice && <div className="settings-alert settings-alert--success">{notice}</div>}
+      {error && <div role="alert" className="settings-alert settings-alert--danger">{error}</div>}
+      {notice && <div role="status" className="settings-alert settings-alert--success">{notice}</div>}
 
       {needsLogin ? (
         <section className="settings-panel">
@@ -280,25 +322,31 @@ const SettingsPage = () => {
             로그인하기
           </button>
         </section>
-      ) : isLoading ? (
-        <section className="settings-panel">
-          <p className="settings-empty">알림 정보를 불러오는 중입니다...</p>
-        </section>
       ) : (
         <>
-          <section className="settings-grid">
+          <nav className="settings-nav" aria-label="설정 화면">
+            {SCREENS.map((item) => <button key={item.id} type="button" aria-current={screen === item.id ? 'page' : undefined}
+              aria-controls={`settings-${item.id}`} onClick={() => setScreen(item.id)}>{item.label}</button>)}
+          </nav>
+          {dirty && <p className="settings-dirty" role="status">저장하지 않은 관심 주제 변경이 있습니다. 다른 설정 화면에서도 유지됩니다.
+            {screen !== 'preferences' && <button type="button" className="settings-page__back" onClick={() => setScreen('preferences')}>설정 저장하러 가기</button>}
+          </p>}
+          <section id="settings-preferences" hidden={screen !== 'preferences'}>
+
             <article className="settings-panel">
+              {preferencesLoading && <p role="status">관심 주제를 불러오는 중입니다...</p>}
+              {preferencesError && <div role="alert"><p>{preferencesError}</p><button type="button" className="settings-page__back" onClick={() => void loadPreferences()}>관심 주제 다시 시도</button></div>}
               <div className="settings-panel__header">
                 <div>
                   <h2>관심 주제</h2>
-                  <p>켜둔 주제만 내 마감일과 알림에 반영됩니다.</p>
+                  <p>저장한 관심 주제와 리마인드 시점을 내 마감과 알림에 반영합니다. 변경 후 ‘설정 저장’을 눌러주세요.</p>
                 </div>
                 <div className="settings-topic-bulk">
                   <button
                     type="button"
                     className="settings-page__back"
                     onClick={() => handleToggleAllTopics(true)}
-                    disabled={isSaving || preferences.every((preference) => preference.enabled)}
+                    disabled={isSaving || preferencesLoading || !!preferencesError || preferences.every((preference) => preference.enabled)}
                   >
                     전체 켜기
                   </button>
@@ -306,12 +354,12 @@ const SettingsPage = () => {
                     type="button"
                     className="settings-page__back"
                     onClick={() => handleToggleAllTopics(false)}
-                    disabled={isSaving || preferences.every((preference) => !preference.enabled)}
+                    disabled={isSaving || preferencesLoading || !!preferencesError || preferences.every((preference) => !preference.enabled)}
                   >
                     전체 끄기
                   </button>
-                  <button type="button" className="auth-submit settings-save-btn" onClick={handleSave} disabled={isSaving}>
-                    {isSaving ? '저장 중...' : '저장'}
+                  <button type="button" className="auth-submit settings-save-btn" onClick={handleSave} disabled={isSaving || preferencesLoading || !!preferencesError || !dirty}>
+                    {isSaving ? '저장 중...' : preferencesLoading || preferencesError ? '설정 저장' : dirty ? '설정 저장' : '저장됨'}
                   </button>
                 </div>
               </div>
@@ -325,6 +373,7 @@ const SettingsPage = () => {
                       <label className="settings-topic__main">
                         <input
                           type="checkbox"
+                          disabled={isSaving || preferencesLoading || !!preferencesError || !preference}
                           checked={preference?.enabled ?? false}
                           onChange={() => handleToggleTopic(topic.topic)}
                         />
@@ -347,7 +396,7 @@ const SettingsPage = () => {
                               type="checkbox"
                               checked={remindDays.has(day)}
                               onChange={() => handleToggleRemindDay(topic.topic, day)}
-                              disabled={!preference?.enabled}
+                              disabled={isSaving || preferencesLoading || !!preferencesError || !preference?.enabled}
                             />
                             <span>{day === 0 ? '당일' : `${day}일 전`}</span>
                           </label>
@@ -359,17 +408,9 @@ const SettingsPage = () => {
               </div>
             </article>
 
-            <article className="settings-panel settings-panel--summary">
-              <h2>알림함</h2>
-              <p className="settings-summary-number">{unreadCount}</p>
-              <p>읽지 않은 내부 알림</p>
-              <button type="button" className="settings-sync-btn" onClick={handleSync} disabled={isSyncing}>
-                {isSyncing ? '확인 중...' : '마감 알림 확인'}
-              </button>
-            </article>
           </section>
 
-          <section className="settings-panel">
+          <section id="settings-deadlines" className="settings-panel" hidden={screen !== 'deadlines'}>
             <div className="settings-panel__header">
               <div>
                 <h2>내 마감일</h2>
@@ -381,11 +422,11 @@ const SettingsPage = () => {
               {deadlinesLoading ? (
                 <p className="settings-empty">마감 정보를 불러오는 중...</p>
               ) : deadlinesError ? (
-                <p className="settings-empty">마감 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
+                <p className="settings-empty">마감 정보를 불러오지 못했습니다. <button type="button" className="settings-page__back" onClick={() => void loadDeadlines()}>다시 시도</button></p>
               ) : deadlines.length === 0 ? (
                 <p className="settings-empty">켜둔 관심 주제에 해당하는 마감이 아직 없습니다.</p>
               ) : (
-                deadlines.map((deadline) => (
+                deadlineSlice.items.map((deadline) => (
                   <article className="deadline-item" key={deadline.id}>
                     <div className="deadline-item__d-day">{formatDday(deadline.dDay)}</div>
                     <div className="deadline-item__body">
@@ -395,7 +436,7 @@ const SettingsPage = () => {
                         <span>{formatDate(deadline.targetDate)}</span>
                       </div>
                       <h3>{deadline.title}</h3>
-                      {deadline.snippet && <p>{deadline.snippet}</p>}
+                      {cleanDeadlineSnippet(deadline.snippet) && <details className="settings-description"><summary>상세 설명</summary><p>{cleanDeadlineSnippet(deadline.snippet)}</p></details>}
                     </div>
                     {deadline.url && (
                       <a className="deadline-item__link" href={deadline.url} target="_blank" rel="noreferrer">
@@ -406,41 +447,50 @@ const SettingsPage = () => {
                 ))
               )}
             </div>
+            <Pagination {...deadlineSlice} total={deadlines.length} onChange={setDeadlinePage} />
           </section>
 
-          <section className="settings-panel">
+          <section id="settings-inbox" className="settings-panel" hidden={screen !== 'inbox'}>
             <div className="settings-panel__header">
               <div>
-                <h2>최근 알림</h2>
-                <p>동기화 시점에 해당하는 7일 전, 1일 전, 당일 알림입니다.</p>
+                <h2>알림함</h2>
+                {!inboxLoading && !inboxError && <p>불러온 {notifications.length}회 중 읽지 않은 다가오는 마감 {unreadDeadlines}건 · 읽지 않은 리마인드 {unreadCount}회.</p>}
+                <p>지난 마감을 포함하여 마감일이 빠른 순으로 최대 {INBOX_LIMIT}회만 조회합니다. 건수는 불러온 범위 기준이며 전체 이력이 아닙니다.</p>
+                <p>벨은 다가오는 마감의 여러 리마인드를 1건으로 묶습니다. 별도 조회 범위 때문에 숫자가 다를 수 있습니다.</p>
+                <p>‘모두 읽음’과 ‘읽은 알림 정리’는 현재 페이지 밖의 계정 알림에도 적용됩니다.</p>
+                <button type="button" className="settings-sync-btn" onClick={handleSync} disabled={isSyncing || notificationBusy}>
+                  {isSyncing ? '확인 중...' : '마감 알림 확인'}
+                </button>
               </div>
               <div className="settings-topic-bulk">
-                <span className="settings-count">{notifications.length}개</span>
+                <span className="settings-count">{inboxLoading ? '불러오는 중' : inboxError ? '조회 실패' : `조회 ${notifications.length}회`}</span>
                 {unreadCount > 0 && (
-                  <button type="button" className="settings-page__back" onClick={handleMarkAllRead}>
+                  <button type="button" className="settings-page__back" onClick={handleMarkAllRead} disabled={notificationBusy || isSyncing}>
                     모두 읽음
                   </button>
                 )}
                 {notifications.some((notification) => notification.isRead) && (
-                  <button type="button" className="settings-page__back" onClick={handleClearRead}>
+                  <button type="button" className="settings-page__back" onClick={handleClearRead} disabled={notificationBusy || isSyncing}>
                     읽은 알림 정리
                   </button>
                 )}
               </div>
             </div>
+            {inboxError && <div role="alert"><p>{inboxError}</p><button type="button" className="settings-page__back" onClick={() => void loadInbox()}>알림함 다시 시도</button></div>}
             <div className="notification-list">
-              {notifications.length === 0 ? (
+              {inboxLoading ? <p role="status">알림함을 불러오는 중입니다...</p> : inboxError ? null : notifications.length === 0 ? (
                 <p className="settings-empty">아직 생성된 알림이 없습니다.</p>
               ) : (
-                notifications.map((notification) => (
+                notificationSlice.items.map((notification) => (
                   <article className={`notification-item ${notification.isRead ? 'notification-item--read' : ''}`} key={notification.id}>
                     <div>
                       <div className="deadline-item__meta">
                         <span>{notification.topicLabel}</span>
+                        <span>마감 {formatDate(notification.targetDate)} · {getDDay(notification.targetDate) === null ? '날짜 확인 필요' : formatDDay(getDDay(notification.targetDate)!)}</span>
                         <span>{formatDateTime(notification.createdTime)}</span>
                       </div>
                       <h3>{notification.title}</h3>
-                      <p>{notification.body}</p>
+                      <details className="settings-description"><summary>알림 상세 · {notification.reminderDaysBefore === 0 ? '당일' : `${notification.reminderDaysBefore}일 전`} 리마인드</summary><p>{cleanDeadlineSnippet(notification.body) || '원문에서 자세한 내용을 확인하세요.'}</p></details>
                     </div>
                     <div className="notification-item__actions">
                       {notification.url && (
@@ -449,7 +499,7 @@ const SettingsPage = () => {
                         </a>
                       )}
                       {!notification.isRead && (
-                        <button type="button" onClick={() => handleMarkRead(notification.id)}>
+                        <button type="button" disabled={notificationBusy || isSyncing} onClick={() => handleMarkRead(notification.id)}>
                           읽음
                         </button>
                       )}
@@ -458,9 +508,10 @@ const SettingsPage = () => {
                 ))
               )}
             </div>
+            {!inboxLoading && !inboxError && <Pagination {...notificationSlice} total={notifications.length} onChange={setNotificationPage} />}
           </section>
 
-          <section className="settings-panel settings-panel--danger-zone">
+          <section id="settings-account" className="settings-panel settings-panel--danger-zone" hidden={screen !== 'account'}>
             <div className="settings-panel__header">
               <div>
                 <h2>계정 관리</h2>
@@ -479,6 +530,15 @@ const SettingsPage = () => {
       )}
 
       <ConfirmDialog
+        open={blocker.state === 'blocked'}
+        title="저장하지 않은 변경"
+        description="관심 주제 변경을 저장하지 않고 이동할까요? 머무르기를 선택하면 설정을 저장할 수 있습니다."
+        confirmLabel="저장하지 않고 이동"
+        cancelLabel="머무르기"
+        onCancel={() => { if (blocker.state === 'blocked') blocker.reset() }}
+        onConfirm={() => { if (blocker.state === 'blocked') blocker.proceed() }}
+      />
+      <ConfirmDialog
         open={deleteDialogOpen}
         title="회원 탈퇴"
         description="삭제 후에는 계정과 대화 기록을 복구할 수 없습니다. 현재 비밀번호와 확인 문구를 입력해주세요."
@@ -489,6 +549,7 @@ const SettingsPage = () => {
         onCancel={closeDeleteDialog}
         onConfirm={handleDeleteAccount}
       >
+        {deleteError && <p role="alert" className="settings-alert settings-alert--danger">{deleteError}</p>}
         <label className="settings-delete-field">
           <span>현재 비밀번호</span>
           <input

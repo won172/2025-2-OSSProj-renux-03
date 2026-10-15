@@ -226,6 +226,7 @@ const SignUpPage = () => {
     <div className="auth-page">
       <div className="auth-page__scroll">
       <div className="auth-container">
+        <Link className="auth-home-link" to="/">← 홈으로</Link>
         <h2>회원가입</h2>
         <div className="auth-mode-tabs" role="group" aria-label="가입 유형">
           <button

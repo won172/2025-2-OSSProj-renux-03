@@ -33,6 +33,7 @@ interface ChatMessageItemProps {
   busy: boolean
   guestToken?: string
   activeCitationNumber: number | null
+  citationRequest?: number
   onCitationClick: (citationNumber: number) => void
   onRegenerate: () => void
   onSelectSuggestion: (question: string) => void
@@ -47,6 +48,7 @@ const ChatMessageItem = ({
   busy,
   guestToken,
   activeCitationNumber,
+  citationRequest = 0,
   onCitationClick,
   onRegenerate,
   onSelectSuggestion,
@@ -196,6 +198,7 @@ const ChatMessageItem = ({
             showScores={showScores}
             isFallback={message.isFallback}
             activeCitationNumber={activeCitationNumber}
+            citationRequest={citationRequest}
           />
         )}
 

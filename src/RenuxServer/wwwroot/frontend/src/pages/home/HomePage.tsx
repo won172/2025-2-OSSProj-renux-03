@@ -1,3 +1,4 @@
+import { publicMajorName } from '../../auth/publicMajor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
@@ -27,6 +28,7 @@ import {
   syncNotifications,
 } from '../../chat/chatApi'
 import { createFollowupRequestTracker, loadFollowups } from '../../chat/followups'
+import { getChatStreamFailureMessage, getFailedAssistantContent } from '../../chat/streamFailure'
 import {
   finalizeStoppedAssistant,
   isAbortError,
@@ -137,7 +139,7 @@ const HomePage = () => {
   const [chatInput, setChatInput] = useState('')
   const [chatSending, setChatSending] = useState(false)
   const [streamStatus, setStreamStatus] = useState<ChatStreamStatus>(null)
-  const [activeCitation, setActiveCitation] = useState<{ messageId: string; citationNumber: number } | null>(null)
+  const [activeCitation, setActiveCitation] = useState<{ messageId: string; citationNumber: number; request: number } | null>(null)
 
   const [briefing, setBriefing] = useState<HomeBriefingData | null>(null)
   const [briefingLoading, setBriefingLoading] = useState(true)
@@ -723,11 +725,12 @@ const HomePage = () => {
           streamAnnouncementRef.current.terminal(request, 'error')
         }
         console.error('Failed to send message', error)
-        if (streamAnnouncementRef.current.isCurrent(request)) setChatError('메시지를 전송하지 못했습니다.')
+        const failureMessage = getChatStreamFailureMessage(error, authStatus === 'authenticated')
+        if (streamAnnouncementRef.current.isCurrent(request)) setChatError(failureMessage)
         setChatMessages((previous) =>
           previous.map((message) =>
             message.id === assistantId
-              ? { ...message, content: '응답 연결이 끊겼습니다. 다시 생성 버튼으로 시도해주세요.', isFallback: true }
+              ? { ...message, content: getFailedAssistantContent(message.content, failureMessage) }
               : message,
           ),
         )
@@ -1051,7 +1054,7 @@ const HomePage = () => {
   )
 
   const starterQuestions = useMemo(() => {
-    const dept = isAuthenticated ? (departmentName ?? '').trim() : ''
+    const dept = isAuthenticated ? publicMajorName(departmentName) : ''
     const questions: string[] = []
 
     if (dept) {
@@ -1085,7 +1088,7 @@ const HomePage = () => {
   const headerTitle = selectedChatId ? (selectedChatTitle ?? '대화') : '동국대학교 동똑이'
   const greeting = isAuthenticated && userName ? `${userName}님, 오늘의 동국대` : '오늘의 동국대'
   const greetingSub = isAuthenticated
-    ? `${departmentName ?? '동국대학교'} 기준으로 오늘 알아두면 좋은 정보를 모았어요.`
+    ? `${publicMajorName(departmentName) || '동국대학교'} 기준으로 오늘 알아두면 좋은 정보를 모았어요.`
     : '로그인하면 학과에 맞는 답변과 마감 알림까지 받을 수 있어요.'
 
   const composerDisabled = chatSending
@@ -1127,7 +1130,7 @@ const HomePage = () => {
           menuButtonRef={mobileMenuButtonRef}
           isAuthenticated={isAuthenticated}
           userName={userName}
-          departmentName={departmentName}
+          departmentName={publicMajorName(departmentName)}
           role={userRole}
           notifications={notifications}
           hasEnabledTopics={hasEnabledTopics}
@@ -1212,8 +1215,9 @@ const HomePage = () => {
                       activeCitationNumber={
                         activeCitation?.messageId === message.id ? activeCitation.citationNumber : null
                       }
+                      citationRequest={activeCitation?.messageId === message.id ? activeCitation.request : 0}
                       onCitationClick={(citationNumber) =>
-                        setActiveCitation({ messageId: message.id, citationNumber })
+                        setActiveCitation((previous) => ({ messageId: message.id, citationNumber, request: (previous?.request ?? 0) + 1 }))
                       }
                       onRegenerate={() => { void regenerateChatMessage(message.id) }}
                       onSelectSuggestion={(question) => { void submitQuestion(question) }}
