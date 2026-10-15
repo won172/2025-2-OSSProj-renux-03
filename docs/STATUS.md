@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-10-15 (API 모델 스냅샷 수정 후보 검증)
+Last Updated: 2026-10-15 (API 모델 수정·운영 DB 반영 완료)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -109,10 +109,10 @@ Last Updated: 2026-10-15 (API 모델 스냅샷 수정 후보 검증)
 - TestFlight 최신 확인값은 1.0(8) `VALID`·`IN_BETA_TESTING`이다. 공개 App Store 심사는 제출하지 않았다.
 - 남은 검증: Mac 잠금 해제와 앱 테스트 계정 로그인이 필요하다. 최종 앱의 로그인 후 설정·관리자·native SSE 전체 경로와
   실제 기기 동작은 미확인이다. 로컬 fixture 및 앞서 수행한 게스트 시뮬레이터 검증과 구분한다.
-- 별도 기존 결함: full-main API를 새로 빌드해 배포하려면 snapshot 속성 위치 교정과 DB 없는 모델 일치 회귀 검사가 필요하다.
-  그 뒤 기존 11번째 migration 적용 여부를 별도로 검토해야 한다. 이번 운영 이미지에는 이 migration을 포함하지 않았다.
+- 이 단계에서 발견한 full-main snapshot 불일치는 아래 PR #65 및 운영 DB 반영으로 해결했다.
+  당시 사용한 호환 이미지와 현재 운영 이미지를 구분한다.
 
-## 2026-10-15 API 모델 스냅샷 재발 방지 후보
+## 2026-10-15 API 모델 수정·운영 DB 반영 완료
 
 - `fix/api-model-snapshot`의 `b748cf1`, [PR #65](https://github.com/won172/2025-2-OSSProj-renux-03/pull/65).
   `DegradedDatasetsJson` 스냅샷 선언을 `ActiveChat`에서 실제 모델과 같은 `ChatMessage`로 이동했다.
@@ -121,19 +121,27 @@ Last Updated: 2026-10-15 (API 모델 스냅샷 수정 후보 검증)
 - 새 검사는 수정 전 exit 1로 정확한 모델 불일치를 검출했고, 수정 후 전체 계약 테스트가 exit 0으로 통과했다.
   root Release 빌드(0 warnings/errors), 온라인 restore, 전체 계약·secret/diff 검사 및 독립 QA 재실행을 통과했다.
   출처 식별자 8개 시나리오·160 assertions도 포함한다. 전체 계약 assertion 총수는 실행기가 출력하지 않는다.
-- 최종 후보 이미지 `renuxserver-api:api-model-b748cf1`,
-  `sha256:c6c8f749bc4dfb352d97194f065dfa750038b36c7a5c0a609379aeba1feee8ff`를 준비했다.
+- 최종 운영 이미지 `renuxserver-api:api-model-b748cf1`,
+  `sha256:c6c8f749bc4dfb352d97194f065dfa750038b36c7a5c0a609379aeba1feee8ff`를 적용했다.
   격리 internal network의 폐기 가능한 PostgreSQL에서 기존 운영과 같은 migration 10개 상태를 만들고,
   테스트 사용자·대화·출처를 저장한 뒤 새 이미지로 11개 상태까지 전환했다. 기존 행 수·내용 해시가 동일했고
   API health 200 및 DB 연동 계약 테스트가 통과했다. 기존 이미지로 되돌린 뒤에도 health 200과 추가 데이터 보존을 확인했다.
-- 운영에 적용하면 기존 `20260928010000_AddChatRetrievalModeAndDegradedDatasets`가 실행되어 `chat_messages`에
-  nullable text 열 `retrieval_mode`, `degraded_datasets_json`이 추가된다. EF가 생성한 적용 SQL은 두 ALTER ADD와
-  migration 이력 INSERT뿐이다. 기존 데이터 삭제·열 이름 변경은 없다. 운영 DB migration은 명시적 승인 대기다.
-- 승인 후 실행 계획은 private DB backup 검증 → 짧은 lock/statement timeout을 둔 추가 migration → API 단독 교체 →
-  공개 health/ready·인증 CORS·DB 이력·기존 데이터 서비스 불변 확인이다. 문제가 생기면 API 이미지만 복구하고,
-  추가 열을 삭제하는 Down migration이나 운영 데이터 복원은 자동 실행하지 않는다.
-- 현재 운영 API는 앞서 검증한 `mobile-ux-compatible-bb2c56a`로 유지한다. PR #65 및 이 기록은 아직 main에 병합하지 않았다.
-  앞선 PR #63과 main `12c0887`의 원격 CI는 모두 통과했다.
+- Human이 PR #65·#66 병합과 운영 DB migration·API 반영을 명시적으로 승인했다. PR #65는 `2e319bb`로
+  main에 병합됐으며 소스 `b748cf1`과 병합 결과의 파일 차이가 없음을 확인했다. 코드·문서 후보의 원격 CI는 모두 통과했다.
+- 운영 PostgreSQL custom-format 백업 114,094B를 저장하고 `pg_restore --list`로 읽기 검증했다.
+  이어 네트워크가 없는 임시 PostgreSQL에 전체 복원해 11개 테이블·753행의 내용 digest와 적용 전 migration 10개가 일치함을 확인했다.
+  임시 컨테이너와 볼륨은 제거했고, 백업은 저장소 밖 private 디렉터리에 0600 권한으로 보존했다. 데이터 파일·인증값은 Git에 넣지 않았다.
+- 운영에 `20260928010000_AddChatRetrievalModeAndDegradedDatasets`를 적용하여 `chat_messages`에
+  nullable text 열 `retrieval_mode`, `degraded_datasets_json`을 추가했다. lock timeout 5초·statement timeout 30초를 둔
+  트랜잭션이 성공했고 migration 이력은 10개에서 11개가 됐다. 데이터 삭제·열 이름 변경·Down migration은 실행하지 않았다.
+- 추가된 두 nullable 열을 제외하고 적용 전후 11개 테이블의 기존 753행을 비교했다. 행 수와 내용 digest가 모두 같았다.
+  이 값은 배포 직전·직후의 관측이며 이후 사용자 활동에 따른 데이터 변경까지 불변이라고 의미하지 않는다.
+- API만 교체했고 컨테이너 `7fab9ea2686e3df975fba8c282aae65848ea6659316d1a21b58747cbe81ede1f`의
+  이미지·소스 revision·healthy 상태를 확인했다. 공개 `/health`·`/ready` 200, 비로그인 ticket 401, native CORS 204였다.
+  환경값 30개와 Data Protection 볼륨을 유지했고 RAG·DB·Redis·nginx의 ID/이미지/시작 시각은 그대로였다.
+  이전 API 복구는 필요하지 않았다. 문제가 생길 경우 이전 API로 돌아가되 추가 열과 데이터는 보존한다.
+- `api-model-snapshot` 구현 및 독립 리뷰 worktree/local branch를 병합 확인 후 정리했다. remote branch는 유지했고,
+  primary checkout의 기존 RAG 변경 10개는 fast-forward 전후 해시가 같음을 확인했다.
 - 최종 시뮬레이터 앱을 1.0(8)로 갱신했고 native public 파일 44개가 TestFlight 8 archive와 같음을 확인했다.
   Mac 잠금·앱 테스트 계정 로그인 대기로 최종 로그인 후 화면 조작은 여전히 미확인이다.
 
@@ -158,8 +166,8 @@ Last Updated: 2026-10-15 (API 모델 스냅샷 수정 후보 검증)
 
 | Component | Status | Notes |
 |---|---|---|
-| Frontend | Stable / Revalidation Needed | React/Vite/TypeScript. 기존 테스트·lint·build 통과 기록 있음. 9월 27일 재검증하지 않음 |
-| Main Backend | Stable / Revalidation Needed | ASP.NET Core. 기존 계약 테스트 통과 기록 있음. 9월 27일 재검증하지 않음 |
+| Frontend | Stable / Native Auth UI Verification Pending | 10월 15일 웹 배포, lint·123 tests·build 통과. 실제 운영 밝은 설정 화면 확인. 최종 native 로그인 후 검증 대기 |
+| Main Backend | Stable | 10월 15일 b748cf1 이미지 운영 반영. 모델 일치·DB 연동 계약 통과, 운영 migration11·기존753행 보존, health/ready200 |
 | RAG Server | Active Development | 질문별 검색 경로 개선 중. 스트리밍·일반 응답의 검색 계획 공통화 완료 |
 | Crawler | Manual Catch-up Verified / Scheduler Off | 9월 28일 수동 소급 수집 확인. 교직원 승인 대기·교과과정 한 원천 부분 실패 |
 | SourceDocument | Active / Strict Lineage Passed | 운영 사본 및 운영 RAG에서 6개 데이터셋 정본·Parquet·Chroma 검사 통과 |
@@ -218,7 +226,7 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| API 기동 EF 모델·스냅샷 일치 | P0 | RAG/Backend / QA | `fix/api-model-snapshot` | `api-model-snapshot` | Review | 수정 전 실패→후 통과, Release/계약, 독립 QA, 격리 DB 10→11 전환·데이터 보존·이전 이미지 복구 검증 | 운영 DB 두 nullable 열 추가 승인 필요 | PR #65 및 상태 PR 검토; 운영 DB migration 명시적 승인 |
+| API 기동 EF 모델·스냅샷 일치 | P0 | RAG/Backend / QA | `fix/api-model-snapshot` | 정리 완료 | Completed | 회귀 실패→통과, Release/계약, 독립 QA·CI, 격리 DB 전환/복구, 운영 백업·migration11·기존753행 보존·health/ready200 | 최종 앱 인증 검증은 별도 진행 | PR #65 병합·운영 반영 완료 |
 | 모바일 UX·네이티브 인증 TestFlight 1.0(8) | P1 | Orchestrator / QA | `chore/mobile-ux-testflight` | `mobile-ux-testflight` | Review | 123 tests, backend 계약, 독립 인증 리뷰, Release archive/export, Apple VALID·내부 IN_BETA_TESTING·그룹 UI, CI 통과 | main 병합·웹/API·TestFlight 내부 반영 완료. 로그인 후 native SSE 미확인 | 테스트 계정 로그인 후 최종 검증; 릴리스 worktree·운영 재현 산출물 보존 |
 | iOS 키보드 입력창 가림 | P0 | Client | `fix/ios-keyboard-resize` | 정리 완료 | Completed | lint, 78 tests, native build, iOS 26.5 fixture 키보드 검증, 독립 QA | 실제 기기·운영 인증 미확인 | PR #64에 포함되어 병합 완료; 실제 기기 확인 유지 |
 | 저장 답변 출처 식별자·번호 보존 | P1 | RAG/Backend | `fix/chat-source-identity` | 정리 완료 | Completed | Release build, 전체 계약 테스트, 8 scenarios/160 assertions, 독립 QA | 격리 PostgreSQL 계약 통과. 운영 실제 대화 저장 미확인 | PR #64에 포함되어 병합 완료 |
