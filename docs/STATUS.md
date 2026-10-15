@@ -1,16 +1,116 @@
 # Dongttok Current Status
 
-Last Updated: 2026-09-29
+Last Updated: 2026-10-15 (모바일 UX 병합·운영 반영 기록)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
 설정 상태는 코드 기본값을 기준으로 기록한다.
+아래 9월 운영·RAG 기록은 이번 UI 작업에서 다시 확인하지 않은 당시 기록이다.
 
 ## Current Goal
 
 동똑이 RAG 검색 품질과 서비스 안정성을 개선한다.
 질문에 맞게 구조화 SQL 관계 조회, 키워드 검색, 벡터 검색을 선택하고,
 동국대학교 공식 출처와 정본 데이터에 근거한 답변을 유지한다.
+
+10월 13일 화면 감사에서 확인한 모바일 입력·알림 설정·관리자 화면 문제를
+우선순위에 따라 개선했다. PR #64 병합과 웹 배포를 확인했으며 최종 앱의 로그인 후 실사용 검증을 이어간다.
+
+## 2026-10-15 모바일 UX 구현·검증 기록
+
+- 작업 기준은 `origin/main`의 `b559b966`이다. primary checkout의 기존 RAG 데이터·산출물 변경은 보존했다.
+- iOS 키보드: `fix/ios-keyboard-resize`의 `c145245`, [PR #60](https://github.com/won172/2025-2-OSSProj-renux-03/pull/60).
+  Capacitor Keyboard Native resize와 중복 inset 방지 설정을 추가했다. root의 lint·78개 테스트와
+  Xcode 시뮬레이터 빌드가 통과했다. iOS 26.5 로컬 API fixture에서 로그인 상태와 게스트 홈,
+  여러 줄 입력·전송 버튼 탭·키보드 닫힘 후 여백 복원을 확인했다. 독립 정적 QA의 P0–P2 지적은 없었다.
+- 출처 저장: `fix/chat-source-identity`의 `bb2c56a`, [PR #61](https://github.com/won172/2025-2-OSSProj-renux-03/pull/61).
+  `source_ref`·`citation_number`를 저장·히스토리 DTO까지 보존한다. root의 Release 빌드와 전체 계약 테스트,
+  출처 보존 8개 시나리오·160개 assertion이 통과했다. 독립 정적 QA의 P0–P2 지적은 없었다.
+- 웹 화면: `fix/mobile-interaction-layout`의 소스 `a8d15e0` 및 웹 산출물 `e7b5a3b`,
+  [PR #62](https://github.com/won172/2025-2-OSSProj-renux-03/pull/62). 밝은 설정/로딩 화면, 설정 분리·8건 단위 목록,
+  모바일 목록/상세 전환, 교직원 갱신 diff와 승인 가드, 터치 조작·출처 카드·로딩 복구를 구현했다.
+  독립 QA의 P2 6건을 수정하고 재리뷰에서 추가 P0–P2 지적이 없음을 확인했다.
+  root와 QA 각각 109개 프런트 테스트·lint·타입/번들 검사를 통과했다.
+- `test/mobile-ux-integration`의 `1b68481`에서 세 후보를 조합했다. 프런트 lint·109개 테스트·웹/native bundle,
+  서버 Release 빌드·전체 계약 테스트, Xcode 시뮬레이터 컴파일이 통과했다. 웹 산출물은 재생성해도 Git diff가 없다.
+- 실제 Chrome 360/390/1280px에서 로컬 API fixture의 production bundle을 확인했다. 설정 탭·저장·미저장 이탈 확인,
+  독립 조회 오류·계정 접근, 승인 이력 링크, 학과 폼, staff 검토/차단, 출처 1/3 카드 연결, 관리자 카드·drawer 초점 복귀,
+  개인정보 화면을 확인했다. 동일 fixture의 설정 첫 화면 높이는 390px 폭에서 14,737px → 1,280px다.
+- API fixture와 화면 증거는 저장소 밖에 보존하며 운영 인증·데이터를 사용하지 않는다.
+  시뮬레이터/fixture 검증을 실제 기기·운영 API·배포 검증으로 해석하지 않는다.
+- Mac 잠금 해제 후 실제 API 주소를 사용하는 통합 앱 1.0(7)을 시뮬레이터에서 실행했다.
+  실제 홈 브리핑 표시, 게스트 키보드 위 입력창·전송 버튼 노출, 화면 탭으로 키보드 닫힘과 여백 복원을 확인했다.
+  로그인 후 설정·관리자 화면의 최종 네이티브 확인은 테스트 계정 로그인 대기다. 해당 화면의 로컬 fixture·웹 검증은 통과했다.
+  PR #60·#61·#62의 원격 frontend/backend/rag-python/secret-scan 검사는 모두 통과했다.
+- 웹 precache는 1,248,456 / 1,250,000B로 여유가 작다. 공개 화면·React·라우터는 계속 precache하며,
+  관리자 전용 코드·스타일만 지연 로드한다. 기존 예산을 완화하지 않았다.
+- 이 단계의 후보 검증 후 human 승인을 받아 PR #64를 main에 병합했다. 운영 반영 결과와 제약은 아래 최신 기록을 따른다.
+
+## 2026-10-15 TestFlight 1.0(7)
+
+- `chore/mobile-ux-testflight`의 `6d36470`, [PR #64](https://github.com/won172/2025-2-OSSProj-renux-03/pull/64).
+  최신 `origin/main`에서 만든 전용 worktree에 세 검증된 기능 후보를 조합하고 빌드 번호를 6 → 7로 올렸다.
+  기존 통합 트리와의 직접 비교는 Debug/Release 빌드 번호 두 줄뿐이다.
+- 배포용 iPhoneOS Release archive/export, 릴리스 사전 검사, 실제 API 주소·비fixture·서명 확인이 통과했다.
+  독립 패키지 QA의 정적 검사도 통과했다. 리뷰 sandbox의 서명 신뢰 체인 확인 제약은 root의
+  `codesign --verify --deep --strict` 통과 및 Apple 검증·처리 성공으로 별도 확인했다.
+- Apple 업로드 검증과 업로드가 오류 없이 완료됐다. Build/Delivery ID는 `97114306-4c30-4040-998b-0bcdc317224a`다.
+  App Store Connect API의 `processingState=VALID`, `internalBuildState=IN_BETA_TESTING`,
+  기존 내부 그룹 ‘똑똑이’ 포함을 확인했고 웹 화면에서도 **1.0(7) · 테스트 중**을 확인했다.
+- 한국어 TestFlight 테스트 안내를 추가했다. 기존 내부 테스터의 화면에 1.0(7) 설치됨이 표시되지만,
+  이것을 실제 기기 UI 동작 검증으로 해석하지 않는다.
+- IPA SHA-256: `9e164d148f42bf7d4b4650124df963c75322f4ddb2faea85ab47bfd9658a5c30`.
+- 외부 테스트 그룹은 기존과 같이 빌드 0개이며, 외부 Beta App Review와 App Store 공개 심사는 제출하지 않았다.
+
+## 2026-10-15 최종 코드와 TestFlight 1.0(8)
+
+- 운영 반영 준비 중 API 컨테이너가 `renuxserver-api:native-stream-auth-d826ac9`를 사용하며,
+  해당 `d826ac9`와 대응 클라이언트 `3d758c9`가 `main` 및 빌드 7 후보에 포함되지 않았음을 확인했다.
+  향후 API 교체에서 기존 티켓 기능을 잃지 않고 iOS SSE가 이를 사용하도록 두 변경을 함께 통합했다.
+- 최종 검증 코드는 `chore/mobile-ux-testflight`의 `45535b6`, [PR #64](https://github.com/won172/2025-2-OSSProj-renux-03/pull/64)다.
+  통합 커밋은 `133ce1a`이며 출처 식별자와 인증 티켓 테스트 호출을 모두 보존했다.
+- Root의 frontend lint·123개 테스트·웹/native 빌드, backend Release·전체 계약 테스트가 통과했다.
+  독립 인증 계약 리뷰에서 보고할 P0–P2 구현 결함은 없었다. 원격 PR #64 CI도 모두 통과했다.
+  실제 API의 비로그인 `/chat/stream-ticket`은 401, 앱 Origin의 티켓 헤더 preflight는 204였다.
+  로그인 후 실제 네이티브 HTTP→SSE→저장 전체 경로는 아직 미확인이다.
+- TestFlight 1.0(8)의 Apple 검증·업로드·처리가 성공했다. Build ID는 `d9788bcc-8fd8-4c69-800c-1a4252290483`이며,
+  `VALID`, 내부 그룹 ‘똑똑이’의 `IN_BETA_TESTING`과 웹 화면의 ‘테스트 중’을 확인했다. 한국어 테스트 안내도 반영했다.
+  IPA SHA-256은 `462231bccf837a3502ca12afb02375e172e351ff2e46a1545897d02626b5b2a1`이다.
+- 웹/API 이미지 `renuxserver-api:mobile-ux-45535b6`를 만들었고 이미지의 웹 파일 39개가 후보와 일치했다.
+  운영 API 환경값과 데이터 보호 키 볼륨을 그대로 보존하는 배포 구성을 확인했다. 원래 compose override가
+  실행 시 주입되는 환경변수에 의존하므로, 이를 누락한 일반 compose 실행을 사용하면 안 된다.
+  값은 기존 컨테이너에서 자식 프로세스 환경으로만 전달하며 파일·로그에 복사하지 않는다.
+- 이 full-main 이미지는 실제 기동에서 기존 EF snapshot 불일치로 실패해 즉시 이전 정상 이미지로 복구했다.
+  아래 DB 구조를 유지하는 운영 이미지로 다시 배포했고 공개 정상 응답을 확인했다.
+
+## 2026-10-15 승인 후 병합·운영 반영
+
+- Human이 PR #64·#63 병합과 운영 웹/API 반영을 명시적으로 승인했다. PR #64는 `3082004`로 main에 병합됐고,
+  #60·#61·#62도 MERGED로 확인했다. main의 frontend/backend/rag-python/secret-scan CI가 모두 통과했다.
+- 웹은 Vercel production `dpl_DGneJJD1XWHHoqbb5KcMWr4GuqQB`가 READY이며 `www.dongttok.com`에 연결됐다.
+  운영 모바일 화면에서 밝은 설정 화면을 확인했다. 기존 열린 탭은 새로고침 후 새 버전으로 전환됐다.
+  웹 로그인 세션이 만료된 상태이므로 최종 운영 보호 화면까지 확인했다고 해석하지 않는다.
+- 최초 API 기동 실패 원인은 기존 `90bab94` 변경의 snapshot에서 `DegradedDatasetsJson`이 `ChatMessage` 대신
+  `ActiveChat`에 들어간 점이다. 기존 운영 DLL은 `02c37e1` 모델에 native-auth 수정만 적용한 빌드였다.
+  이미지 태그의 `d826ac9`가 전체 모델·migration 버전을 대표하지 않았음을 독립 QA가 DLL/PDB 체크섬으로 확인했다.
+- 최종 운영 이미지는 `renuxserver-api:mobile-ux-compatible-bb2c56a`,
+  `sha256:7a3373a7e47e263b653b49df43dfb4a8ce040470ef6adfb1d2bdb16af323049c`다.
+  이전 운영 모델·migration·의존성과 인증 수정은 유지하고, `bb2c56ad`의 출처 JSON 보존 수정 및
+  `45535b6`의 웹 자산만 반영했다. full-main 전체를 그대로 배포한 이미지가 아니다.
+- 독립 QA는 모델/DbContext/migration 24개가 운영 기준과 동일하고, Docker 입력 웹 파일 47개가 최종 코드와
+  byte-identical임을 확인해 산출물을 APPROVE했다. root는 실제 이미지에서도 같은 47개 파일과 의존성 일치를 확인했다.
+- 별도 internal Docker network와 폐기 가능한 PostgreSQL에서 Release 빌드(0 warnings/errors), 전체 계약 테스트,
+  DB 연동 계약 테스트, API 기동을 확인했다. 출처 식별자 8개 시나리오·160 assertions가 통과했다.
+  독립 QA의 전체 실행은 read-only 임시 파일 제한으로 중단됐으므로 root의 격리 DB 완주 결과와 구분한다.
+- 최종 운영 API 컨테이너 `cef3dfc7354a704e7b9d65e1ed0f8739b6e44fae3c8bd59396f02a3db733f227`는 healthy다.
+  공개 `/health`·`/ready` 200, 비로그인 stream-ticket 401, native Origin/header CORS 204를 확인했다.
+  운영 환경값 30개와 Data Protection 볼륨을 그대로 유지했다. RAG·DB·Redis·nginx의 ID/이미지/시작 시각이 같고,
+  PostgreSQL migration 이력은 기존 10개로 동일하다. 운영 DB migration·데이터 삭제는 수행하지 않았다.
+- TestFlight 최신 확인값은 1.0(8) `VALID`·`IN_BETA_TESTING`이다. 공개 App Store 심사는 제출하지 않았다.
+- 남은 검증: Mac 잠금 해제와 앱 테스트 계정 로그인이 필요하다. 최종 앱의 로그인 후 설정·관리자·native SSE 전체 경로와
+  실제 기기 동작은 미확인이다. 로컬 fixture 및 앞서 수행한 게스트 시뮬레이터 검증과 구분한다.
+- 별도 기존 결함: full-main API를 새로 빌드해 배포하려면 snapshot 속성 위치 교정과 DB 없는 모델 일치 회귀 검사가 필요하다.
+  그 뒤 기존 11번째 migration 적용 여부를 별도로 검토해야 한다. 이번 운영 이미지에는 이 migration을 포함하지 않았다.
 
 ## 2026-09-28 운영 수집 확인
 
@@ -49,6 +149,7 @@ Last Updated: 2026-09-29
 
 ### P0
 
+- 배포된 TestFlight 1.0(8)의 로그인 후 키보드·설정·관리자·SSE 경로를 테스트 계정으로 최종 확인한다.
 - 공지 증분 갱신의 revision 메타데이터 수정 코드를 검토·배포한 뒤 자동 수집을
   재개한다. 9월 28일 운영 데이터는 수동 복구 후 strict lineage를 통과했다.
 - 실제 후보 endpoint의 전체 골든 평가와 결과·manifest를 확보한다.
@@ -56,6 +157,7 @@ Last Updated: 2026-09-29
 
 ### P1
 
+- 개선된 알림 설정·모바일 관리자 화면의 운영 사용성을 관찰한다. 기존 탭은 새로고침 후 새 버전 표시를 확인했다.
 - 이미 구현된 regression 평가 도구를 같은 질문·기준일·corpus/model revision으로 반복 실행한다.
 - 실제 질문과 사람 판정 qrels를 확대한다. 관계형 질문 목표는 200건이며 교과목 실사용 표본을 보강한다.
 - Retrieval 품질과 cold/warm 지연, p50/p95, fallback을 함께 측정한다.
@@ -91,6 +193,11 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
+| 모바일 UX·네이티브 인증 TestFlight 1.0(8) | P1 | Orchestrator / QA | `chore/mobile-ux-testflight` | `mobile-ux-testflight` | Review | 123 tests, backend 계약, 독립 인증 리뷰, Release archive/export, Apple VALID·내부 IN_BETA_TESTING·그룹 UI, CI 통과 | main 병합·웹/API·TestFlight 내부 반영 완료. 로그인 후 native SSE 미확인 | 테스트 계정 로그인 후 최종 검증; 릴리스 worktree·운영 재현 산출물 보존 |
+| iOS 키보드 입력창 가림 | P0 | Client | `fix/ios-keyboard-resize` | 정리 완료 | Completed | lint, 78 tests, native build, iOS 26.5 fixture 키보드 검증, 독립 QA | 실제 기기·운영 인증 미확인 | PR #64에 포함되어 병합 완료; 실제 기기 확인 유지 |
+| 저장 답변 출처 식별자·번호 보존 | P1 | RAG/Backend | `fix/chat-source-identity` | 정리 완료 | Completed | Release build, 전체 계약 테스트, 8 scenarios/160 assertions, 독립 QA | 격리 PostgreSQL 계약 통과. 운영 실제 대화 저장 미확인 | PR #64에 포함되어 병합 완료 |
+| 설정·관리자 모바일 사용성 | P1 | Client | `fix/mobile-interaction-layout` | 정리 완료 | Completed | 109 tests, lint/build, bundle budget, 독립 재리뷰, Chrome 360/390/1280px fixture, PR #62 CI 통과 | 로그인 후 최종 네이티브 화면 확인 대기 | 테스트 계정 로그인 후 최종 확인 |
+| 모바일 UX 초기 통합 | P1 | Orchestrator / QA | `test/mobile-ux-integration` | `mobile-ux-integration` | Review | 프런트 109 tests·웹/native bundle, 서버 Release·계약, Xcode sim build, build7 게스트 키보드 검증 | 이 트리에는 운영 native auth 보강이 없음. 최종 후보는 PR #64/45535b6 | 최종 릴리스 후보 증거를 기준으로 검토 |
 | 공지 증분 동기화·관리자 upsert 임베딩 입력 통일 | P1 | RAG/Backend | `fix/notice-live-embed-retrieval-text` | `~/dongttok-work/notice-live-embed-retrieval-text`(임시, 아래 Git State) | Review | 로컬 RAG 1,453 passed/1 skipped(main 711744e 병합 후), QA 재리뷰 APPROVE, PR CI 대기 | 관리자 승인 학과 한정 공지가 Chroma에 public으로 들어가던 공개범위 결함 수정. 실제 데이터 검색 영향 미확인 | PR #51 human 검토·merge |
 | 운영 공지 자동 갱신 재개 (P0) | P0 | Orchestrator | - | - | Blocked | revision 수정 코드 merge(PR #45) | 운영 이미지 미배포, `RAG_SCHEDULER_ENABLED=0` | human 배포·스케줄러 재개 승인 |
 | 실제 후보 골든 평가 190문항 (P0) | P0 | QA | - | - | Blocked | release gate는 fail-closed로 전환(PR #14) | 후보 endpoint·모델 비용 승인 필요 | human이 endpoint 제공 |
@@ -100,6 +207,9 @@ Worktree 경로는 `../dongttok-worktrees/<slug>` 기준으로 적는다.
 완료된 행은 다음 갱신 때 Recently Completed로 옮긴다.
 
 ## Git State
+
+2026-10-15 모바일 UX 작업 시작 시 `git fetch origin`으로 `origin/main = b559b966`을 확인했다.
+신규 브랜치는 모두 이 기준에서 별도 worktree로 생성했다. human 승인 후 PR #64가 `3082004`로 병합되어 #60·#61·#62도 MERGED가 됐다. 세 구현 worktree와 local branch를 정리했고 remote branch는 보존했다. primary의 기존 RAG 변경 10개는 내용 해시가 그대로임을 확인했다.
 
 2026-09-28 기준 확인값. 원격 상태는 `git fetch` 시점에 따라 달라진다.
 
