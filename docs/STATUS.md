@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-10-16 (Compose 단일 명령 기동 후보 검증)
+Last Updated: 2026-10-16 (RAG 503 운영 복구·일반 Compose 기동 검증)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -13,14 +13,51 @@ Last Updated: 2026-10-16 (Compose 단일 명령 기동 후보 검증)
 질문에 맞게 구조화 SQL 관계 조회, 키워드 검색, 벡터 검색을 선택하고,
 동국대학교 공식 출처와 정본 데이터에 근거한 답변을 유지한다.
 
-재부팅 후 Compose 단일 명령으로 기동할 수 있는 수정 후보의 구현·격리 검증을 완료했다.
-main 병합과 기존 운영 경로 적용은 human 승인 대기다.
+RAG 503을 운영에서 복구했고, 재발 방지 PR #73을 human 승인 후 main에 병합했다.
+기존 primary 경로에서 별도 override 없는 Compose 전체 기동과 외부 게스트 채팅을 확인했다.
 
 10월 13일 화면 감사에서 확인한 모바일 입력·알림 설정·관리자 화면 문제를
 우선순위에 따라 개선했다. main 병합, 운영 웹/API 및 TestFlight 1.0(8) 반영을 마쳤고,
 iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자·실제 채팅 저장/복원 검증까지 완료했다.
 
-## 2026-10-16 Compose 단일 명령 기동 후보
+## 2026-10-16 RAG 503 운영 복구 완료
+
+- Human의 실제 서버 복구 요청과 PR #73 병합 승인 후 작업했다. 코드 `5a11dd6`·`65a3179`의
+  [PR #73](https://github.com/won172/2025-2-OSSProj-renux-03/pull/73)을 `0d6fa13`으로 main에 병합했고,
+  primary를 fast-forward했다. 무관한 기존 RAG 데이터 변경은 보존했고, 복구 대상 파생물만 백업 후 교체했다.
+- 현재 Chroma 마운트는 `/app/artifacts/db_chroma` → primary `src/RAG/artifacts/db_chroma`로 올바르다.
+  기본 포인터의 최신 공지 컬렉션은 15,068개 청크가 있고, 예전 복구 컬렉션은 14,994개였다.
+  오래된 컬렉션으로 되돌리지 않고 최신 자료의 파생물 불일치를 복구했다.
+- 두 원인을 수정했다. 관리자 공지 갱신이 Parquet/lexical revision만 바꾸고 dense metadata를 남기는 경로를
+  공통 refresh와 maintenance lock으로 통일했다. 학식 로더는 게시 가능한 `active`·`updated`를 모두 읽고,
+  완전한 다음 수집에서 빠진 두 상태의 문서를 삭제 없이 숨긴다.
+- RAG를 중지하고 SQLite 정본과 active artifacts 72개·약 2.2GB를 private 디렉터리에 백업했다.
+  사본에서 공지 15,068개 벡터와 학식 기존 77개 벡터를 인증된 입력 hash로 재사용했고,
+  누락된 학식 5개만 새 임베딩했다. 정본 DB는 사본 복구 전후 byte hash가 동일했고,
+  실제 적용도 파생 artifacts만 교체했다. 이전 Chroma와 별도 백업은 보존했다.
+- 독립 read-only QA는 6개 데이터셋의 정본 문서·청크·doc ID·revision·URL·FTS 일치와 무결성을 재확인했다.
+  공지는 6,323문서/15,068청크, 학식은 82문서/82청크다. 나머지 4개 데이터셋의 파일과 dense/FTS 내용은
+  백업과 같았다. 기존 staff 표현 차이는 이번 복구의 회귀가 아니며 별도 재색인을 하지 않았다.
+- 실제 `src/RenuxServer`에서 **`docker compose up -d --build`**가 exit 0으로 완료됐다.
+  최종 5개 컨테이너의 compose 설정은 기본 `docker-compose.yml` 하나이고 restart 정책은 모두 `unless-stopped`다.
+  DB·Redis·RAG·API가 healthy이며 nginx를 통한 로컬/외부 `/ready`도 HTTP 200이다.
+  최종 RAG 이미지는 `sha256:a77b1fd17cf7f61a83e54eef405c60976e8ffebd311262f80c30b0f554deb8f6`,
+  API 이미지는 `sha256:7e698d9062efc9ab7349c05603c1651f457a022f9f3f42da89d5dccf5c605c8b`다.
+- 외부 `api.dongttok.com` 게스트 세션에서 학식·학생지원팀 연락처 질문 각각 HTTP 200,
+  completion/done 1개씩, error 0개로 끝났다. 학식은 결정적 응답 `verification_status=not_required`,
+  연락처는 `grounded=true`·`verification_status=passed`·hybrid·degraded dataset 없음이다.
+  두 표본의 운영 검증이며 전체 답변 품질/골든 평가로 일반화하지 않는다.
+- 새 Dockerfile 이미지 전체 RAG **1,523 passed / 1 skipped / 기존 경고 10개**,
+  독립 QA 전체 1,523개·집중 67개, 신규 회귀 3개 base 실패→candidate 통과를 확인했다.
+  PR #73의 frontend/backend/RAG 일반·빈 DB·무작위 순서/secret CI와 독립 리뷰도 통과했다.
+- PostgreSQL custom-format 백업 117,233B를 폐기 가능한 네트워크 없는 PostgreSQL에 실제 복원해 비교했다.
+  12개 테이블의 기존 793행 내용이 모두 보존됐고 migration은 11개로 같았다.
+  최종 검증 채팅에 따른 product_events 2행 추가만 관측했다. 임시 복원 컨테이너는 정리했다.
+- 운영 백업/증거는 저장소 밖 `../dongttok-worktrees/.ops-recovery/server-lineage-20261016-151549/`의
+  접근 제한 디렉터리에 있다. DB·secret·artifact를 Git에 넣지 않았다.
+  병합된 구현 worktree/local branch는 정리했고 remote branch는 보존했다. 물리적 전원 재부팅은 미실행이다.
+
+## 2026-10-16 Compose 단일 명령 기동 후보 (운영 적용 전 기록)
 
 - `fix/compose-one-command-startup`의 `0e0452d`, [PR #68](https://github.com/won172/2025-2-OSSProj-renux-03/pull/68).
   최신 `origin/main=1d669c0`에서 만든 별도 worktree에서 구현했다. 기존 primary의 RAG 데이터·산출물 변경은 보존했다.
@@ -41,7 +78,7 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
   이 검증은 실제 운영 모델·검색 데이터·질문 품질 또는 Docker 엔진 재부팅 전체 검증을 의미하지 않는다.
 - Root의 backend restore·Release 빌드(0 warnings/errors)·전체 계약 테스트, 출처 식별자 8 scenarios/160 assertions,
   shell·Compose 구성·secret·staged diff 검사와 독립 QA가 통과했다. primary 파일·운영 컨테이너·secret·DB는 변경하지 않았다.
-- 현재 **Review**다. 코드 PR의 main 병합과 기존 경로에서의 운영 재기동은 human 승인 후 진행한다.
+- 당시 상태는 **Review**였다. 이후 PR #68·#69·#73 병합 및 운영 반영 결과는 위 복구 완료 기록을 따른다.
 
 ## 2026-10-15 모바일 UX 구현·검증 기록
 
@@ -217,31 +254,31 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
 - 운영 RAG `/ready`, 6개 데이터셋 strict lineage, SQLite 무결성·외래키,
   공지 품질 검사가 통과했다. 이전에 실패한 학사일정·공지 질문을 RAG `/ask`로
   재실행해 각각 출처 2개·3개를 포함한 응답과 근거성 결과를 확인했다.
-- 운영 스케줄러는 `RAG_SCHEDULER_ENABLED=0`으로 유지한다. 다음 자동 수집 재개에는
-  공지 revision 수정 코드의 검토·배포와 운영 설정 변경 승인이 필요하다.
+- 당시 운영 스케줄러는 `RAG_SCHEDULER_ENABLED=0`이었다. 10월 16일 최신 확인값은
+  기존 설정을 보존한 `1` 및 readiness `started`이며 위 운영 복구 기록을 따른다.
 
 ## System Status
 
 | Component | Status | Notes |
 |---|---|---|
 | Frontend | Stable | 10월 15일 웹·TestFlight8 반영, lint·123 tests·build 통과. 최종 native 로그인 후 설정·관리자·채팅 검증 완료 |
-| Main Backend | Stable | 10월 15일 b748cf1 이미지 운영 반영. 모델 일치·DB 연동 계약 통과, 운영 migration11·기존753행 보존, health/ready200 |
-| RAG Server | Active Development | 질문별 검색 경로 개선 중. 스트리밍·일반 응답의 검색 계획 공통화 완료 |
-| Crawler | Manual Catch-up Verified / Scheduler Off | 9월 28일 수동 소급 수집 확인. 교직원 승인 대기·교과과정 한 원천 부분 실패 |
+| Main Backend | Stable | 10월 16일 최신 main 기본 Compose 이미지 기동. migration11·기존793행 보존, 외부 ready/SSE200 |
+| RAG Server | Ready / Recovery Verified | 10월 16일 PR #73 적용, 6개 strict lineage·ready200, 외부 게스트 SSE2건 완료. 전체 답변 품질 평가는 별도 |
+| Crawler | Scheduler Started / Next Cycle Pending | 10월 16일 기존 enabled=1 보존·readiness started. 복구 후 다음 실제 cron 수집 결과는 미확인 |
 | SourceDocument | Active / Strict Lineage Passed | 운영 사본 및 운영 RAG에서 6개 데이터셋 정본·Parquet·Chroma 검사 통과 |
-| Dense Retrieval | Active / Notices Verified / Reindex Pending | 공지 14,852개 청크를 포함한 Chroma lineage 통과. 모든 재구축 경로가 live와 같은 `retrieval_text`를 임베딩하도록 통일 중(#50 merge, #51 Review). 데이터 변경으로 재색인할 때 반영됨(재색인은 MPS 사용). 질의 품질 전체 평가는 별도 필요 |
+| Dense Retrieval | Active / Strict Lineage Passed | 최신 공지15,068·학식82 및 전체6개 lineage 통과. 공지/기존학식 벡터 재사용·학식5개만 임베딩. 전체 검색/답변 품질 평가는 별도 |
 | Lexical Retrieval | Active | FTS5/BM25. SQL로 좁힌 규정 문서 내부 청크 재정렬에도 사용 |
 | Reranking | Rule-based Active / Model Disabled | 최신성·필터·후보 융합 적용. Cross-encoder는 `RERANKER_ENABLED=0`이 기본값 |
 | Ontology Retrieval | Scoped SQL Active / Broad Expansion Experimental | `RAG_STRUCTURED_RETRIEVAL_ENABLED=1`. 명시적 연락처·과목·학번 질문만 관계 근거 우선 조회. Shadow·광범위한 후보 보강은 기본 OFF |
-| Grounding | Implemented / Quality Evaluation Pending | 공식 출처 기반 생성·근거성 검사 구현. `verification_status`(passed/failed/unavailable/not_required)를 RAG completion에 노출(PR #15). C#·프런트 전달은 미적용. 전체 실제 후보 답변의 품질 통과를 의미하지 않음 |
+| Grounding | Implemented / Quality Evaluation Pending | 공식 출처 기반 생성·근거성 검사 구현. `verification_status`(passed/failed/unavailable/not_required)를 RAG completion에 노출(PR #15). 외부 API SSE까지 필드 전달 확인. 전체 실제 후보 답변의 품질 통과를 의미하지 않음 |
 | iOS | Simulator Verified / TestFlight Available | 1.0(8), iOS26.5 시뮬레이터에서 로그인·키보드·설정·관리자·운영 SSE/저장/복원 확인. 물리적 iPhone은 미검증 |
 
 ## Current Priorities
 
 ### P0
 
-- 공지 증분 갱신의 revision 메타데이터 수정 코드를 검토·배포한 뒤 자동 수집을
-  재개한다. 9월 28일 운영 데이터는 수동 복구 후 strict lineage를 통과했다.
+- 공지 갱신 코드와 스케줄러 시작 상태를 확인한 뒤, 다음 정규 수집의 ingestion run·
+  strict lineage·freshness를 검증한다. 10월 16일 운영 503 복구와 전체 6개 lineage 검사는 통과했다.
 - 실제 후보 endpoint의 전체 골든 평가와 결과·manifest를 확보한다.
   현재 후보 URL이 없으면 CI가 평가를 skip하므로, CI 성공만으로 출시 가능하다고 판단하지 않는다.
 
@@ -283,7 +320,8 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| Compose 단일 명령 전체 기동 | P0 | RAG/Backend / QA | `fix/compose-one-command-startup` | `compose-one-command-startup` | Review | 새 Docker 이미지·RAG 1,509 passed/1 skipped·QA 48·backend 계약·격리 5서비스 2회 기동 | 운영 모델/데이터 기동·엔진 재부팅 미확인. main·운영 미반영 | PR #68 human 병합·운영 적용 승인 |
+| RAG revision·학식 published 상태 503 복구 | P0 | RAG/Backend / QA / Orchestrator | `fix/rag-lineage-recovery` | 정리 완료 | Completed | 신규 회귀 3개·RAG 1,523/1skip·QA 67·CI·6개 strict lineage·실제 기본 Compose 기동·외부 SSE·기존 PostgreSQL 793행 보존 | 물리적 전원 재부팅·전체 운영 골든 평가는 미실행 | PR #73 병합·운영 적용·503 해소 완료 |
+| Compose 단일 명령 전체 기동 | P0 | RAG/Backend / QA | `fix/compose-one-command-startup` | 정리 완료 | Completed | 후보 RAG 1,509/1skip·QA 48·CI, 최신 운영 기본 Compose 기동·ready200·외부 SSE 확인 | 엔진/물리적 전원 재부팅 자체는 미실행 | PR #68·#69 병합 및 primary·운영 반영 완료 |
 | API 기동 EF 모델·스냅샷 일치 | P0 | RAG/Backend / QA | `fix/api-model-snapshot` | 정리 완료 | Completed | 회귀 실패→통과, Release/계약, 독립 QA·CI, 격리 DB 전환/복구, 운영 백업·migration11·기존753행 보존·health/ready200 | 운영 인증·UI 최종 검증 완료 | PR #65 병합·운영 반영 완료 |
 | 모바일 UX·네이티브 인증 TestFlight 1.0(8) | P1 | Orchestrator / QA | `chore/mobile-ux-testflight` | 정리 완료 | Completed | 123 tests, backend 계약·독립 QA·CI, Apple VALID/IN_BETA_TESTING, native 설정/관리자/키보드, 운영 ticket·SSE·저장/재조회 확인 | 물리적 iPhone/Android 검증과 구분 | 구현·배포·최종 검증 완료; 증거 보존 |
 | iOS 키보드 입력창 가림 | P0 | Client | `fix/ios-keyboard-resize` | 정리 완료 | Completed | lint, 78 tests, native build, iOS 26.5 fixture 키보드 검증, 독립 QA | 물리적 iPhone은 미검증; 운영 인증 시뮬레이터 확인 | PR #64 병합 및 native 키보드 검증 완료 |
@@ -291,7 +329,7 @@ Status 값:
 | 설정·관리자 모바일 사용성 | P1 | Client | `fix/mobile-interaction-layout` | 정리 완료 | Completed | 109 tests, lint/build, bundle budget, 독립 재리뷰, Chrome 360/390/1280px fixture, PR #62 CI 통과 | 관리자 실데이터 변경은 수행하지 않음 | 로그인 후 native 설정·관리자 화면 검증 완료 |
 | 모바일 UX 초기 통합 | P1 | Orchestrator / QA | `test/mobile-ux-integration` | `mobile-ux-integration` | Review | 프런트 109 tests·웹/native bundle, 서버 Release·계약, Xcode sim build, build7 게스트 키보드 검증 | 이 트리에는 운영 native auth 보강이 없음. 최종 후보는 PR #64/45535b6 | 최종 릴리스 후보 증거를 기준으로 검토 |
 | 공지 증분 동기화·관리자 upsert 임베딩 입력 통일 | P1 | RAG/Backend | `fix/notice-live-embed-retrieval-text` | `~/dongttok-work/notice-live-embed-retrieval-text`(임시, 아래 Git State) | Review | 로컬 RAG 1,453 passed/1 skipped(main 711744e 병합 후), QA 재리뷰 APPROVE, PR CI 대기 | 관리자 승인 학과 한정 공지가 Chroma에 public으로 들어가던 공개범위 결함 수정. 실제 데이터 검색 영향 미확인 | PR #51 human 검토·merge |
-| 운영 공지 자동 갱신 재개 (P0) | P0 | Orchestrator | - | - | Blocked | revision 수정 코드 merge(PR #45) | 운영 이미지 미배포, `RAG_SCHEDULER_ENABLED=0` | human 배포·스케줄러 재개 승인 |
+| 운영 공지 자동 갱신 후 회귀 확인 | P1 | Orchestrator | - | - | Review | 최신 main 이미지 적용·RAG ready200·기존 scheduler=1/started 확인 | 복구 후 다음 cron의 실제 결과는 미확인 | 다음 정규 수집 후 run·lineage·freshness 확인 |
 | 실제 후보 골든 평가 190문항 (P0) | P0 | QA | - | - | Blocked | release gate는 fail-closed로 전환(PR #14) | 후보 endpoint·모델 비용 승인 필요 | human이 endpoint 제공 |
 | Orchestrator·Codex 실행 설정 후보 적용 | P1 | Orchestrator | `chore/agent-orchestration` | `agent-orchestration` | Blocked | runner 단위 테스트 22/22(2026-09-27 재실행) | staged 상태. 에이전트 권한 설정 commit이 auto mode에서 차단됨. base `cffe3e3`로 오래됨 | human이 commit·PR 여부 결정 |
 
@@ -360,18 +398,19 @@ Next Action:
 변경 후보 17건을 먼저 판정하고, 최근 질문·교과목 질문과 expected source를 보강한다.
 자동 라벨과 사람 라벨의 평가 결과를 분리한다.
 
-### ISSUE-002 — 공지 자동 갱신 코드 배포 대기
+### ISSUE-002 — 자동 수집의 다음 운영 주기 확인
 
-Impact: High / P0
+Impact: Medium / P1
 
-9월 28일 MPS 재색인과 포인터 복구 후 운영 공지 Chroma의 strict lineage가 통과했다.
-소급 수집 사본에서 증분 경로가 새 Parquet revision을 Chroma 메타데이터에
-전달하지 않는 결함을 발견했고, 수정 코드는 PR #45로 `main`에 merge됐다(9월 28일).
-운영 이미지에는 아직 배포되지 않았고 스케줄러는 OFF다.
+9월 28일에는 공지 증분 revision 수정 코드의 운영 배포와 스케줄러 재개가 대기 중이었다.
+10월 16일 실제 복구에서 최신 main 이미지와 PR #73을 적용했고, 6개 데이터셋 lineage 및
+RAG `/ready` 200을 확인했다. 기존 운영 설정 `RAG_SCHEDULER_ENABLED=1`을 보존했으며
+readiness의 scheduler는 `started`다. 이번 복구가 스케줄러를 새로 활성화한 것은 아니다.
+복구 이후 다음 cron의 수집 성공·freshness 갱신은 아직 확인하지 않았다.
 
 Next Action:
-배포 승인 후 스케줄러 재개를 검토한다. 재개 전 PR #51(공지 증분 경로 임베딩 입력·공개범위)도
-함께 반영하는 것을 권장한다.
+다음 정규 수집의 ingestion run, strict lineage, freshness를 확인한다. 시작 상태와
+실제 수집 성공을 구분하며 누락 기간의 자동 소급 수집을 주장하지 않는다.
 
 ### ISSUE-003 — 실제 후보 릴리스 검증 증거 미확보
 
@@ -485,7 +524,6 @@ Next:
 
 - 실로그 변경 후보의 relevance·관계 정확성 사람 판정 및 검토 담당자 확정.
 - 실제 평가에 사용할 후보 endpoint/검증 환경과 모델 호출 비용 승인.
-- 공지 revision 수정 코드(PR #45, merge됨) 배포와 자동 스케줄러 재개 여부 승인.
 - 재색인 방침(9월 29일 human 결정): 데이터가 바뀌지 않으면 재색인하지 않고, 할 때는 MPS로 한다.
   청크 표현·임베딩 입력 변경(#17·#26·#27·#29·#50·#51)은 다음 데이터 변경 재색인 때 반영된다.
   전후 비교용 읽기 전용 데이터 사본은 human이 제공한다(개인정보 포함 DB라 agent가 임의로 복사하지 않음).
