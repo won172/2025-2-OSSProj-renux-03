@@ -47,6 +47,7 @@ import {
   type GuestChatRecord,
 } from '../../chat/chatState'
 import ChatComposer, { CHAT_INPUT_MAX_LENGTH } from '../../components/chat/ChatComposer'
+import AppNav from '../../components/AppNav'
 import ChatHeader from '../../components/chat/ChatHeader'
 import ChatMessageItem from '../../components/chat/ChatMessageItem'
 import ChatSidebar from '../../components/chat/ChatSidebar'
@@ -1258,6 +1259,7 @@ const HomePage = () => {
           }
           error={chatError}
         />
+        <AppNav tabs />
       </div>
 
       {isSidebarOpen && (

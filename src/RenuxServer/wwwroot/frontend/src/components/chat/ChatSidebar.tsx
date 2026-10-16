@@ -1,5 +1,6 @@
 import { type RefObject, useEffect, useMemo, useState } from 'react'
 import dongddokiLogo from '../../assets/images/dongddoki-logo.png'
+import AppNav from '../AppNav'
 import { filterChatEntries, formatChatTime, groupChatEntries, type ChatListEntry } from '../../chat/chatList'
 
 interface ChatSidebarProps {
@@ -68,6 +69,8 @@ const ChatSidebar = ({
           <img src={dongddokiLogo} alt="" className="ch-brand__logo" />
           <span className="ch-brand__name">동국대학교 동똑이</span>
         </div>
+
+        <AppNav />
 
         <button type="button" className="ch-newchat" onClick={onNewChat} disabled={busy}>
           <span aria-hidden="true">+</span> 새 대화
