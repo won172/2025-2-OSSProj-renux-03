@@ -150,6 +150,63 @@ def test_old_meal_url_written_without_row_provenance_is_not_exposed(source_db):
     assert rag_service._load_meal_rows_for_direct_answer()[0].source_url is None
 
 
+def test_meal_projection_includes_updated_canonical_rows_with_their_official_urls(source_db):
+    """Updated is a published status in the strict canonical lineage contract."""
+    statuses = ("active", "updated", "hidden", "deleted", "parse_failed")
+    with source_db() as session:
+        for index, status in enumerate(statuses):
+            restaurant = f"상록원{index + 1}층식당"
+            key = f"meals:2026-09-01:{restaurant}"
+            session.add(db.SourceDocument(
+                dataset="meals", source_type="official_coop_meal",
+                source_id=f"2026-09-01:{restaurant}", document_key=key,
+                source_url=COOP_URL, status=status,
+                normalized_payload_json=json.dumps({
+                    "date": "2026-09-01", "weekday": "화", "restaurant": restaurant,
+                    "menu_text": f"[중식] 메뉴 {index}", "is_closed": False,
+                }),
+            ))
+        session.commit()
+        expected = {
+            document.document_key for document in session.query(db.SourceDocument).filter(
+                db.SourceDocument.dataset == "meals",
+                db.SourceDocument.status.in_(("active", "updated")),
+            ).all()
+        }
+
+    frame = ingest.load_meals_from_db()
+    assert set(frame["document_key"]) == expected
+    assert frame["source_url"].tolist() == [COOP_URL, COOP_URL]
+    chunks = ingest.build_meal_chunks(frame)
+    assert set(chunks["doc_id"]) == expected
+    assert chunks["url"].tolist() == [COOP_URL, COOP_URL]
+    assert "메뉴 1" in chunks.loc[chunks["doc_id"].str.endswith("상록원2층식당"), "chunk_text"].item()
+
+
+def test_complete_meal_window_hides_absent_updated_rows_without_deleting_history(source_db):
+    original = pd.DataFrame([
+        {"date": "2026-09-01", "restaurant": "상록원1층식당", "menu_text": "기존 메뉴"},
+        {"date": "2026-09-01", "restaurant": "상록원2층식당", "menu_text": "보존할 이력"},
+    ])
+    ingest.store_meals_in_db(original)
+    with source_db() as session:
+        document = session.query(db.SourceDocument).filter_by(
+            document_key="meals:2026-09-01:상록원2층식당",
+        ).one()
+        document.status = "updated"
+        history = (document.id, document.normalized_payload_json, document.content_hash)
+        session.commit()
+
+    ingest.store_meals_in_db(original.iloc[:1])
+
+    with source_db() as session:
+        assert session.query(db.SourceDocument).filter_by(dataset="meals").count() == 2
+        document = session.get(db.SourceDocument, history[0])
+        assert document.status == "hidden"
+        assert (document.id, document.normalized_payload_json, document.content_hash) == history
+    assert ingest.load_meals_from_db()["document_key"].tolist() == ["meals:2026-09-01:상록원1층식당"]
+
+
 def test_meal_crawlers_attach_the_fetched_page_or_pdf_url(monkeypatch):
     day = date(2026, 9, 1)
     monkeypatch.setattr(dongguk_meals, "fetch_day_html", lambda *_args, **_kwargs: "<html />")

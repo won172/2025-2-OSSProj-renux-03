@@ -2663,7 +2663,7 @@ def store_meals_in_db(df: pd.DataFrame) -> int:
         # This crawl is a complete time window.  Do not delete historical rows;
         # retain them as hidden so the canonical DB remains auditable.
         for document in session.query(SourceDocument).filter(SourceDocument.dataset == "meals").all():
-            if document.source_id not in seen and document.status == "active":
+            if document.source_id not in seen and document.status in {"active", "updated"}:
                 document.status = "hidden"
         session.commit()
         return len(seen)
@@ -2677,7 +2677,10 @@ def load_meals_from_db(*, include_source_url: bool = True) -> pd.DataFrame:
         rows: list[dict] = []
         documents = (
             session.query(SourceDocument)
-            .filter(SourceDocument.dataset == "meals", SourceDocument.status == "active")
+            .filter(
+                SourceDocument.dataset == "meals",
+                SourceDocument.status.in_(("active", "updated")),
+            )
             .order_by(SourceDocument.published_at.asc(), SourceDocument.id.asc())
             .all()
         )
