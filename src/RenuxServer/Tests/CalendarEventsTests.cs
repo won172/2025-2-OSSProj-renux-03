@@ -2,15 +2,22 @@ using System.Net;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RenuxServer.Apis;
 
 internal static class CalendarEventsTests
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    /// <summary>날짜 창(오늘 ± 2년) 검사가 테스트 실행일에 따라 흔들리지 않도록 고정한 "오늘".</summary>
+    private static readonly DateOnly FixedToday = new(2026, 10, 16);
 
     public static async Task RunAsync(Action<bool, string> check)
     {
@@ -19,6 +26,195 @@ internal static class CalendarEventsTests
         await CheckMappingAndOverlapAsync(check);
         await CheckRagFailureAsync(check);
         await CheckTruncationWarningAsync(check);
+        await CheckDateWindowAsync(check);
+        await CheckCallerCancellationIsNotCachedAsync(check);
+        await CheckReversedRangeAsync(check);
+        await CheckScheduleKindAsync(check);
+        await CheckDateStatusCasingAsync(check);
+        CheckRateLimitAttached(check);
+    }
+
+    private static async Task CheckDateWindowAsync(Action<bool, string> check)
+    {
+        (string From, string To, string Label)[] outside =
+        [
+            ("9999-12-01", "9999-12-31", "far future (to + lookahead would overflow DateOnly)"),
+            ("0001-01-01", "0001-01-01", "DateOnly.MinValue"),
+            ("2024-10-15", "2024-10-20", "from one day before today-2y"),
+            ("2028-10-10", "2028-10-17", "to one day after today+2y"),
+        ];
+
+        foreach (var (from, to, label) in outside)
+        {
+            var harness = new Harness("[]");
+            CalendarEventsOutcome outcome;
+            try
+            {
+                outcome = await harness.GetAsync(Guest(), from, to);
+            }
+            catch (Exception ex)
+            {
+                check(false, $"Calendar input outside the date window must not throw ({label}): {ex.GetType().Name}.");
+                continue;
+            }
+
+            var body = Serialize(outcome.Body);
+            check(outcome.StatusCode == 400
+                  && body.TryGetProperty("error", out var error) && error.GetString() == "invalid_range",
+                $"Calendar input outside today±2y must return 400 invalid_range ({label}, status={outcome.StatusCode}).");
+            check(harness.Handler.Requests.Count == 0, $"Out-of-window input must not call RAG ({label}).");
+        }
+
+        // 실제 오늘(KST) 경로에서도 9999-12 입력이 예외(500)가 되지 않아야 한다.
+        var realToday = new Harness("[]");
+        try
+        {
+            var outcome = await CalendarApis.GetEventsAsync(
+                Guest(), realToday.Configuration, realToday.Factory, realToday.Cache, realToday.Logger,
+                "9999-12-01", "9999-12-31", CancellationToken.None);
+            check(outcome.StatusCode == 400, "9999-12 with the real KST today must return 400.");
+        }
+        catch (Exception ex)
+        {
+            check(false, $"9999-12 with the real KST today must not throw: {ex.GetType().Name}.");
+        }
+
+        var lower = new Harness("[]");
+        check((await lower.GetAsync(Guest(), "2024-10-16", "2024-10-31")).StatusCode == 200,
+            "from exactly today-2y must be accepted.");
+        var upper = new Harness("[]");
+        check((await upper.GetAsync(Guest(), "2028-10-01", "2028-10-16")).StatusCode == 200,
+            "to exactly today+2y must be accepted.");
+    }
+
+    private static async Task CheckCallerCancellationIsNotCachedAsync(Action<bool, string> check)
+    {
+        var handler = new SwitchableHandler();
+        var harness = new Harness(handler);
+
+        // 1) 호출자 자신의 요청이 취소되면 실패로 캐시하지 않는다.
+        using (var cts = new CancellationTokenSource())
+        {
+            var pending = harness.GetAsync(Guest(), "2026-10-01", "2026-10-31", cts.Token);
+            await handler.Started.Task;
+            cts.Cancel();
+            var propagated = false;
+            try
+            {
+                await pending;
+            }
+            catch (OperationCanceledException)
+            {
+                propagated = true;
+            }
+
+            check(propagated, "A caller-cancelled calendar request must propagate cancellation, not return a result.");
+        }
+
+        handler.Mode = SwitchableHandler.Behavior.Ok;
+        var afterAbort = await harness.GetAsync(Guest(), "2026-10-01", "2026-10-31");
+        check(afterAbort.StatusCode == 200 && handler.Calls == 2,
+            $"A caller abort must not be cached as a failure for other guests (status={afterAbort.StatusCode}, calls={handler.Calls}).");
+
+        // 2) 호출자 토큰이 살아 있는데 RAG 쪽 TaskCanceledException(HttpClient 타임아웃)이면 실패(503)다.
+        var timeoutHandler = new SwitchableHandler { Mode = SwitchableHandler.Behavior.Timeout };
+        var timeoutHarness = new Harness(timeoutHandler);
+        var timedOut = await timeoutHarness.GetAsync(Guest(), "2026-10-01", "2026-10-31");
+        check(timedOut.StatusCode == 503, $"A genuine RAG timeout must still return 503 (status={timedOut.StatusCode}).");
+
+        // 알림 경로도 타임아웃은 기존처럼 빈 목록이다.
+        var notifTimeout = new Harness(new SwitchableHandler { Mode = SwitchableHandler.Behavior.Timeout });
+        var notif = await NotificationApis.FetchCandidatesAsync(
+            notifTimeout.Configuration, notifTimeout.Factory, notifTimeout.Cache, notifTimeout.Logger,
+            NotificationCandidateScope.Public, 60, 100, CancellationToken.None);
+        check(notif.Count == 0, "The notification path must keep returning an empty list on a RAG timeout.");
+    }
+
+    private static async Task CheckReversedRangeAsync(Action<bool, string> check)
+    {
+        var json = "[" + Candidate("schedule:reversed", "schedule", "뒤바뀐 기간", target: "2026-10-10", start: "2026-10-20", end: "2026-10-10") + "]";
+        var harness = new Harness(json);
+        var outcome = await harness.GetAsync(Guest(), "2026-10-01", "2026-10-31");
+        var events = Serialize(outcome.Body).GetProperty("events").EnumerateArray().ToList();
+        check(events.Count == 1
+              && events[0].GetProperty("startDate").ValueKind == JsonValueKind.Null
+              && events[0].GetProperty("endDate").GetString() == "2026-10-10",
+            "start_date after end_date must become a single-day event on endDate (startDate=null).");
+        check(harness.Logger.Warnings.Any(message => message.Contains("schedule:reversed", StringComparison.Ordinal)
+                                                     && !message.Contains("뒤바뀐", StringComparison.Ordinal)),
+            "A reversed range must be logged with the candidate id only.");
+    }
+
+    private static async Task CheckScheduleKindAsync(Action<bool, string> check)
+    {
+        (string Title, string Expected)[] cases =
+        [
+            ("종합시험 접수", "academic"),
+            ("제2외국어시험 접수", "academic"),
+            ("대학원 외국어시험 접수", "academic"),
+            ("졸업시험 응시원서 제출", "academic"),
+            ("기말시험", "exam"),
+            ("중간고사", "exam"),
+            ("기말고사 기간", "exam"),
+            ("시험 기간", "exam"),
+            ("수강신청", "academic"),
+            ("개강", "academic"),
+        ];
+
+        foreach (var (title, expected) in cases)
+        {
+            check(CalendarApis.ResolveScheduleKind(title) == expected,
+                $"Schedule title '{title}' must map to kind={expected} (got {CalendarApis.ResolveScheduleKind(title)}).");
+        }
+
+        var json = "[" + Candidate("schedule:reg-exam", "schedule", "종합시험 접수", target: "2026-10-10", start: "2026-10-06", end: "2026-10-10") + "]";
+        var outcome = await new Harness(json).GetAsync(Guest(), "2026-10-01", "2026-10-31");
+        var events = Serialize(outcome.Body).GetProperty("events").EnumerateArray().ToList();
+        check(events.Count == 1 && events[0].GetProperty("kind").GetString() == "academic",
+            "An exam registration item must be returned as kind=academic.");
+    }
+
+    private static async Task CheckDateStatusCasingAsync(Action<bool, string> check)
+    {
+        var json = "[" + string.Join(",",
+            Candidate("notices:upper", "notices", "a", target: "2026-10-10", end: "2026-10-10", extra: "\"date_status\":\"CONFIRMED\""),
+            Candidate("notices:padded", "notices", "b", target: "2026-10-10", end: "2026-10-10", extra: "\"date_status\":\" confirmed \""),
+            Candidate("notices:exact", "notices", "c", target: "2026-10-10", end: "2026-10-10", extra: "\"date_status\":\"confirmed\""),
+            Candidate("notices:unv", "notices", "d", target: "2026-10-10", end: "2026-10-10", extra: "\"date_status\":\"unverified\""),
+            Candidate("notices:nullish", "notices", "e", target: "2026-10-10", end: "2026-10-10", extra: "\"date_status\":null"),
+            Candidate("notices:missing", "notices", "f", target: "2026-10-10", end: "2026-10-10"),
+            Candidate("notices:meta-upper", "notices", "g", target: "2026-10-10", end: "2026-10-10",
+                extra: "\"metadata\":{\"date_status\":\"Confirmed\"}")) + "]";
+        var outcome = await new Harness(json).GetAsync(Guest(), "2026-10-01", "2026-10-31");
+        var statuses = Serialize(outcome.Body).GetProperty("events").EnumerateArray()
+            .ToDictionary(e => e.GetProperty("id").GetString()!, e => e.GetProperty("dateStatus").GetString());
+
+        check(statuses.GetValueOrDefault("notices:upper") == "unverified"
+              && statuses.GetValueOrDefault("notices:padded") == "unverified"
+              && statuses.GetValueOrDefault("notices:meta-upper") == "unverified",
+            "date_status must match \"confirmed\" exactly; other casing/padding must be unverified.");
+        check(statuses.GetValueOrDefault("notices:exact") == "confirmed"
+              && statuses.GetValueOrDefault("notices:unv") == "unverified",
+            "Exact confirmed/unverified values must pass through.");
+        check(statuses.GetValueOrDefault("notices:nullish") == "confirmed"
+              && statuses.GetValueOrDefault("notices:missing") == "confirmed",
+            "A null or missing date_status must stay confirmed.");
+    }
+
+    private static void CheckRateLimitAttached(Action<bool, string> check)
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddHttpClient();
+        builder.Services.AddMemoryCache();
+        var app = builder.Build();
+        app.AddCalendarApis();
+        var endpoint = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .FirstOrDefault(e => e.RoutePattern.RawText?.EndsWith("/events", StringComparison.Ordinal) == true
+                                 && e.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods.Contains("GET") == true);
+        check(endpoint?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == CalendarApis.RateLimitPolicy,
+            "GET /calendar/events must require the calendar rate-limit policy.");
     }
 
     private static async Task CheckValidationAsync(Action<bool, string> check)
@@ -309,6 +505,12 @@ internal static class CalendarEventsTests
             Factory = new SingleClientFactory(Handler);
         }
 
+        public Harness(HttpMessageHandler handler)
+        {
+            Handler = new StaticHandler("[]", HttpStatusCode.OK);
+            Factory = new SingleClientFactory(handler);
+        }
+
         public StaticHandler Handler { get; }
         public IHttpClientFactory Factory { get; }
         public MemoryCache Cache { get; } = new(new MemoryCacheOptions());
@@ -317,8 +519,43 @@ internal static class CalendarEventsTests
             .AddInMemoryCollection(new Dictionary<string, string?> { ["RagServiceUrl"] = "http://rag.test" })
             .Build();
 
-        public Task<CalendarEventsOutcome> GetAsync(HttpContext context, string? from, string? to)
-            => CalendarApis.GetEventsAsync(context, Configuration, Factory, Cache, Logger, from, to, CancellationToken.None);
+        public Task<CalendarEventsOutcome> GetAsync(
+            HttpContext context, string? from, string? to, CancellationToken cancellationToken = default)
+            => CalendarApis.GetEventsAsync(
+                context, Configuration, Factory, Cache, Logger, from, to, cancellationToken, FixedToday);
+    }
+
+    /// <summary>
+    /// Hang: 호출자 토큰이 취소될 때까지 대기. Ok: 빈 목록. Timeout: 호출자 토큰과 무관한
+    /// TaskCanceledException(HttpClient.Timeout과 같은 모양).
+    /// </summary>
+    private sealed class SwitchableHandler : HttpMessageHandler
+    {
+        public enum Behavior { Hang, Ok, Timeout }
+
+        public Behavior Mode { get; set; } = Behavior.Hang;
+        public int Calls { get; private set; }
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            switch (Mode)
+            {
+                case Behavior.Hang:
+                    Started.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                    throw new InvalidOperationException("unreachable");
+                case Behavior.Timeout:
+                    throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.",
+                        new TimeoutException());
+                default:
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("[]", Encoding.UTF8, "application/json"),
+                    };
+            }
+        }
     }
 
     private sealed class StaticHandler(string json, HttpStatusCode status) : HttpMessageHandler

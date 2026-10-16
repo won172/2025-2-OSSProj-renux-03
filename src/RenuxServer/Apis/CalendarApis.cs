@@ -43,11 +43,29 @@ static public class CalendarApis
     /// <summary>
     /// RAG는 마감일(end/target) 기준으로 후보를 거르므로, from 이전에 시작해 기간 안에 걸치는
     /// 긴 일정(예: 겨울 방학 12-22~02-28)을 놓치지 않도록 to 뒤로 이만큼 더 조회한다.
+    /// 설계상 한계: to 이후 92일보다 더 늦게 끝나는 일정은 기간과 겹쳐도 누락될 수 있다.
     /// </summary>
     internal const int LookaheadDays = 92;
 
     /// <summary>RAG 후보 limit 상한. 이만큼 돌아오면 잘렸을 수 있다.</summary>
     internal const int RagCandidateLimit = 300;
+
+    /// <summary>
+    /// from/to가 놓일 수 있는 범위: 오늘(KST) ± 이 햇수. 익명 엔드포인트의 캐시 키 수를 묶고,
+    /// to + LookaheadDays 계산이 DateOnly 범위를 넘지 않게 한다.
+    /// </summary>
+    internal const int MaxYearsFromToday = 2;
+
+    /// <summary>익명 호출을 허용하므로 IP 단위 레이트 리밋을 건다(Program.cs의 정책 이름).</summary>
+    internal const string RateLimitPolicy = "calendar";
+
+    /// <summary>
+    /// 신청·접수 성격의 학사일정. "종합시험 접수"처럼 "시험"이 들어가도 시험 기간이 아니다.
+    /// </summary>
+    private static readonly string[] RegistrationKeywords = ["접수", "신청", "등록", "응시원서"];
+
+    /// <summary>실제 시험 기간을 나타내는 표현. 신청·접수 키워드가 없을 때만 exam으로 본다.</summary>
+    private static readonly string[] ExamKeywords = ["중간고사", "기말고사", "시험"];
 
     private const string ConfirmedStatus = "confirmed";
     private const string UnverifiedStatus = "unverified";
@@ -70,7 +88,7 @@ static public class CalendarApis
             var outcome = await GetEventsAsync(
                 context, configuration, httpClientFactory, cache, logger, from, to, context.RequestAborted);
             return Results.Json(outcome.Body, statusCode: outcome.StatusCode);
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicy);
     }
 
     internal static NotificationCandidateScope ResolveScope(HttpContext context)
@@ -86,7 +104,8 @@ static public class CalendarApis
         ILogger logger,
         string? from,
         string? to,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateOnly? today = null)
     {
         if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to))
         {
@@ -109,6 +128,16 @@ static public class CalendarApis
             return BadRequest($"조회 기간은 최대 {MaxSpanDays}일입니다.");
         }
 
+        // 오늘(KST) ± MaxYearsFromToday 밖은 거부한다. 이 검사 덕분에 아래 to + LookaheadDays가
+        // DateOnly.MaxValue를 넘지 않는다(예: 9999-12-31 입력이 500이 되지 않음).
+        var anchor = today ?? NotificationApis.TodayKst();
+        if (fromDate < anchor.AddYears(-MaxYearsFromToday) || toDate > anchor.AddYears(MaxYearsFromToday))
+        {
+            return BadRequest($"조회 기간은 오늘 기준 앞뒤 {MaxYearsFromToday}년 이내여야 합니다.");
+        }
+
+        var queryTo = toDate.AddDays(LookaheadDays);
+
         var scope = ResolveScope(context);
         var fetch = await NotificationApis.FetchCandidateRangeAsync(
             configuration,
@@ -117,7 +146,7 @@ static public class CalendarApis
             logger,
             scope,
             fromDate,
-            toDate.AddDays(LookaheadDays),
+            queryTo,
             RagCandidateLimit,
             cancellationToken);
 
@@ -136,10 +165,10 @@ static public class CalendarApis
                 RagCandidateLimit,
                 fromDate,
                 toDate,
-                toDate.AddDays(LookaheadDays));
+                queryTo);
         }
 
-        var events = BuildEvents(fetch.Candidates, fromDate, toDate);
+        var events = BuildEvents(fetch.Candidates, fromDate, toDate, logger);
         return new CalendarEventsOutcome(
             StatusCodes.Status200OK,
             new CalendarEventsResponse(
@@ -156,14 +185,15 @@ static public class CalendarApis
     internal static List<CalendarEventDto> BuildEvents(
         IEnumerable<NotificationCandidateDto> candidates,
         DateOnly from,
-        DateOnly to)
+        DateOnly to,
+        ILogger? logger = null)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var items = new List<(DateOnly SortDate, CalendarEventDto Event)>();
 
         foreach (var candidate in candidates)
         {
-            var mapped = ToEvent(candidate);
+            var mapped = ToEvent(candidate, logger);
             if (mapped is null)
             {
                 continue;
@@ -192,7 +222,9 @@ static public class CalendarApis
             .ToList();
     }
 
-    private static (DateOnly? Start, DateOnly End, CalendarEventDto Event)? ToEvent(NotificationCandidateDto candidate)
+    private static (DateOnly? Start, DateOnly End, CalendarEventDto Event)? ToEvent(
+        NotificationCandidateDto candidate,
+        ILogger? logger)
     {
         if (string.IsNullOrWhiteSpace(candidate.Id))
         {
@@ -203,7 +235,7 @@ static public class CalendarApis
         string kind;
         if (source == "schedule")
         {
-            kind = (candidate.Title ?? "").Contains("시험", StringComparison.Ordinal) ? "exam" : "academic";
+            kind = ResolveScheduleKind(candidate.Title);
         }
         else if (source == "notices")
         {
@@ -225,6 +257,15 @@ static public class CalendarApis
             ? parsedStart
             : null;
 
+        if (start is { } startValue && startValue > end)
+        {
+            // 뒤바뀐 기간은 신뢰할 수 없으므로 종료일 하루짜리 일정으로 다룬다. 후보 id만 남긴다(개인정보 없음).
+            logger?.LogWarning(
+                "Calendar candidate {CandidateId} has start_date after end_date; treating it as a single-day event.",
+                candidate.Id);
+            start = null;
+        }
+
         var calendarEvent = new CalendarEventDto(
             candidate.Id,
             source,
@@ -242,13 +283,27 @@ static public class CalendarApis
         return (start, end, calendarEvent);
     }
 
+    /// <summary>
+    /// 학사일정의 kind. 신청·접수 성격이면 academic, 그 밖에 시험 기간 표현이 있으면 exam이다.
+    /// </summary>
+    internal static string ResolveScheduleKind(string? title)
+    {
+        var text = title ?? "";
+        if (RegistrationKeywords.Any(keyword => text.Contains(keyword, StringComparison.Ordinal)))
+        {
+            return "academic";
+        }
+
+        return ExamKeywords.Any(keyword => text.Contains(keyword, StringComparison.Ordinal)) ? "exam" : "academic";
+    }
+
     private static string? ResolveEvidence(NotificationCandidateDto candidate)
         => ElementToText(candidate.Evidence)
             ?? NullIfBlank(candidate.Metadata?.GetValueOrDefault("evidence"));
 
     /// <summary>
-    /// RAG의 date_status를 그대로 전달하되, 계약 밖의 값은 확인된 것으로 취급하지 않고
-    /// "unverified"로 낮춘다. 값이 없으면 기존 후보와 같이 "confirmed"다.
+    /// RAG의 date_status를 그대로 전달하되, 정확히 "confirmed"가 아닌 값(대소문자 차이·공백 포함)은
+    /// 확인된 것으로 취급하지 않고 "unverified"로 낮춘다. 값이 없으면 기존 후보와 같이 "confirmed"다.
     /// </summary>
     private static string ResolveDateStatus(NotificationCandidateDto candidate)
     {
@@ -259,8 +314,7 @@ static public class CalendarApis
             return ConfirmedStatus;
         }
 
-        var normalized = raw.Trim().ToLowerInvariant();
-        return normalized is ConfirmedStatus ? ConfirmedStatus : UnverifiedStatus;
+        return string.Equals(raw, ConfirmedStatus, StringComparison.Ordinal) ? ConfirmedStatus : UnverifiedStatus;
     }
 
     private static string? ElementToText(JsonElement? element)

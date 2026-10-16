@@ -639,7 +639,12 @@ static public class NotificationApis
                 var fetched = await client.GetFromJsonAsync<List<NotificationCandidateDto>>(url, JsonOptions, cancellationToken);
                 return new NotificationCandidateFetchResult(fetched ?? [], Succeeded: true);
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+            // 호출자 자신의 요청 취소(RequestAborted)는 RAG 실패가 아니다. 이를 실패로 캐시하면 같은 범위
+            // (특히 게스트 공용 키)의 다른 요청까지 30초간 실패하므로 걸러서 그대로 전파한다.
+            // 전파된 예외 때문에 팩터리가 값을 돌려주지 않으므로 캐시 항목도 만들어지지 않는다.
+            // HttpClient.Timeout에 의한 TaskCanceledException은 호출자 토큰이 취소되지 않았으므로 실패로 처리한다.
+            catch (Exception ex) when ((ex is HttpRequestException or TaskCanceledException or JsonException)
+                                       && !cancellationToken.IsCancellationRequested)
             {
                 logger.LogWarning(ex, "Failed to fetch notification candidates from RAG service.");
                 // 실패는 오래 캐시하지 않고 30초 뒤 재시도되게 한다. 실패 표시를 남겨 빈 성공과 구분한다.

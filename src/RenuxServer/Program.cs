@@ -143,6 +143,18 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             });
     });
+
+    // 달력(GET /calendar/events)은 익명 호출을 허용하므로 IP 단위로 묶는다. 월 이동마다 1회
+    // 호출되는 정도라 넉넉하게 두되, chat 정책과 카운터를 공유하지 않도록 별도 정책으로 둔다.
+    options.AddPolicy(RenuxServer.Apis.CalendarApis.RateLimitPolicy, httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
 });
 
 // CORS is credentialed (cookies), so the origin allowlist must be tight.
