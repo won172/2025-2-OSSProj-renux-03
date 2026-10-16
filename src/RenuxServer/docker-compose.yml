@@ -10,6 +10,7 @@ services:
             POSTGRES_DB: ${POSTGRES_DB}
         volumes:
             - postgres_data_test:/var/lib/postgresql
+        restart: unless-stopped
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
             interval: 5s 
@@ -44,7 +45,13 @@ services:
             - RagServiceTimeoutSeconds=${RAG_SERVICE_TIMEOUT_SECONDS:-300}
         volumes:
             - data_protection_keys:/var/lib/dongttok-dpkeys
-        restart: on-failure
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "curl", "--connect-timeout", "2", "--max-time", "4", "-fsS", "http://localhost:8080/ready"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
  
     rag-service:
         container_name: renux_rag_test
@@ -58,10 +65,15 @@ services:
             # (/root 는 0700이라 appuser가 못 읽어 오프라인 모델 로드가 실패했음)
             - ../RAG/huggingface_cache:/home/appuser/.cache/huggingface
             - ../RAG/artifacts:/app/artifacts
-            - ../RAG/rag_database.db:/app/rag_database.db
+            - type: bind
+              source: ../RAG/rag_database.db
+              target: /app/rag_database.db
+              bind:
+                  create_host_path: false
             - ../RAG/data:/app/data
         depends_on:
-            - redis
+            redis:
+                condition: service_healthy
         env_file:
             - .env
             - ../RAG/.env
@@ -103,7 +115,7 @@ services:
             - HUGGINGFACE_HUB_CACHE=/home/appuser/.cache/huggingface/hub
             - HF_HUB_OFFLINE=1
             - TRANSFORMERS_OFFLINE=1
-        restart: on-failure
+        restart: unless-stopped
         healthcheck:
             test: ["CMD-SHELL", "curl --connect-timeout 2 --max-time 4 -fsS http://localhost:8000/ready || python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/ready\", timeout=4)'"]
             interval: 15s
@@ -118,7 +130,13 @@ services:
             - "6380:6379"
         volumes:
             - redis_data:/data
-        restart: always
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 5s
+            timeout: 3s
+            retries: 5
+            start_period: 10s
 
     nginx:
         container_name: renux_nginx_test
@@ -128,7 +146,8 @@ services:
         volumes:
             - ./nginx.conf:/etc/nginx/nginx.conf:ro
         depends_on:
-            - api
+            api:
+                condition: service_healthy
         restart: unless-stopped
 volumes:
     postgres_data_test:
