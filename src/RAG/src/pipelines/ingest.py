@@ -2677,7 +2677,10 @@ def load_meals_from_db(*, include_source_url: bool = True) -> pd.DataFrame:
         rows: list[dict] = []
         documents = (
             session.query(SourceDocument)
-            .filter(SourceDocument.dataset == "meals", SourceDocument.status == "active")
+            .filter(
+                SourceDocument.dataset == "meals",
+                SourceDocument.status.in_(("active", "updated")),
+            )
             .order_by(SourceDocument.published_at.asc(), SourceDocument.id.asc())
             .all()
         )
