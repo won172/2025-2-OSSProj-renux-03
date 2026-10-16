@@ -25,6 +25,12 @@ public class GlobalExceptionHandlerMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // 클라이언트가 연결을 끊어 요청이 취소된 경우. 서버 오류가 아니고 연결도 없으므로
+            // Error 로그·응답 본문 없이 끝낸다(응답이 이미 시작됐어도 쓰지 않으므로 예외가 나지 않는다).
+            _logger.LogDebug("Request aborted by the client. TraceId={TraceId}", context.TraceIdentifier);
+        }
         catch (Exception e)
         {
             // 상세 정보(연결문자열/경로/스택)는 서버 로그로만 남기고 클라이언트에는 노출하지 않는다.

@@ -117,6 +117,8 @@ builder.Services.AddDataProtection()
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    // 모든 정책 공통: 429 + {error:"rate_limited", message} JSON, 가능하면 Retry-After.
+    options.OnRejected = RenuxServer.Middlewares.RateLimitRejectionHandler.OnRejectedAsync;
     options.AddPolicy("auth", httpContext =>
         System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",

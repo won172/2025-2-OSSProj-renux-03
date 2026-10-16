@@ -153,6 +153,7 @@ internal static class CalendarEventsTests
             ("제2외국어시험 접수", "academic"),
             ("대학원 외국어시험 접수", "academic"),
             ("졸업시험 응시원서 제출", "academic"),
+            ("대학원 시험 등록", "academic"),
             ("기말시험", "exam"),
             ("중간고사", "exam"),
             ("기말고사 기간", "exam"),
