@@ -1,6 +1,6 @@
 import { publicMajorName } from '../../auth/publicMajor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiFetch } from '../../api/client'
 import { mapRoleNameToUserRole } from '../../auth/roleMapping'
 import {
@@ -178,6 +178,16 @@ const HomePage = () => {
   const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const skipLoadOnSelectRef = useRef<string | null>(null)
   const isLoadingMoreRef = useRef(false)
+
+  // 캘린더 등 다른 화면이 넘긴 질문은 입력창에만 채운다(자동 전송하지 않음). 새로고침 때 반복되지 않게 state를 비운다.
+  const location = useLocation()
+  useEffect(() => {
+    const prefill = (location.state as { prefillQuestion?: unknown } | null)?.prefillQuestion
+    if (typeof prefill !== 'string' || !prefill.trim()) return
+    setChatInput(prefill.slice(0, CHAT_INPUT_MAX_LENGTH))
+    navigate(location.pathname, { replace: true, state: null })
+    window.requestAnimationFrame(() => chatInputRef.current?.focus())
+  }, [location.pathname, location.state, navigate])
   /** 사용자가 위로 올려 읽는 중이면 새 토큰이 와도 끌어내리지 않는다. */
   const shouldFollowRef = useRef(true)
   const toastSeq = useRef(0)
@@ -1259,7 +1269,7 @@ const HomePage = () => {
           }
           error={chatError}
         />
-        <AppNav tabs />
+        <AppNav tabs busy={chatSending} />
       </div>
 
       {isSidebarOpen && (

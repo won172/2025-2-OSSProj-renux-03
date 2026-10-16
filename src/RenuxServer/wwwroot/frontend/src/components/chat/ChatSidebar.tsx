@@ -70,7 +70,7 @@ const ChatSidebar = ({
           <span className="ch-brand__name">동국대학교 동똑이</span>
         </div>
 
-        <AppNav />
+        <AppNav busy={busy} />
 
         <button type="button" className="ch-newchat" onClick={onNewChat} disabled={busy}>
           <span aria-hidden="true">+</span> 새 대화

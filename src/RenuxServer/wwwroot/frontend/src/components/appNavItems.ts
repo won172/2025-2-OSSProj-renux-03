@@ -1,5 +1,5 @@
-/** 빌드 시점 플래그. 캘린더 화면이 준비되기 전에는 false로 두어 탭과 경로를 모두 노출하지 않는다. */
-export const CALENDAR_ENABLED = false
+/** 빌드 시점 플래그. false로 바꾸면 캘린더 탭과 경로를 모두 숨긴다. */
+export const CALENDAR_ENABLED = true
 
 // [경로, 이름, 22px 선 아이콘 path] — PWA 사전 캐시 예산 때문에 아이콘 라이브러리 대신 인라인 SVG를 쓴다.
 const ITEMS = [

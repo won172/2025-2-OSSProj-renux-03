@@ -11,6 +11,8 @@ const PRECACHE_MAX_BYTES = 1_250_000
 
 const adminAsset = /^assets\/(?:admin[^/]*|Admin[^/]*|DashboardPage|ReviewPage|ContentPage|ChatLogPage|FeedbackPage|UsersPage|SystemPage|DepartmentAdminPage|UniversityOnly|TrendChart|QuickFaqModal|Modal|ui|format)-[^/]+\.(?:js|css)$/
 const nonCriticalAsset = /^assets\/dongddoki-logo-[^/]+\.png$|\.(?:otf|ttf|woff2)$/
+// Calendar is a lazy route; it is fetched on first visit and kept by the runtime asset cache.
+const lazyRouteAsset = /^assets\/CalendarPage-[^/]+\.(?:js|css)$/
 
 export function checkBundleBudget(distDir = join(projectRoot, 'dist')) {
   const html = readFileSync(join(distDir, 'index.html'), 'utf8')
@@ -27,7 +29,7 @@ export function checkBundleBudget(distDir = join(projectRoot, 'dist')) {
   const urls = [...new Set(manifestEntries.map((entry) => entry[1]))]
   const precacheBytes = urls.reduce((total, url) => total + statSync(join(distDir, url)).size, 0)
   const mainJsBytes = statSync(join(distDir, mainJs)).size
-  const forbidden = urls.filter((url) => adminAsset.test(url) || nonCriticalAsset.test(url))
+  const forbidden = urls.filter((url) => adminAsset.test(url) || nonCriticalAsset.test(url) || lazyRouteAsset.test(url))
 
   console.log(`[bundle-budget] precache: ${precacheBytes} B / ${PRECACHE_MAX_BYTES} B (${manifestEntries.length} entries, ${urls.length} unique URLs)`)
   console.log(`[bundle-budget] main JS: ${mainJsBytes} B / ${MAIN_JS_MAX_BYTES} B (${mainJs})`)

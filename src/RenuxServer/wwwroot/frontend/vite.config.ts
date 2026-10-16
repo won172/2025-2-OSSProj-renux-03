@@ -49,6 +49,8 @@ export default defineConfig(({ mode }) => {
           globIgnores: [
             '**/assets/dongddoki-logo-*.png',
             '**/assets/{admin*,Admin*,DashboardPage*,ReviewPage*,ContentPage*,ChatLogPage*,FeedbackPage*,UsersPage*,SystemPage*,DepartmentAdminPage*,UniversityOnly*,TrendChart*,QuickFaqModal*,StaffRefreshPreview*,display-*,Modal-*,ui-*,format-*}.{js,css}',
+            // 캘린더 화면은 열 때 받아 런타임 캐시(dongttok-assets)에 둔다. 사전 캐시 예산 밖이다.
+            '**/assets/CalendarPage-*.{js,css}',
           ],
           runtimeCaching: [
             {
@@ -112,6 +114,19 @@ export default defineConfig(({ mode }) => {
           // 주소창으로 직접 들어온 화면 요청까지 백엔드로 넘기면 SPA가 뜨지 않으므로,
           // HTML을 원하는 내비게이션 요청만 index.html로 돌려 라우터가 처리하게 한다.
           // (운영 환경은 ASP.NET의 MapFallbackToFile이 같은 역할을 한다.)
+          bypass: (req) => {
+            const accept = req.headers.accept ?? ''
+            if (req.method === 'GET' && accept.includes('text/html')) {
+              return '/index.html'
+            }
+            return undefined
+          },
+        },
+        // 화면 경로(/calendar, /calendar/event/:id)와 API(/calendar/events)가 접두사를 공유한다. /admin과 같은 방식.
+        '/calendar': {
+          target: DEV_PROXY_TARGET,
+          changeOrigin: true,
+          secure: false,
           bypass: (req) => {
             const accept = req.headers.accept ?? ''
             if (req.method === 'GET' && accept.includes('text/html')) {
