@@ -263,6 +263,7 @@ app.AddEtcApis();
 app.AddHomeApis();
 app.AddAdminProxyApis();
 app.AddNotificationApis();
+app.AddCalendarApis();
 app.AddProductTelemetryApis();
 
 // 헬스체크: /health = 프로세스 생존(liveness), /ready = DB 연결 확인(readiness).

@@ -182,6 +182,7 @@ await RagRelayTimeoutTests.RunAsync(Check);
 await ChatSourceIdentityTests.RunAsync(Check);
 await ChatStreamTicketTests.RunAsync(Check);
 await NotificationCandidateScopeTests.RunAsync(Check);
+await CalendarEventsTests.RunAsync(Check);
 
 string keyDirectory = Path.Combine(Path.GetTempPath(), $"dongttok-dp-{Guid.NewGuid():N}");
 string otherKeyDirectory = Path.Combine(Path.GetTempPath(), $"dongttok-dp-other-{Guid.NewGuid():N}");
