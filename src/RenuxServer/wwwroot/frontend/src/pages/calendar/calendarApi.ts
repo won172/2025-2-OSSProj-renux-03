@@ -96,6 +96,7 @@ export const calendarErrorMessage = (error: unknown) => {
   const status = (error as ApiError | null)?.status
   if (status === 400) return '조회 기간이 올바르지 않아요. 다른 달을 선택해 주세요.'
   if (status === 503) return '학사일정·공지 정보를 잠시 불러올 수 없어요.'
+  if (status === 429) return '요청이 많아요. 잠시 후 다시 시도해 주세요.'
   if (typeof status === 'number') return `일정을 불러오지 못했어요. (오류 ${status})`
   return '네트워크 연결을 확인해 주세요.'
 }

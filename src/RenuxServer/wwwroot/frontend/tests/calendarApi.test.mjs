@@ -77,6 +77,7 @@ test('API failures keep their status for the retry message (400 / 503 / network)
   assert.equal(error.status, 503)
   assert.match(calendarErrorMessage(error), /잠시 불러올 수 없어요/)
   assert.match(calendarErrorMessage({ status: 400 }), /조회 기간/)
+  assert.match(calendarErrorMessage({ status: 429 }), /잠시 후 다시 시도/)
   assert.match(calendarErrorMessage(new TypeError('Failed to fetch')), /네트워크/)
 })
 
