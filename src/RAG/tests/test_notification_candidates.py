@@ -26,6 +26,7 @@ def test_notification_candidates_filters_and_deduplicates_notice_deadlines():
                 "apply_deadline": "2026-07-10",
                 "url": "https://example.com/1",
                 "chunk_text": "서류 제출 기한 안내",
+                "visibility": "public",
             },
             {
                 "chunk_id": "notice-1-b",
@@ -39,6 +40,7 @@ def test_notification_candidates_filters_and_deduplicates_notice_deadlines():
                 "apply_deadline": "2026-07-10",
                 "url": "https://example.com/1",
                 "chunk_text": "두 번째 청크",
+                "visibility": "public",
             },
             {
                 "chunk_id": "notice-old",
@@ -52,6 +54,7 @@ def test_notification_candidates_filters_and_deduplicates_notice_deadlines():
                 "apply_deadline": "2026-06-30",
                 "url": "https://example.com/2",
                 "chunk_text": "지난 마감",
+                "visibility": "public",
             },
         ]
     )
@@ -232,9 +235,7 @@ def test_notification_candidates_wise_items_require_allow_wise():
     assert "notices:103" not in wise_ids
 
 
-def test_notification_candidates_department_visibility_without_department_is_public():
-    notices = _scoped_notices()
-    notices.loc[notices["notice_id"] == 102, "department"] = ""
+def _notice_ids(notices: pd.DataFrame, major: str | None = None) -> set[str]:
     candidates = _build_notification_candidates_from_frames(
         notices_df=notices,
         schedule_df=pd.DataFrame(),
@@ -243,9 +244,88 @@ def test_notification_candidates_department_visibility_without_department_is_pub
         sources={"notices"},
         limit=50,
         today=date(2026, 7, 6),
+        major=major,
     )
-    # normalize_notice_visibility treats an untargeted department scope as public.
-    assert "notices:102" in {candidate.id for candidate in candidates}
+    return {candidate.id for candidate in candidates}
+
+
+def test_notification_candidates_department_visibility_without_department_is_excluded():
+    notices = _scoped_notices()
+    notices.loc[notices["notice_id"] == 102, "department"] = ""
+    for major in (None, "컴퓨터공학과", ""):
+        assert "notices:102" not in _notice_ids(notices, major), major
+
+
+def test_notification_candidates_visibility_fails_closed_for_missing_blank_unknown():
+    notices = _scoped_notices()
+    notices["visibility"] = notices["visibility"].astype(object)
+    notices.loc[notices["notice_id"] == 102, "visibility"] = float("nan")
+    notices.loc[notices["notice_id"] == 103, "visibility"] = "   "
+    notices.loc[notices["notice_id"] == 104, "visibility"] = "전체공개"
+    notices.loc[notices["notice_id"] == 104, "title"] = "통계학과 장학 신청"
+    notices.loc[notices["notice_id"] == 104, "department"] = "통계학과"
+    for major in (None, "컴퓨터공학과", "경제학과", "통계학과"):
+        assert _notice_ids(notices, major) == {"notices:101"}, major
+
+
+def test_notification_candidates_nan_visibility_with_department_hidden_from_guest():
+    notices = _scoped_notices().iloc[[2]].copy()
+    notices["visibility"] = [float("nan")]
+    notices["department"] = ["통계학과"]
+    assert _notice_ids(notices) == set()
+    assert _notice_ids(notices, "통계학과") == set()
+
+
+def test_notification_candidates_missing_visibility_column_excludes_notices(caplog):
+    notices = _scoped_notices().drop(columns=["visibility"])
+    with caplog.at_level("WARNING"):
+        assert _notice_ids(notices) == set()
+        assert _notice_ids(notices, "컴퓨터공학과") == set()
+    assert "notification_candidates_visibility_column_missing" in caplog.text
+
+
+def test_notification_candidates_keep_original_row_label_after_campus_boundary():
+    # No id/url columns: the candidate id falls back to the original row label.
+    schedule = pd.DataFrame(
+        [
+            {
+                "title": "WISE캠퍼스 정규학기 학점교류 신청",
+                "schedule_start": "2026-07-08",
+                "schedule_end": "2026-07-09",
+                "chunk_text": "학사일정: WISE캠퍼스 정규학기 학점교류 신청",
+            },
+            {
+                "title": "정규학기 학점교류 신청",
+                "schedule_start": "2026-07-08",
+                "schedule_end": "2026-07-09",
+                "chunk_text": "학사일정: 정규학기 학점교류 신청",
+            },
+        ],
+        index=[40, 41],
+    )
+    candidates = _build_notification_candidates_from_frames(
+        notices_df=pd.DataFrame(),
+        schedule_df=schedule,
+        start=date(2026, 7, 1),
+        end=date(2026, 7, 31),
+        sources={"schedule"},
+        limit=50,
+        today=date(2026, 7, 6),
+    )
+    assert [candidate.id for candidate in candidates] == ["schedule:41"]
+    assert candidates[0].source_id == "41"
+
+    wise_candidates = _build_notification_candidates_from_frames(
+        notices_df=pd.DataFrame(),
+        schedule_df=schedule,
+        start=date(2026, 7, 1),
+        end=date(2026, 7, 31),
+        sources={"schedule"},
+        limit=50,
+        today=date(2026, 7, 6),
+        allow_wise=True,
+    )
+    assert {candidate.id for candidate in wise_candidates} == {"schedule:40", "schedule:41"}
 
 
 def test_notification_candidates_endpoint_defaults_to_safe_scope(monkeypatch):

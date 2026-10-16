@@ -700,28 +700,39 @@ def _notification_notice_visibility(
     *,
     major: str | None,
 ) -> pd.DataFrame:
-    """Keep notices visible to ``major`` with the same rule as ``_visible_notice_scope``.
+    """Keep only notices visible to ``major``; fail closed like chat retrieval.
 
-    Public notices are always visible. Department-only notices are visible only
-    when their department equals the caller's normalized major; guests and
-    unknown majors see public notices only.
+    Mirrors ``_notice_visibility_where_filter`` / ``_matches_where`` (case and
+    surrounding whitespace aside): a row is visible only when its visibility is
+    exactly ``public``, or exactly ``department`` with a department equal to the
+    caller's normalized major. Missing (NaN), blank, or unrecognized visibility
+    values, and department rows without a matching department, are excluded.
+    Guests and unknown majors therefore see public notices only. A frame
+    without a ``visibility`` column yields no notices and logs a warning.
     """
     if notices.empty:
         return notices
+    if "visibility" not in notices.columns:
+        _log_event(
+            logging.WARNING,
+            "notification_candidates_visibility_column_missing",
+            excluded=len(notices),
+        )
+        return notices.iloc[:0].copy()
     user_major = clean_department(major)
     if user_major.lower() in {"unknown", "default"}:
         user_major = ""
-    visibility = notices.get("visibility", pd.Series("", index=notices.index))
     department = notices.get("department", pd.Series("", index=notices.index))
     keep: list[bool] = []
-    for raw_visibility, raw_department in zip(visibility, department):
-        raw_visibility = _candidate_str(raw_visibility)
-        raw_department = _candidate_str(raw_department)
-        normalized = normalize_notice_visibility(raw_visibility, raw_department)
-        if normalized == PUBLIC_VISIBILITY:
+    for raw_visibility, raw_department in zip(notices["visibility"], department):
+        visibility = _candidate_str(raw_visibility).lower()
+        if visibility == PUBLIC_VISIBILITY:
             keep.append(True)
+        elif visibility == DEPARTMENT_VISIBILITY:
+            row_department = clean_department(_candidate_str(raw_department))
+            keep.append(bool(user_major) and bool(row_department) and row_department == user_major)
         else:
-            keep.append(bool(user_major) and clean_department(raw_department) == user_major)
+            keep.append(False)
     return notices.loc[keep].copy()
 
 
