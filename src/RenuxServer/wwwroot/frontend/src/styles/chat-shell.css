@@ -1221,3 +1221,19 @@
   .ch-header__actions { gap: 6px; }
   .ch-shell .source-cards__header { min-height: 44px; }
 }
+
+/* App navigation: sidebar list on wide screens, bottom tabs on mobile (in flow, never over the composer).
+   While a text field is focused (on-screen keyboard) the tabs hide and the composer keeps the safe area. */
+.app-nav a { display: flex; align-items: center; gap: 10px; padding: 0 10px; min-height: 42px; border-radius: 10px; color: #77695a; font-size: 14px; text-decoration: none; }
+.app-nav [aria-current] { background: #fdefe0; color: #c25400; font-weight: 600; }
+.app-nav svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.app-tabs { display: none; }
+@media (max-width: 900px) {
+  .app-side { display: none; }
+  .app-tabs { display: flex; flex-shrink: 0; background: #fff; border-top: 1px solid #e6ded3; padding-bottom: env(safe-area-inset-bottom); }
+  .app-tabs a { flex: 1; flex-direction: column; justify-content: center; gap: 2px; min-height: 50px; font-size: 11px; background: none !important; }
+  .settings-page .app-tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; }
+  .settings-page { padding-bottom: calc(74px + env(safe-area-inset-bottom)); }
+  .ch-main:not(:has(:focus:is(textarea, input:not([type=checkbox])))) .ch-composer { padding-bottom: 10px; }
+  body:has(:focus:is(textarea, input:not([type=checkbox]))) .app-tabs { display: none; }
+}

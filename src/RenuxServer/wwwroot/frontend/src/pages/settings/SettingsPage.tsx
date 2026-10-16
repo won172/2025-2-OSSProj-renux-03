@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useBlocker, useNavigate } from 'react-router-dom'
 import { apiFetch, type ApiError } from '../../api/client'
+import AppNav from '../../components/AppNav'
 import Pagination from '../../components/Pagination'
 import { cleanDeadlineSnippet, pageSlice, preferenceKey } from '../../chat/settingsState'
 import { countUnreadGroups, formatDDay, getDDay, groupNotifications } from '../../chat/notifications'
@@ -573,6 +574,7 @@ const SettingsPage = () => {
       <footer className="settings-page__footer">
         <Link to="/privacy">개인정보처리방침</Link>
       </footer>
+      <AppNav tabs />
     </div>
   )
 }
