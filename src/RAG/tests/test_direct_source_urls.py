@@ -183,6 +183,30 @@ def test_meal_projection_includes_updated_canonical_rows_with_their_official_url
     assert "메뉴 1" in chunks.loc[chunks["doc_id"].str.endswith("상록원2층식당"), "chunk_text"].item()
 
 
+def test_complete_meal_window_hides_absent_updated_rows_without_deleting_history(source_db):
+    original = pd.DataFrame([
+        {"date": "2026-09-01", "restaurant": "상록원1층식당", "menu_text": "기존 메뉴"},
+        {"date": "2026-09-01", "restaurant": "상록원2층식당", "menu_text": "보존할 이력"},
+    ])
+    ingest.store_meals_in_db(original)
+    with source_db() as session:
+        document = session.query(db.SourceDocument).filter_by(
+            document_key="meals:2026-09-01:상록원2층식당",
+        ).one()
+        document.status = "updated"
+        history = (document.id, document.normalized_payload_json, document.content_hash)
+        session.commit()
+
+    ingest.store_meals_in_db(original.iloc[:1])
+
+    with source_db() as session:
+        assert session.query(db.SourceDocument).filter_by(dataset="meals").count() == 2
+        document = session.get(db.SourceDocument, history[0])
+        assert document.status == "hidden"
+        assert (document.id, document.normalized_payload_json, document.content_hash) == history
+    assert ingest.load_meals_from_db()["document_key"].tolist() == ["meals:2026-09-01:상록원1층식당"]
+
+
 def test_meal_crawlers_attach_the_fetched_page_or_pdf_url(monkeypatch):
     day = date(2026, 9, 1)
     monkeypatch.setattr(dongguk_meals, "fetch_day_html", lambda *_args, **_kwargs: "<html />")

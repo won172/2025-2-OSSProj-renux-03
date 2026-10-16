@@ -8289,10 +8289,7 @@ def _rebuild_notices_lexical_artifacts(context: str) -> None:
 
     학생회가 올린 행사 공지가 몇 시간 동안 키워드로 안 잡히는 것을 막는 것이 목적이다.
     """
-    from src.pipelines.ingest import (
-        build_notice_index_frame_from_db,
-        persist_dataset_artifacts_only,
-    )
+    from src.services.ingest_runtime import serialized_ingest_write
 
     _lexical_rebuild_pending.set()
     # 연속 승인 시 재생성이 겹치지 않게 한 번에 하나만 돌리고, 대기 중 들어온 요청은
@@ -8301,13 +8298,15 @@ def _rebuild_notices_lexical_artifacts(context: str) -> None:
         if not _lexical_rebuild_pending.is_set():
             return
         _lexical_rebuild_pending.clear()
-        frame = build_notice_index_frame_from_db()
-        persist_dataset_artifacts_only("notices", frame)
+        # A corpus revision covers both lexical artifacts and dense metadata.
+        # Keep the complete common refresh in one maintenance critical section
+        # so scheduler/admin writers cannot publish different generations.
+        with serialized_ingest_write(dataset="notices", operation="admin_notice_refresh"):
+            refresh_notice_artifacts()
         _log_event(
             logging.INFO,
             "notices_lexical_artifacts_rebuilt",
             context=context,
-            chunk_count=len(frame),
         )
 
 
