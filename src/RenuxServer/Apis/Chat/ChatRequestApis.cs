@@ -1428,7 +1428,7 @@ static public class ChatRequestApis
 
     // JWT의 "Major" 클레임에서 학과명을 추출한다. 값이 없거나 "Unknown"이면 null을 반환해
     // RAG 서비스가 학과 필터를 적용하지 않도록 한다.
-    static private string? ResolveMajor(HttpContext context)
+    static internal string? ResolveMajor(HttpContext context)
     {
         string? major = context.User.FindFirstValue("Major");
         if (string.IsNullOrWhiteSpace(major) || major == "Unknown")

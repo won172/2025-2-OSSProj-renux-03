@@ -679,6 +679,63 @@ def _filter_active_notice_frames(
     )
 
 
+def _notification_campus_scope(frame: pd.DataFrame, *, allow_wise: bool) -> pd.DataFrame:
+    """Apply the shared campus safety boundary while keeping the original row index.
+
+    ``apply_campus_safety_boundary`` resets the index; candidate ids fall back to
+    the row label when no stable id column exists, so the label is restored.
+    """
+    if frame.empty:
+        return frame
+    labelled = frame.copy()
+    labelled["_candidate_row_label"] = list(labelled.index)
+    bounded, _ = apply_campus_safety_boundary(labelled, allow_wise=allow_wise)
+    bounded = bounded.set_index("_candidate_row_label")
+    bounded.index.name = frame.index.name
+    return bounded
+
+
+def _notification_notice_visibility(
+    notices: pd.DataFrame,
+    *,
+    major: str | None,
+) -> pd.DataFrame:
+    """Keep only notices visible to ``major``; fail closed like chat retrieval.
+
+    Mirrors ``_notice_visibility_where_filter`` / ``_matches_where`` (case and
+    surrounding whitespace aside): a row is visible only when its visibility is
+    exactly ``public``, or exactly ``department`` with a department equal to the
+    caller's normalized major. Missing (NaN), blank, or unrecognized visibility
+    values, and department rows without a matching department, are excluded.
+    Guests and unknown majors therefore see public notices only. A frame
+    without a ``visibility`` column yields no notices and logs a warning.
+    """
+    if notices.empty:
+        return notices
+    if "visibility" not in notices.columns:
+        _log_event(
+            logging.WARNING,
+            "notification_candidates_visibility_column_missing",
+            excluded=len(notices),
+        )
+        return notices.iloc[:0].copy()
+    user_major = clean_department(major)
+    if user_major.lower() in {"unknown", "default"}:
+        user_major = ""
+    department = notices.get("department", pd.Series("", index=notices.index))
+    keep: list[bool] = []
+    for raw_visibility, raw_department in zip(notices["visibility"], department):
+        visibility = _candidate_str(raw_visibility).lower()
+        if visibility == PUBLIC_VISIBILITY:
+            keep.append(True)
+        elif visibility == DEPARTMENT_VISIBILITY:
+            row_department = clean_department(_candidate_str(raw_department))
+            keep.append(bool(user_major) and bool(row_department) and row_department == user_major)
+        else:
+            keep.append(False)
+    return notices.loc[keep].copy()
+
+
 def _build_notification_candidates_from_frames(
     notices_df: pd.DataFrame,
     schedule_df: pd.DataFrame,
@@ -687,6 +744,9 @@ def _build_notification_candidates_from_frames(
     sources: set[str],
     limit: int,
     today: date,
+    *,
+    major: str | None = None,
+    allow_wise: bool = False,
 ) -> list[NotificationCandidate]:
     candidates: list[NotificationCandidate] = []
 
@@ -704,6 +764,9 @@ def _build_notification_candidates_from_frames(
         if not notices.empty:
             notices["_target_date"] = notices["_target_ts"].dt.date
             notices = notices[(notices["_target_date"] >= start) & (notices["_target_date"] <= end)].copy()
+            notices = _notification_notice_visibility(notices, major=major)
+            notices = _notification_campus_scope(notices, allow_wise=allow_wise)
+        if not notices.empty:
             if "position" in notices.columns:
                 notices["_position"] = pd.to_numeric(notices["position"], errors="coerce").fillna(0)
             else:
@@ -762,6 +825,8 @@ def _build_notification_candidates_from_frames(
         if not schedule.empty:
             schedule["_target_date"] = schedule["_target_ts"].dt.date
             schedule = schedule[(schedule["_target_date"] >= start) & (schedule["_target_date"] <= end)].copy()
+            schedule = _notification_campus_scope(schedule, allow_wise=allow_wise)
+        if not schedule.empty:
             schedule["_source_key"] = schedule.apply(lambda row: _notification_source_id(row, "schedule"), axis=1)
             schedule.sort_values(
                 by=["_target_ts", "_source_key"],
@@ -963,7 +1028,15 @@ async def notification_candidates(
     to: str | None = None,
     sources: str = "notices,schedule",
     limit: int = 100,
+    major: str | None = None,
+    allow_wise: bool = False,
 ):
+    """Deadline candidates scoped like chat retrieval.
+
+    ``major`` unlocks department-only notices for that department; omitted or
+    unknown majors see public notices only. WISE-scoped items are excluded
+    unless ``allow_wise`` is true. The defaults are the safe (guest) scope.
+    """
     today = kst_now().date()
     start = _parse_candidate_date(from_date, "from", today)
     end = _parse_candidate_date(to, "to", today + timedelta(days=60))
@@ -996,6 +1069,8 @@ async def notification_candidates(
         sources=requested_sources,
         limit=max(1, min(limit, 300)),
         today=today,
+        major=major,
+        allow_wise=allow_wise,
     )
 
 

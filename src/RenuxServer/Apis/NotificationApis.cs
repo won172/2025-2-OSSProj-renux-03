@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using RenuxServer.Apis.Chat;
 using RenuxServer.DbContexts;
 using RenuxServer.Models;
 
@@ -77,6 +78,15 @@ public record UserNotificationDto(
 );
 
 public record NotificationSyncResult(int Created, int UpcomingMatched);
+
+/// <summary>
+/// 후보를 볼 수 있는 범위. 채팅 검색과 같은 규칙으로 RAG가 학과 전용 공지와 WISE 항목을 거른다.
+/// Major가 null이면 전체 공개만, AllowWise가 false면 WISE 캠퍼스 항목을 제외한다.
+/// </summary>
+public record NotificationCandidateScope(string? Major, bool AllowWise)
+{
+    public static readonly NotificationCandidateScope Public = new(null, false);
+}
 
 static public class NotificationApis
 {
@@ -186,7 +196,7 @@ static public class NotificationApis
                 return Results.Ok(Array.Empty<DeadlineDto>());
             }
 
-            var candidates = await FetchCandidatesAsync(configuration, httpClientFactory, cache, logger, daysAhead, limit, context.RequestAborted);
+            var candidates = await FetchCandidatesAsync(configuration, httpClientFactory, cache, logger, ResolveCandidateScope(context), daysAhead, limit, context.RequestAborted);
             var deadlines = candidates
                 .Select(candidate => ToDeadline(candidate))
                 .Where(deadline => deadline is not null && enabledTopics.Contains(deadline.Topic))
@@ -219,7 +229,7 @@ static public class NotificationApis
                 return Results.Ok(new NotificationSyncResult(0, 0));
             }
 
-            var candidates = await FetchCandidatesAsync(configuration, httpClientFactory, cache, logger, 60, 200, context.RequestAborted);
+            var candidates = await FetchCandidatesAsync(configuration, httpClientFactory, cache, logger, ResolveCandidateScope(context), 60, 200, context.RequestAborted);
             var today = TodayKst();
             var now = DateTime.UtcNow;
             var dueNotifications = new List<UserNotification>();
@@ -542,11 +552,20 @@ static public class NotificationApis
         );
     }
 
-    private static async Task<List<NotificationCandidateDto>> FetchCandidatesAsync(
+    /// <summary>
+    /// 채팅 경로와 같은 방식으로 로그인 사용자의 범위를 정한다. 학과는 JWT "Major" 클레임
+    /// (<see cref="ChatRequestApis.ResolveMajor"/>)을 쓰고, 사용자별 캠퍼스 설정이 없으며 채팅도
+    /// WISE를 허용하지 않으므로 AllowWise는 항상 false다.
+    /// </summary>
+    internal static NotificationCandidateScope ResolveCandidateScope(HttpContext context)
+        => new(ChatRequestApis.ResolveMajor(context), AllowWise: false);
+
+    internal static async Task<List<NotificationCandidateDto>> FetchCandidatesAsync(
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
         IMemoryCache cache,
         ILogger logger,
+        NotificationCandidateScope scope,
         int daysAhead,
         int limit,
         CancellationToken cancellationToken)
@@ -558,11 +577,19 @@ static public class NotificationApis
         var from = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var to = today.AddDays(clampedDaysAhead).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         const string sources = "notices,schedule";
-        var url = $"{ragUrl.TrimEnd('/')}/notifications/candidates?from={Uri.EscapeDataString(from)}&to={Uri.EscapeDataString(to)}&sources={sources}&limit={clampedLimit}";
+        var major = string.IsNullOrWhiteSpace(scope.Major) ? null : scope.Major.Trim();
+        var allowWise = scope.AllowWise ? "true" : "false";
+        var url = $"{ragUrl.TrimEnd('/')}/notifications/candidates?from={Uri.EscapeDataString(from)}&to={Uri.EscapeDataString(to)}&sources={sources}&limit={clampedLimit}&allow_wise={allowWise}";
+        if (major is not null)
+        {
+            url += $"&major={Uri.EscapeDataString(major)}";
+        }
 
-        // 후보 목록은 전 사용자 공용이고 공지는 하루 4회만 갱신되므로 20분간 캐시한다.
+        // 공지는 하루 4회만 갱신되므로 20분간 캐시한다. 결과는 학과·캠퍼스 범위마다 다르므로
+        // 범위를 캐시 키에 넣어 서로 다른 범위가 같은 캐시 항목을 공유하지 않게 한다.
         // 관심 주제 필터·유저별 알림 생성은 이 메서드 바깥에서 수행되므로 캐시에는 개인 데이터가 담기지 않는다.
-        var cacheKey = $"notif:candidates:{from}:{to}:{sources}:{clampedLimit}";
+        var majorKey = major is null ? "public" : $"major={Uri.EscapeDataString(major)}";
+        var cacheKey = $"notif:candidates:{from}:{to}:{sources}:{clampedLimit}:{majorKey}:wise={allowWise}";
         var candidates = await cache.GetOrCreateAsync<List<NotificationCandidateDto>>(cacheKey, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(20);
