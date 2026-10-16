@@ -21,7 +21,7 @@ from contextvars import ContextVar
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass, replace
-from typing import Any, AsyncIterator, Dict, List, Tuple
+from typing import Any, AsyncIterator, Dict, List, Literal, Tuple
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -99,6 +99,7 @@ from src.pipelines.ingest import (
     ingest_schedule,
     ingest_staff, # 추가
 )
+from src.pipelines.notice_event_dates import NoticeEventDates, extract_notice_event_dates
 from src.pipelines.notices_sync import (
     backfill_manual_notice_department_scopes,
     ensure_manual_notice_source_document,
@@ -502,6 +503,10 @@ class NotificationCandidate(BaseModel):
     snippet: str | None = None
     confidence: float | None = None
     date_source: str | None = None
+    # 공지 마감일의 원문 근거(제목·본문의 정확한 부분 문자열, 여럿이면 " || "로 잇는다)와 확정 여부.
+    # 근거를 다시 찾지 못한 후보는 둘 다 None이다(기존 후보와 같은 의미).
+    evidence: str | None = None
+    date_status: Literal["confirmed", "unverified"] | None = None
     metadata: dict[str, str | None] = Field(default_factory=dict)
 
 
@@ -736,6 +741,27 @@ def _notification_notice_visibility(
     return notices.loc[keep].copy()
 
 
+def _notice_event_dates_by_key(notices: pd.DataFrame) -> dict[str, NoticeEventDates]:
+    """공지마다 저장된 마감일(``_target_date``)을 그대로 다시 내는 청크의 기간·근거를 찾는다.
+
+    저장된 마감일은 원문 전체에서 정해졌고 청크에는 일부만 있으므로, 같은 마감일이 나오는
+    청크를 찾았을 때만 시작일·근거·확정 여부를 붙인다. 못 찾으면 붙이지 않는다(추측 금지).
+    """
+    found: dict[str, NoticeEventDates] = {}
+    for _, row in notices.iterrows():
+        key = row["_source_key"]
+        if key in found:
+            continue
+        result = extract_notice_event_dates(
+            _candidate_str(row.get("title")),
+            _candidate_str(row.get("chunk_text")),
+            _candidate_str(row.get("published_at")) or None,
+        )
+        if result is not None and result.end_date == row["_target_date"].isoformat():
+            found[key] = result
+    return found
+
+
 def _build_notification_candidates_from_frames(
     notices_df: pd.DataFrame,
     schedule_df: pd.DataFrame,
@@ -778,10 +804,12 @@ def _build_notification_candidates_from_frames(
                 kind="stable",
                 inplace=True,
             )
+            event_dates_by_key = _notice_event_dates_by_key(notices)
             notices.drop_duplicates(subset=["_source_key"], keep="first", inplace=True)
 
             for _, row in notices.iterrows():
                 target_date = row["_target_date"]
+                event_dates = event_dates_by_key.get(row["_source_key"])
                 title = _candidate_str(row.get("title")) or _extract_chunk_title(row.get("chunk_text"))
                 raw_topic = _candidate_str(row.get("topics"))
                 category = _candidate_str(row.get("category")) or None
@@ -796,7 +824,7 @@ def _build_notification_candidates_from_frames(
                         topic=_notification_topic("notices", title, raw_topic, category),
                         category=category,
                         target_date=target_date.isoformat(),
-                        start_date=None,
+                        start_date=event_dates.start_date if event_dates else None,
                         end_date=target_date.isoformat(),
                         d_day=(target_date - today).days,
                         published_at=_candidate_str(row.get("published_at")) or None,
@@ -804,6 +832,8 @@ def _build_notification_candidates_from_frames(
                         snippet=_candidate_snippet(row.get("chunk_text")),
                         confidence=0.78,
                         date_source="apply_deadline_parsed",
+                        evidence=event_dates.evidence if event_dates else None,
+                        date_status=event_dates.date_status if event_dates else None,
                         metadata={
                             "raw_topic": raw_topic or None,
                             "board_code": _candidate_str(row.get("board_code")) or None,

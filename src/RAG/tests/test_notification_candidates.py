@@ -359,3 +359,79 @@ def test_notification_candidates_endpoint_defaults_to_safe_scope(monkeypatch):
 
     wise_ids = {candidate.id for candidate in call(major="컴퓨터공학과", allow_wise=True)}
     assert "schedule:202" in wise_ids and "notices:103" not in wise_ids
+
+
+def _event_notice(notice_id: int, chunk_text: str, apply_deadline: str, position: int = 0) -> dict:
+    return {
+        "chunk_id": f"notice-{notice_id}-{position}",
+        "doc_id": f"notice-{notice_id}",
+        "notice_id": notice_id,
+        "position": position,
+        "title": f"장학 신청 안내 {notice_id}",
+        "topics": "장학공지",
+        "category": "장학",
+        "published_at": "2026-10-05",
+        "apply_deadline": apply_deadline,
+        "url": f"https://example.com/{notice_id}",
+        "chunk_text": chunk_text,
+        "visibility": "public",
+    }
+
+
+def _event_candidates(rows: list[dict]) -> dict[str, object]:
+    candidates = _build_notification_candidates_from_frames(
+        notices_df=pd.DataFrame(rows),
+        schedule_df=pd.DataFrame(),
+        start=date(2026, 10, 1),
+        end=date(2026, 10, 31),
+        sources={"notices"},
+        limit=20,
+        today=date(2026, 10, 6),
+    )
+    return {item.source_id: item for item in candidates}
+
+
+def test_notice_candidates_expose_period_evidence_and_status_at_top_level():
+    by_id = _event_candidates(
+        [
+            # 근거가 두 번째 청크에만 있어도 같은 마감일을 내는 청크에서 찾는다.
+            _event_notice(10, "지원 자격: 재학생", "2026-10-16", position=0),
+            _event_notice(10, "신청기간: 2026. 10. 12.(월) ~ 10. 16.(금)", "2026-10-16", position=1),
+            _event_notice(
+                11,
+                "1차 신청기간: 2026. 10. 12.(월) ~ 10. 14.(수)\n2차 신청기간: 2026. 10. 26.(월) ~ 10. 28.(수)",
+                "2026-10-14",
+            ),
+        ]
+    )
+
+    confirmed = by_id["10"]
+    assert (confirmed.start_date, confirmed.end_date, confirmed.target_date) == ("2026-10-12", "2026-10-16", "2026-10-16")
+    assert confirmed.date_status == "confirmed"
+    assert confirmed.evidence == "신청기간: 2026. 10. 12.(월) ~ 10. 16"
+
+    multi = by_id["11"]
+    assert multi.date_status == "unverified"
+    assert multi.target_date == "2026-10-14"
+
+    dumped = confirmed.model_dump()
+    assert {"evidence", "date_status", "start_date"} <= set(dumped)
+    assert "evidence" not in dumped["metadata"] and "date_status" not in dumped["metadata"]
+
+
+def test_notice_candidates_leave_fields_empty_when_chunks_do_not_reproduce_stored_deadline():
+    # 저장된 마감일은 원문 전체에서 정해졌지만 청크에는 근거가 없다: 추측하지 않는다.
+    by_id = _event_candidates([_event_notice(12, "자세한 일정은 첨부파일 참고", "2026-10-20")])
+
+    candidate = by_id["12"]
+    assert candidate.target_date == "2026-10-20"
+    assert (candidate.start_date, candidate.evidence, candidate.date_status) == (None, None, None)
+
+
+def test_notice_candidates_do_not_attach_evidence_for_a_different_deadline():
+    # 청크에서 다른 마감일(10.22)이 나오면 저장된 마감일(10.20)의 근거로 쓰지 않는다.
+    by_id = _event_candidates([_event_notice(13, "신청기간: 2026. 10. 15.(목) ~ 10. 22.(목)", "2026-10-20")])
+
+    candidate = by_id["13"]
+    assert candidate.target_date == "2026-10-20"
+    assert (candidate.start_date, candidate.evidence, candidate.date_status) == (None, None, None)
