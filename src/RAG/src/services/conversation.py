@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import json
 from dataclasses import dataclass
+from typing import Literal
 
 from src.utils.query_years import extract_explicit_years
 
@@ -338,7 +339,12 @@ def _resolved_context(query: str, history_text: str) -> tuple[list[str], list[di
         if selections:
             questions = [clean(turn["question"]) for turn in turns[selections[-1]:]]
         if _FOLLOW_UP_MARKERS.search(query):
-            named = [cue for cue in sources if has_lexical_overlap(query, str(cue.get("title", "")))]
+            named = [cue for cue in sources if _names_source(query, [cue])]
+            if named:
+                longest = max(len(re.sub(r"\s+", "", str(cue.get("title", "")))) for cue in named)
+                named = [cue for cue in named if len(re.sub(r"\s+", "", str(cue.get("title", "")))) == longest]
+            else:
+                named = [cue for cue in sources if has_lexical_overlap(query, str(cue.get("title", "")))]
             if len(named) == 1:
                 sources, questions = named, []
     safe_sources = []
@@ -365,14 +371,106 @@ def _resolved_context(query: str, history_text: str) -> tuple[list[str], list[di
     documents = {cue.get("document_key") or cue.get("doc_id") or cue.get("url") or cue.get("title")
                  or cue.get("chunk_id") or cue.get("source_ref") for cue in safe_sources}
     ambiguous = (numbers is not None and not safe_sources) or (
-        _generic_document_reference(query) and len(documents) > 1
+        _generic_document_reference(query) and (len(documents) > 1 or bool(sources and not safe_sources))
     )
     return questions, safe_sources, bool(ambiguous)
 
 
 def followup_source_clarification(query: str, history_text: str) -> bool:
-    return (_document_numbers(query) is not None or _generic_document_reference(query)) and (
-        not history_allows_context_rewrite(query, history_text) or _resolved_context(query, history_text)[2]
+    if _document_numbers(query) is None and not _generic_document_reference(query):
+        return False
+    if not history_allows_context_rewrite(query, history_text):
+        return True
+    _, sources, ambiguous = _resolved_context(query, history_text)
+    # An identified source must never fall back to title-only discovery when
+    # its dataset/identity is malformed or unsupported.
+    return ambiguous or any(
+        any(cue.get(key) for key in ("source", "dataset", "document_key", "doc_id", "chunk_id"))
+        and _typed_source_reference(cue) is None for cue in sources
+    )
+
+
+SourceDataset = Literal["notices", "rules", "schedule", "staff", "courses", "meals"]
+_SOURCE_DOMAIN_HINTS: dict[SourceDataset, str] = {
+    "notices": "학교 공지사항", "rules": "학교 학칙 규정", "schedule": "학교 학사일정",
+    "staff": "학교 교직원 연락처", "courses": "학교 교과목", "meals": "학교 학식",
+}
+
+
+@dataclass(frozen=True)
+class FollowupSourceReference:
+    dataset: SourceDataset
+    document_key: str | None = None
+    chunk_id: str | None = None
+
+    @property
+    def domain_hint(self) -> str:
+        return _SOURCE_DOMAIN_HINTS[self.dataset]
+
+
+def _typed_source_reference(cue: dict) -> FollowupSourceReference | None:
+    def bounded(key: str) -> str | None:
+        value = cue.get(key)
+        return value.strip() if isinstance(value, str) and 0 < len(value.strip()) <= 256 else None
+    document_key = bounded("document_key") or bounded("doc_id")
+    dataset = bounded("source") or bounded("dataset")
+    if dataset is None and document_key:
+        dataset = document_key.split(":", 1)[0]
+    if dataset not in _SOURCE_DOMAIN_HINTS:
+        return None
+    if document_key and not document_key.startswith(f"{dataset}:"):
+        return None
+    chunk_id = bounded("chunk_id")
+    if not document_key and not chunk_id:
+        return None
+    return FollowupSourceReference(dataset, document_key, chunk_id)
+
+
+def followup_source_reference(query: str, history_text: str) -> FollowupSourceReference | None:
+    """Resolve one referenced source as a typed retrieval scope, never as facts."""
+    if not needs_context_rewrite(query, history_text):
+        return None
+    _, sources, ambiguous = _resolved_context(query, history_text)
+    # A scope correction asks for new evidence; it cannot pin an older doc
+    # merely because the title omitted the corrected year/major/campus.
+    if any(_scopes(query).values()) and not (
+        _document_numbers(query) is not None or _generic_document_reference(query)
+        or _names_source(query, sources)
+    ):
+        return None
+    if ambiguous or len(sources) != 1:
+        return None
+    return _typed_source_reference(sources[0])
+
+
+def _names_source(query: str, sources: list[dict]) -> bool:
+    if not _FOLLOW_UP_MARKERS.search(query) or re.search(r"말고|아니라|아니고|기준|^(?:아니|정정)", query):
+        return False
+    compact = re.sub(r"\s+", "", query)
+    return any(
+        (title := re.sub(r"\s+", "", str(cue.get("title", "")))) and title in compact
+        for cue in sources
+    )
+
+
+def requires_source_identity(query: str, history_text: str) -> bool:
+    """A requested document cannot be replaced by a title lookalike.
+
+    Keep this separate from resolution: older title-only cues can explain the
+    user's topic, but cannot authorize an answer about a particular document.
+    """
+    if _document_numbers(query) is not None or _generic_document_reference(query):
+        return True
+    if not needs_context_rewrite(query, history_text):
+        return False
+    _, sources, _ = _resolved_context(query, history_text)
+    if _names_source(query, sources):
+        return True
+    if any(_scopes(query).values()):
+        return False
+    return len(sources) == 1 and (
+        _typed_source_reference(sources[0]) is not None
+        or has_lexical_overlap(query, str(sources[0].get("title", "")))
     )
 
 
@@ -482,6 +580,9 @@ def rewrite_with_context(query: str, history_text: str) -> str:
     if ambiguous:
         return query
     parts = list(dict.fromkeys([query.strip(), *questions, *(str(cue.get("title", "")) for cue in sources)]))
+    reference = followup_source_reference(query, history_text)
+    if reference is not None:
+        parts.append(reference.domain_hint)
     return " ".join(part for part in parts if part).strip()
 
 
@@ -499,5 +600,8 @@ __all__ = [
     "relevant_history",
     "conversation_recall",
     "followup_source_clarification",
+    "followup_source_reference",
+    "FollowupSourceReference",
+    "requires_source_identity",
     "effective_scope_query",
 ]

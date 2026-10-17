@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-10-17 (대화 기억 검증 기록·공식 정보 연결 후보 진행)
+Last Updated: 2026-10-17 (대화 기억 운영 기록·공식 정보 연결 통합 후보 진행)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -18,7 +18,8 @@ Last Updated: 2026-10-17 (대화 기억 검증 기록·공식 정보 연결 후�
 캠퍼스·대상·학번·학기·유효기간을 보존한 정보 단위와 출처를 공통 검색에 연결한다.
 현재는 별도 worktree와 임시 검증 DB에서 진행하며, 실제 전체 수집·운영 반영 완료 상태가 아니다.
 
-대화 기억과 이전 문서 참조의 수정 후보(PR #80)는 main에 병합된 것을 확인했다(`707ecc9`). 아래 상세 검증 기록은 병합 전 후보 스냅샷이며, 운영 RAG 반영 여부는 이 정보 연결 작업에서 재확인하지 않았다.
+대화 기억·이전 문서 참조 수정(PR #80·#82)을 human 승인 후 main에 병합하고 운영 RAG에 반영했다.
+공개 게스트 API에서 동일 문서 재질문·직전 질문 회상·다른 채팅 격리를 확인했다.
 
 RAG 503을 운영에서 복구했고, 재발 방지 PR #73을 human 승인 후 main에 병합했다.
 기존 primary 경로에서 별도 override 없는 Compose 전체 기동과 외부 게스트 채팅을 확인했다.
@@ -79,33 +80,54 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
 - 현재 수집 범위·미지원 구조·추출 실패·미연결 정보·검색 회귀를 따로 기록한다.
   실제 전체 원천 수집, 사람 판정 답변 품질, 운영 데이터 적용 및 배포는 완료되지 않았다.
 
-## 2026-10-17 대화 기억·문서 후속 질문 수정 후보
+## 2026-10-17 대화 기억·문서 후속 질문 운영 반영 완료
 
-- 최신 `origin/main=8411b22`에서 만든 `fix/conversation-memory`의 `c97c9f0`,
-  [PR #80](https://github.com/won172/2025-2-OSSProj-renux-03/pull/80). 현재 **Review**이며 main 병합·운영 반영 전이다.
-  primary의 기존 데이터·vectorizer·staff review 변경은 보존했다.
-- 실행 중이던 코드의 Redis 이력 초기화가 `'dict' object has no attribute 'index'`로 실패하고,
-  요청마다 새 임시 이력을 만들어 같은 방의 맥락을 잃는 경로를 격리 Redis에서 재현했다.
-  dict/list 응답 호환 어댑터가 기존 JSON·키·인덱스를 유지하고, 세션별 bounded fallback과
-  안정적인 메시지 ID·원자적 저장·원래 TTL로 장애 복구 및 lost-ack 재시도의 중복을 방지한다.
-- 단어가 겹치지 않는 명시적 후속 질문, 문서 번호·제목 참조, 짧은 신청 조건 질문을 연결한다.
-  최신 학번·학기·캠퍼스·학과 정정을 다음 질문에도 유지하며, 이전 출처는 현재 공식 자료를
-  다시 검색하는 단서로만 쓴다. 문서 대상이 모호하면 번호·제목을 묻고, 새 주제와 공지 열람 권한 경계는 보존한다.
-- 생성 후보의 grounding 전 저장을 제거했다. 검증된 최종 생성 답변에만 출처 단서를 보존하며,
-  실패·미확인 후보의 사실을 이력으로 재사용하지 않는다. 검색·생성 및 ask/stream 경로를 함께 검사했다.
-- 구현 agent의 최종 집중 **256 passed**, 전체 빈 DB **1,853 passed / 1 skipped / 기존 경고 10개**.
-  Root의 전체 무작위 순서(`20261017`)도 **1,853 passed / 1 skipped / 기존 경고 10개**다.
-  skip은 기존 gitignored 공지 chunk·lexical 자료가 필요한 deadline recall 검사 1건이다.
-  독립 QA의 최종 집중 **233 passed**와 실제 planner·최종 scope filter를 호출한 합성 검증 **9건**이 통과했다.
-- 독립 QA가 찾은 '참고한/확인한 문서'의 서수 오인과 2학기 정정 후 1학기 자료로 되돌아가는 회귀도
-  수정 후 같은 입력으로 재확인했다. 검토한 범위에 남은 blocking finding은 없다.
-- Root는 운영과 분리한 internal Docker network의 폐기 가능한 Redis에서 실제 런타임 의존성을 사용해
-  기존 JSON 보존, 새 이력 인스턴스의 출처·인용 번호 복원, 장애 중 대화 보존, 복구·중복 방지·세션 분리를 확인했다.
-  최종 코드의 9개 SHA-256과 QA snapshot이 일치하며 secret/staged diff 검사가 통과했다.
+- Human의 "반영해" 승인 후 [PR #80](https://github.com/won172/2025-2-OSSProj-renux-03/pull/80)
+  (`c97c9f0`, merge `707ecc9`)·상태 문서 PR #81을 병합했다. 운영 검증에서 추가로 확인한 문서 참조 오류는
+  [PR #82](https://github.com/won172/2025-2-OSSProj-renux-03/pull/82)
+  (`b03b02d`, merge `a843d08`)으로 수정·독립 검증 후 같은 승인 범위에서 반영했다.
+  primary를 fast-forward했고 기존 데이터·vectorizer·staff review 파일 25개의 byte hash를 보존했다.
+- Redis 이력 초기화의 `'dict' object has no attribute 'index'`와 요청마다 새 임시 이력을 만드는 경로를 수정했다.
+  dict/list 응답 호환 어댑터는 기존 JSON·키·인덱스를 유지하며, 세션별 bounded fallback·안정적인 메시지 ID·
+  원자적 저장·원래 TTL로 장애 복구와 lost-ack 재시도의 중복을 방지한다.
+- 명시적 후속 질문, 문서 번호·제목 참조, 짧은 조건 질문과 최신 학번·학기·캠퍼스·학과 정정을 연결한다.
+  grounding 전 생성 후보는 이력에 저장하지 않으며, 검증된 최종 답변에만 출처 단서를 보존한다.
+  실패·미확인 후보의 사실은 다음 답변의 근거로 재사용하지 않는다.
+- 첫 운영 검증에서 제목이 `통계학과 - 이**`처럼 일반적이면 `[문서1] 자세히 알려줘`가 `out_of_domain`으로
+  차단됨을 확인했다. PR #82는 선택한 자료의 데이터셋·문서·청크 식별자를 함께 전달하고, 현재 정본과
+  projection의 동일 문서를 재조회한다. 현재 공개 상태·캠퍼스·학과 권한·학기·학번을 다시 검사하며,
+  문서가 없거나 범위를 벗어나면 다른 동명 자료로 확장하지 않는다. Korean staff의 `부서경로`와
+  `조직(트리)`에 있는 WISE 구분도 독립 회귀 검사를 통과했다.
+- 최종 full-main 소스의 빈 DB·무작위 순서(`20261017`) 전체 검사는 각각
+  **1,925 passed / 1 skipped / 기존 경고 10개**다. 독립 QA의 집중 **305 passed**와 추가 합성 8개 그룹,
+  이전 Redis 격리 smoke·합성 9건이 통과했다. PR #80·#82의 frontend/backend/RAG 일반·빈 DB·무작위/secret CI도 통과했다.
+  skip은 기존 ignored 공지 chunk·lexical 자료가 필요한 deadline recall 1건이다.
+- 운영 런타임 baseline `0d6fa13`에 검증된 수정 `c97c9f0`·`b03b02d`만 적용한 이미지를 사용했다.
+  무관한 최신 main 수집 로직을 함께 배포하지 않았고, 의존성·entrypoint·기존 설정을 보존했다.
+  이미지의 전체 테스트는 **1,669 passed / 1 skipped / 기존 경고 10개**, 독립 패키지 QA는 **305 passed**다.
+  full-main 1,925개와 이미지 1,669개는 baseline에 따른 서로 다른 검사 집합이다.
+- 최종 이미지 `renuxserver-rag-service:conversation-memory-b03b02d`의 ID는
+  `sha256:8f3955741b310ed8a3b672a9092ec11799e28e76cac38bd3d05b8c9849e095d4`다.
+  RAG 서비스만 교체했고 `RAG_BUILD_REVISION=memory-b03b02d-on-0d6fa13` 외 환경과 모든 mount를 보존했다.
+  처음 배포 검증 도구가 mount 배열 순서를 오인해 한 번 자동 복구했으며, destination 기준 비교로 수정했다.
+  이후 최종 rollout은 healthy로 완료됐다. API·PostgreSQL·Redis·nginx의 ID·이미지·시작 시각은 기존과 같다.
+- 2026-10-17 공개 `api.dongttok.com`의 실제 게스트 SSE에서 연락처 질문 → `[문서1] 자세히 알려줘` →
+  직전 질문 확인과 별도 채팅의 회상 요청까지 **4건** 모두 HTTP 200, error 0, completion/done 각 1개였다.
+  앞의 두 답변은 `grounded=true`·`verification_status=passed`이며, 재질문 출처 1개는 선택한 원래 문서 ID와 같다.
+  직전 질문의 원문을 회상하고 별도 방에서는 이전 질문이 없다고 응답했다. 실제 모델의 운영 표본이며 전체 품질 평가가 아니다.
+- 새 별도 프로세스에서도 같은 방의 Redis 메시지 6개와 출처 단서 3개/1개를 읽었다.
+  배포 전에 기존 codec으로 작성한 검증용 메시지 2개도 유지됐다. 최종 컨테이너 로그의 기존 index 오류·
+  Redis fallback 경고는 0개다. 직결/공개 `/ready` HTTP 200, 6개 데이터셋 strict lineage ready·위반 0개다.
+- 최종 전후 비교에서 정본·도메인·ontology 13개 테이블의 row count·내용 digest와 정본 문서 17,947개,
+  검색 관련 정적 산출물 63개의 hash가 같았다. DB migration·재색인·데이터 삭제는 수행하지 않았다.
+  검증 질문에 따른 대화·query log 추가가 있으므로 DB 전체 byte 동일을 주장하지 않는다.
+- 증거는 저장소 밖 `../dongttok-worktrees/.codex-runs/conversation-memory-release/`에 보존했다.
+  secret 값·DB dump는 Git이나 증거 파일에 저장하지 않았다. 병합된 구현·QA·배포 worktree/local branch는 정리했고
+  remote branch와 다른 작업의 worktree는 보존했다.
 - 최근 20턴을 조회하고 프로세스 로컬 완충은 1,000세션·유휴 1시간으로 제한한다.
   Redis 장애 중 미동기화 이력은 프로세스 재시작·유휴 만료·용량 퇴출 시 유실될 수 있다.
-  PostgreSQL 화면 기록에서 RAG 이력을 복원하는 기능은 포함하지 않는다.
-  실제 후보 endpoint의 190문항·모델 답변 품질·물리적 기기 검증은 미실행이며, PR 골든 gate의 skip/통과를 출시 근거로 세지 않는다.
+  PostgreSQL 화면 기록에서 이미 유실된 RAG 이력을 복원하는 기능은 포함하지 않는다.
+  실제 후보 190문항과 물리적 기기 검증은 미실행이며, endpoint 미설정 골든 gate의 skip을 출시 근거로 세지 않는다.
 
 ## 2026-10-16 RAG 503 운영 복구 완료
 
@@ -408,8 +430,7 @@ Status 값:
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
 | 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `feat/connected-official-knowledge` / `test/integration-connected-information` | 별도 핵심·통합·QA | In Progress | 핵심103·전체1,882/1skip·원천130검사, UI155·Root32, C#계약 | 최신 main 재참조·다중 대상/시점 통합 중. 전체 수집·실제 정본·모델/사람 평가·운영 적용 미완료 | 통합 후보의 고정 SHA 독립 QA 및 전체 회귀 |
-
-| 동일 채팅 이력·문서 참조·조건 정정 | P1 | RAG/Backend / QA / Orchestrator | `fix/conversation-memory` | `conversation-memory` / `conversation-memory-review` | Review | 집중256·빈 DB/무작위 각1,853/1skip·독립QA233+합성9·실 Redis 격리 smoke·secret/diff | 프로세스 로컬 장애 완충의 재시작 유실 한계; 실제 후보190문항 미실행 | PR #80 human 검토·main 병합·운영 RAG 반영 승인 |
+| 동일 채팅 이력·문서 참조·조건 정정 | P1 | RAG/Backend / QA / Orchestrator | `fix/conversation-memory`·`fix/document-reference-domain-context` | 정리 완료 | Completed | full-main1,925/1skip·이미지1,669/1skip·독립QA305·CI·공개SSE4건·Redis보존·6개lineage·13테이블/63산출물 무결성 | 최근20턴; 장애 중 미동기화 이력의 프로세스 유실 한계; 실제 후보190문항 미실행 | PR #80·#82 병합·운영 반영 및 문서 재질문 확인 완료 |
 | RAG revision·학식 published 상태 503 복구 | P0 | RAG/Backend / QA / Orchestrator | `fix/rag-lineage-recovery` | 정리 완료 | Completed | 신규 회귀 3개·RAG 1,523/1skip·QA 67·CI·6개 strict lineage·실제 기본 Compose 기동·외부 SSE·기존 PostgreSQL 793행 보존 | 물리적 전원 재부팅·전체 운영 골든 평가는 미실행 | PR #73 병합·운영 적용·503 해소 완료 |
 | Compose 단일 명령 전체 기동 | P0 | RAG/Backend / QA | `fix/compose-one-command-startup` | 정리 완료 | Completed | 후보 RAG 1,509/1skip·QA 48·CI, 최신 운영 기본 Compose 기동·ready200·외부 SSE 확인 | 엔진/물리적 전원 재부팅 자체는 미실행 | PR #68·#69 병합 및 primary·운영 반영 완료 |
 | API 기동 EF 모델·스냅샷 일치 | P0 | RAG/Backend / QA | `fix/api-model-snapshot` | 정리 완료 | Completed | 회귀 실패→통과, Release/계약, 독립 QA·CI, 격리 DB 전환/복구, 운영 백업·migration11·기존753행 보존·health/ready200 | 운영 인증·UI 최종 검증 완료 | PR #65 병합·운영 반영 완료 |
@@ -476,15 +497,17 @@ Status:
 
 ## Known Issues
 
-### ISSUE-005 — 대화 기억 수정 후보의 운영 반영 대기
+### ISSUE-005 — Redis 장애 중 미동기화 이력의 내구성 한계
 
-Impact: High
+Impact: Medium
 
-같은 채팅의 Redis 이력 초기화 실패와 새 임시 이력 생성, 후속 질문·문서 참조 및 조건 정정 오류를
-PR #80에서 수정·독립 검증했다. 현재 운영 반영 전이며, 로컬·fixture·격리 Redis 검증을 운영 답변 품질로 해석하지 않는다.
+동일 방의 이력 초기화·문서 참조 결함은 PR #80·#82 병합 및 운영 반영으로 수정했고, 공개 API 표본 검증을 통과했다.
+정상 Redis에서는 이력을 보존하지만 장애 중 완충은 프로세스 로컬이다. 재시작·유휴 만료·용량 퇴출 시
+미동기화 이력이 유실될 수 있으며, PostgreSQL 화면 기록으로부터의 자동 복원은 포함하지 않는다.
 
 Next Action:
-Human의 main 병합·운영 RAG 반영 승인 후 기존 Redis 기록 보존과 동일 방 연속 질문·문서 참조를 운영에서 확인한다.
+후속 내구성 개선 시 PostgreSQL 기록과 출처 식별자에 기반한 복원 계약을 별도 설계·검증한다.
+현재 운영 성공을 전체 질문 품질이나 장애 중 영구 저장의 증거로 해석하지 않는다.
 
 ### ISSUE-001 — 실제 질문의 정량 회귀 판정 근거 부족
 
