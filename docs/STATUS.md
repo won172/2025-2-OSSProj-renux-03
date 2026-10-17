@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-10-17 (대화 기억 운영 기록·공식 정보 연결 통합 후보 진행)
+Last Updated: 2026-10-17 (공식 정보 연결 PR #85·검증/실제 수집 현황)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -30,55 +30,69 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
 
 ## 2026-10-17 공식 정보 수집·정보 단위 지식 그래프 (In Progress)
 
-- 작업 기준 `origin/main=8411b22`, branch `feat/connected-official-knowledge`,
-  worktree `../dongttok-worktrees/connected-official-knowledge`다. 핵심 후보를 `03a40b1`로 고정했고, 별도 QA·통합 worktree를 사용한다.
-- 사용자 요구는 기존 데이터와 신규 공식 자료를 함께 수집하고, 장학금/학사제도/졸업 요건 등의
-  자격·기간·서류·방법·조건·예외·관련 근거가 연결되는 정보 중심 그래프다.
-  조직·연락처는 해당 정보의 문의처 등 보조 항목으로 취급한다.
-- 수집 범위는 사용자가 확인한 서울·바이오메디·공통이다. WISE는 기존 제품 경계를 유지하며,
-  미확인 캠퍼스나 적용 범위는 추정하지 않는다.
-- 10월 17일 공식 교내 홈페이지 목록에서 188개 항목/179개 호스트를 확인했다.
-  제한된 HTTPS 도달성 확인에서 162개 호스트가 최종 HTTP 200을 반환했다.
-  홈페이지 도달성과 기관 내부 문서 전체 수집은 구분한다.
-- 공식 학사·생활 안내 22개 페이지의 실제 HTML 본문·표와, 학과 공지의 실제 HWP 첨부를
-  임시 검증 경로에서 확보했다. 기존 데이터 검증 입력은 추적된 CSV 9,498행으로 구성한
-  공개 사본이며, 운영 정본의 전체 크기·신선도·검색 품질을 뜻하지 않는다.
-- 공식 현행 규정집의 상위법·폐지규정을 제외한 77개 분류에서 515개 규정을 확보했다.
-  분류/상세 요청 실패는 없었고, 원문 응답·hash·출처를 별도 임시 증거 경로에 보존했다.
-  제목·분류에 WISE 전용임이 명시된 142개를 제외한 373개는 적용 범위 검토 후보이며,
-  모두 서울·바이오메디·공통에 적용된다는 의미나 서비스 반영 완료를 뜻하지 않는다.
-  정본 metadata 분류에서는 후보 중 28개가 추가로 WISE로 판정되어 조회에서 제외되며,
-  195개는 unknown으로 남았다. 나머지는 서울 103개·바이오메디 9개·공통 38개다.
-- 공개 수집 checkpoint의 HTML 응답 778개를 오프라인 재추출해 본문 357개를
-  기존 공개 CSV 사본과 함께 임시 정본에 넣었고 import 실패는 없었다.
-  현행 규정 후보까지 포함한 별도 임시 corpus는 10,228문서이며 `quick_check=ok`,
-  FK 오류 0건이다. 이는 공개 사본의 정합성 검증이며 수집 전체 완료나 운영 DB 수치가 아니다.
-- 전공결정의 일반 안내·학과 공지·실제 HWP와 기존 가이드로 신청 대상·기간·방법·예외,
-  외국인 신입생의 다음 학기 신청, 5지망 요구, 계획 첨부와 제출서류 구분,
-  2025/2026년 기간 비교를 검사했다. 실제 G/N/H와 기존 가이드 9,501문서 재생에서 원천 기반 자동 검사 130개가 통과했다.
-  독립 QA가 찾은 표의 중첩 문맥 우회, PDF/HWPX 검토 경계, 긴 조건의 잘림, 공개 대상/요청자 권한 혼용,
-  비공개 중복의 공개 참조 영향, 정상 문단 검색 누락, 실제 관측 시점 및 대상 학위 구분을 수정했다.
-  자동 검사는 사람의 답변 품질 평가나 최종 독립 QA 통과를 대신하지 않는다.
-- 작업 시작 기준 `8411b22`의 별도 빈 DB 기준선은 `1779 passed, 1 skipped, 10 warnings`다.
-  후보의 정보 단위 관계·원문 span·조건·기간 구분·기존/신규 자료 연결과 공통 ask/SSE 소비는
-  핵심 구현 및 최초 독립 검토를 수행했다. 초기 문서/조직 연결 수나 개별 테스트 통과를 최종 완료로 세지 않는다.
-- Root가 41개 파일을 고정한 독립 QA 사본에서 전체 빈 DB 테스트 **1,845 passed / 1 skipped / 10 warnings**를 재실행했다.
-  같은 사본의 원천 기반 116개 자동 검사와 52개 중첩 문맥의 검토 상태도 확인했다.
-  이후 발견한 대상/권한·과거 연도 비교·식단 관측 시점 수정은 이 검사 결과에 포함되지 않는다.
-- 핵심 후보의 agent 집중 **103 passed**, 전체 일반·빈 DB·무작위(`8411223`) 각각 **1,882 passed / 1 skipped / 10 warnings**다.
-  연결 기능 활성화의 관련 회귀 199개도 통과했다. 이 증거는 Root의 코드 끝 공백 1개 정리 전의 43파일 후보 기준이며,
-  고정 커밋은 원본 HTML bytes를 보존하는 fixture-local `.gitattributes`를 포함한 44파일이다. 최종 통합 SHA는 별도 검증한다.
-- 새 출처 카드 이름을 `guidance=공식 안내`, `attachments=첨부자료`로 추가한 `58597c5`는 2줄 변경이다.
-  Client의 전체 frontend 155개·lint·build, Root의 관련 32개·staged diff·secret 검사를 통과했다.
-- 검증 중 main에 대화 기억·정확한 문서 재참조·상태 기록이 병합되어 `639c160`까지 진행했다.
-  `test/integration-connected-information`은 최신 main과 출처 이름 변경을 포함하고,
-  핵심 `03a40b1` 병합의 `rag_service.py` 충돌을 선언한 상태에서 RAG/Backend agent가 통합 중이다.
-  새 안내/첨부의 정확한 재참조·명시적 첨부 관계, 신규 정본의 미래 공고 판정,
-  실제 달력 연도/학년도 구분 및 여러 대상·학기 비교의 알려진 누락을 검증·보완한다.
-- 통합 트리의 변경 없는 C#은 Release build 경고/오류 0개, backend 계약 및 출처 ID 8 scenarios/160 assertions가 통과했다.
-  최신 main 코드 자체의 별도 빈 DB 기준선은 1,925/1skip/10warnings다. 이는 새 RAG 통합 후보의 통과 결과가 아니다.
-- 현재 수집 범위·미지원 구조·추출 실패·미연결 정보·검색 회귀를 따로 기록한다.
-  실제 전체 원천 수집, 사람 판정 답변 품질, 운영 데이터 적용 및 배포는 완료되지 않았다.
+- 정보 연결 코드 후보는 [PR #85](https://github.com/won172/2025-2-OSSProj-renux-03/pull/85)이며,
+  `test/integration-connected-information`의 `a456d8fb4b7cf17e9660088b180f03ad2c492996`다.
+  검증 base는 `639c160`이고, 코드 PR은 draft/검토 단계다. main 병합·운영 데이터 적용·배포는 하지 않았다.
+- 사용자 요구는 기존 데이터와 신규 공식 자료를 함께 수집하고, 제도·프로그램·절차의
+  자격·조건·예외·기간·방법·서류와 명시적인 규정/교과목/원문 참조를 연결하는 것이다.
+  각 정보 단위에 원문 URL·locator·revision·캠퍼스·대상·학번·학기·효력 범위를 보존한다.
+  조직·연락처는 문의처 등 보조 항목이고, 같은 주제의 링크는 적용 조건을 상속하지 않는다.
+- 범위는 사용자가 확인한 서울·바이오메디·공통이다. WISE는 제외하며 미확인 범위를 추정하지 않는다.
+  `SourceDocument`가 정본이고 연결 표/FTS는 재생성 가능한 파생물이다.
+  `RAG_CONNECTED_RETRIEVAL_ENABLED`와 `RAG_CONNECTED_MAINTENANCE_ENABLED`는 기본값 0이다.
+- 후보는 공개 HTTPS 수집·receipt/hash/policy 검증·staging import·정보 단위 투영과 공통 ask/SSE,
+  새 안내/첨부의 정확한 문서 재참조를 포함한다. 불확실한 표 열 관계는 검토 대상으로 분리하고,
+  혼합 문단은 원문과 조건을 유지하면서 미입력 필드가 근거가 아님을 selector/최종 문맥에 표시한다.
+  공개 갱신은 기존 권한·적용 범위·curated 본문을 넓히거나 비활성 문서를 재활성화하지 않는다.
+- 핵심 `03a40b1`, 출처 카드 2줄 `58597c5`, 최신 main의 대화 기억/문서 참조를 통합했다.
+  최종 54파일 patch SHA-256은 `7571ae41d17c07a4a7f1b31928d3726ca2fc5cab08ec3f7f647a45250d443137`이다.
+  Root는 커밋의 patch와 54개 blob이 독립 검토 사본과 같고 worktree가 깨끗함을 확인했다.
+- 독립 read-only QA는 앞서 재현한 공개범위 덮어쓰기, 표/중첩 문맥 우회, 공유 학기 및 빈 항목
+  문제와 URL 전송·미입력 표시·curriculum/offering 보존의 후속 수정을 검토했다.
+  최종 판정은 **merge / human_review_required**다. 코드 PR에 대한 자문이며 main·운영 승인이 아니다.
+  Root는 해당 JSON을 재검증했고, 이전 반례·고정 patch와 실제 증거를 별도로 보존했다.
+
+### 로컬 검증 범위
+
+- Root의 최종 54파일 사본에서 전체 일반 및 무작위(`8411223`)가 각각
+  **2,274 passed / 1 skipped / 기존 경고 10개**다. 연결 기능 활성화의 19파일 회귀는 **668 passed**다.
+  기존 skip은 복사하지 않은 실제 공지/lexical 산출물이 필요한 검사다.
+  source agent의 전체/flag 실행은 기존 localhost bind 권한 제한 1건으로 실패했으나,
+  Root의 loopback 가능한 host에서 해당 테스트를 포함한 전체 및 flag 검사가 통과했다. 테스트를 약화/제외하지 않았다.
+- 실제 일반 안내 G·학과 공지 N·실제 HWP H와 기존 공개 CSV 사본을 합친 9,501문서에서
+  원천 기반 자동 검사 **130/130**이 통과했다. 전공결정의 대상/예외·기간/게시일·신청 경로,
+  외국인 신입생의 조건부 다음 학기 신청, 계획 첨부/제출서류 구분, 2025/2026 기간 비교를 포함한다.
+- 새 코드로 캐시된 HTML·지원 첨부 **6,426개**를 오프라인 재추출했다.
+  새 정본문서 2,253개와 비답변 다운로드 출처 부모 7개를 기존 사본에 넣어
+  **11,758문서**, import 오류 0개를 확인했다. 표 검토·OCR·미지원·실패 상태는 별도로 남는다.
+  이 수치는 운영 문서 수나 모든 문서의 적용 범위/답변 가능성을 뜻하지 않는다.
+- Frontend의 동일 TSX blob은 lint·155 tests·build, Root 관련 32 tests가 통과했다.
+  변경 없는 C#은 Release build 경고/오류 0개와 기존 계약 tests가 통과했다.
+  staged whitespace·secret scan도 통과했고 DB·secret·생성 인덱스를 commit하지 않았다.
+- 실제 모델, 후보 endpoint 190문항, 사람의 답변/관련성 판정 및 serving hybrid 검증은 미실행이다.
+  골든 workflow의 구성/skip 성공을 실제 후보 평가로 보고하지 않는다. 이탈률 개선도 아직 측정하지 않았다.
+
+### 수집·데이터 경계와 남은 작업
+
+- 공식 교내 목록의 188개 항목/179개 호스트를 수집 origin 발견에 활용했다.
+  이 목록과 HTTPS 도달성 확인은 기관 내부 본문 전체의 coverage와 구분한다.
+- 원본 공개 수집 22차 checkpoint(`2026-10-17T12:08Z`)는 extracted 2,260,
+  pending 20,000, deferred 2,767, OCR-required 370, unsupported-layout 581,
+  authority-review 20이다. 미승인 원천/구조 검토 1,817개도 남아 있다.
+  frontier 한도 밖 작업은 metadata와 함께 보존하며 전체 수집 완료로 세지 않는다.
+- 한글/공백 주소 오류가 있었던 공개 첨부 21개는 검토된 코드로 별도 staging에서 재수집했다.
+  인코딩 오류 0개, 18개 추출, 3개는 응답 용량 제한으로 보류했다.
+  원본 checkpoint나 운영 정본을 덮어쓰지 않았고, 새 capture의 정본 합성/검증은 별도 작업이다.
+- 별도 현행 규정 capture는 상위법/폐지를 제외한 77분류 515개다. 명시적 WISE 142개를 제외한
+  373개 검토 후보에서 추가 WISE 28개를 제외했고, 서울 103·바이오메디 9·공통 38·unknown 195개다.
+  이 capture는 위 11,758문서 corpus에 모두 반영된 결과가 아니다.
+- 기존 데이터 평가 입력은 **추적된 공개 CSV 9,498행의 사본**이며 synthetic row identity를 사용했다.
+  운영 정본의 ID·전체 크기·신선도와 구분한다. human이 제공할 read-only 정본 사본이 필요하다.
+  primary의 공개 원천 CSV 3개를 수정 없이 비교해 현재 courses 4,405행(추적본 4,395),
+  rules 1,029행(추적본 520), guide 105행의 차이도 기록했다. 이 추가분은 아직 기존 평가 사본에 합치지 않았다.
+- 다음 작업은 human 코드 검토/병합, 새 capture와 현재 공개 원천의 버전/출처 보존 합성,
+  계속된 수집과 OCR/미지원 adapter·캠퍼스/대상 검토, 실제 모델/사람 평가 및 승인된 rollout이다.
+  source 스냅샷·복구 지점·파생물 lineage 검증과 별도 human 승인 없이 운영에 적용하지 않는다.
 
 ## 2026-10-17 대화 기억·문서 후속 질문 운영 반영 완료
 
@@ -429,7 +443,7 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `feat/connected-official-knowledge` / `test/integration-connected-information` | 별도 핵심·통합·QA | In Progress | 핵심103·전체1,882/1skip·원천130검사, UI155·Root32, C#계약 | 최신 main 재참조·다중 대상/시점 통합 중. 전체 수집·실제 정본·모델/사람 평가·운영 적용 미완료 | 통합 후보의 고정 SHA 독립 QA 및 전체 회귀 |
+| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `test/integration-connected-information` ([PR #85](https://github.com/won172/2025-2-OSSProj-renux-03/pull/85)) | 핵심·통합·고정 QA 사본 별도 | In Progress | 최종 Root 전체/무작위2,274/1skip·flag668·원천130·독립QA human_review_required·UI155/Root32·C#계약 | 전체 수집·실제 정본·현재 공개 CSV 합성·OCR/범위·모델/사람 평가·운영 적용 미완료 | 코드 human 검토/병합, 출처/버전 보존 합성 및 coverage 확장 |
 | 동일 채팅 이력·문서 참조·조건 정정 | P1 | RAG/Backend / QA / Orchestrator | `fix/conversation-memory`·`fix/document-reference-domain-context` | 정리 완료 | Completed | full-main1,925/1skip·이미지1,669/1skip·독립QA305·CI·공개SSE4건·Redis보존·6개lineage·13테이블/63산출물 무결성 | 최근20턴; 장애 중 미동기화 이력의 프로세스 유실 한계; 실제 후보190문항 미실행 | PR #80·#82 병합·운영 반영 및 문서 재질문 확인 완료 |
 | RAG revision·학식 published 상태 503 복구 | P0 | RAG/Backend / QA / Orchestrator | `fix/rag-lineage-recovery` | 정리 완료 | Completed | 신규 회귀 3개·RAG 1,523/1skip·QA 67·CI·6개 strict lineage·실제 기본 Compose 기동·외부 SSE·기존 PostgreSQL 793행 보존 | 물리적 전원 재부팅·전체 운영 골든 평가는 미실행 | PR #73 병합·운영 적용·503 해소 완료 |
 | Compose 단일 명령 전체 기동 | P0 | RAG/Backend / QA | `fix/compose-one-command-startup` | 정리 완료 | Completed | 후보 RAG 1,509/1skip·QA 48·CI, 최신 운영 기본 Compose 기동·ready200·외부 SSE 확인 | 엔진/물리적 전원 재부팅 자체는 미실행 | PR #68·#69 병합 및 primary·운영 반영 완료 |
