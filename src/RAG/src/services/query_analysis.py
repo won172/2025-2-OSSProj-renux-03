@@ -15,7 +15,8 @@ from src.config import (
     RAG_MAX_SUBQUERIES,
 )
 from src.services.conversation import (
-    history_allows_context_rewrite,
+    effective_scope_query,
+    relevant_history,
     preserve_original_query,
 )
 from src.services.temporal_context import TemporalContext, build_temporal_context
@@ -153,7 +154,8 @@ prompt = PromptTemplate(
    질문 주제가 명시돼 있고 공식 자료에서 답을 찾을 수 있으면 추가 조건이 있으면 더
    정확해진다는 이유만으로 true로 두지 마세요. 모호하지만 검색은 가능하면
    search_queries는 생성하세요.
-10. [이전 대화]는 현재 질문과 실질 어휘가 겹칠 때만 제공됩니다. 후속 질문을 재작성하더라도
+10. [이전 대화]는 관련 주제나 명시적 후속 참조가 있을 때만 제공됩니다. 이전 출처는 재검색할
+   문서를 찾는 단서일 뿐 현재 사실의 근거가 아닙니다. 후속 질문을 재작성하더라도
    현재 질문 원문을 삭제하거나 다른 문장으로 치환하지 말고, 원문 뒤에 필요한 맥락만 덧붙이세요.
 11. 질문이 **여러 종류의 정보를 동시에 요구하는 복합 질문**이면(예: "졸업하려면 뭘 해야 해?",
     "수강 계획 세워줘", "복수전공 졸업 준비") is_compound=true로 두고 sub_queries를 만드세요.
@@ -252,7 +254,7 @@ def enforce_explicit_year_boundary(
     history_text: str = "",
 ) -> QueryAnalysisResult:
     """LLM이 사용자에게 없던 연도를 검색 제약으로 발명하지 못하게 한다."""
-    allowed_years = extract_explicit_years(query) | extract_explicit_years(
+    allowed_years = extract_explicit_years(effective_scope_query(query)) or extract_explicit_years(
         user_history_only(history_text)
     )
     normalized = result.normalized_question.strip() or query.strip()
@@ -353,11 +355,7 @@ async def analyze_query(
     usage_recorded = False
     try:
         temporal = temporal_context or build_temporal_context()
-        safe_history = (
-            history_text
-            if history_allows_context_rewrite(query, history_text)
-            else ""
-        )
+        safe_history = relevant_history(query, history_text)
         response = await _get_analysis_chain().ainvoke({
             "query": query,
             "history": safe_history.strip() or "(없음)",

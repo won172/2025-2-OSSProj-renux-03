@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-10-17 (공식 정보 수집·정보 단위 지식 그래프 구현 진행)
+Last Updated: 2026-10-17 (대화 기억 검증 기록·공식 정보 연결 후보 진행)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -17,6 +17,8 @@ Last Updated: 2026-10-17 (공식 정보 수집·정보 단위 지식 그래프 �
 제도·절차·자격·조건·기간·서류·교과목 등 **정보 내용과 근거 관계**로 연결하는 후보를 구현 중이다.
 캠퍼스·대상·학번·학기·유효기간을 보존한 정보 단위와 출처를 공통 검색에 연결한다.
 현재는 별도 worktree와 임시 검증 DB에서 진행하며, 실제 전체 수집·운영 반영 완료 상태가 아니다.
+
+대화 기억과 이전 문서 참조의 수정 후보(PR #80)를 구현·독립 검증했다. main 병합과 운영 RAG 반영은 human 승인 대기다.
 
 RAG 503을 운영에서 복구했고, 재발 방지 PR #73을 human 승인 후 main에 병합했다.
 기존 primary 경로에서 별도 override 없는 Compose 전체 기동과 외부 게스트 채팅을 확인했다.
@@ -60,6 +62,34 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
   구현 및 독립 검증 중이다. 초기 문서/조직 연결 수나 개별 테스트 통과를 최종 완료로 세지 않는다.
 - 현재 수집 범위·미지원 구조·추출 실패·미연결 정보·검색 회귀를 따로 기록한다.
   실제 전체 원천 수집, 사람 판정 답변 품질, 운영 데이터 적용 및 배포는 완료되지 않았다.
+
+## 2026-10-17 대화 기억·문서 후속 질문 수정 후보
+
+- 최신 `origin/main=8411b22`에서 만든 `fix/conversation-memory`의 `c97c9f0`,
+  [PR #80](https://github.com/won172/2025-2-OSSProj-renux-03/pull/80). 현재 **Review**이며 main 병합·운영 반영 전이다.
+  primary의 기존 데이터·vectorizer·staff review 변경은 보존했다.
+- 실행 중이던 코드의 Redis 이력 초기화가 `'dict' object has no attribute 'index'`로 실패하고,
+  요청마다 새 임시 이력을 만들어 같은 방의 맥락을 잃는 경로를 격리 Redis에서 재현했다.
+  dict/list 응답 호환 어댑터가 기존 JSON·키·인덱스를 유지하고, 세션별 bounded fallback과
+  안정적인 메시지 ID·원자적 저장·원래 TTL로 장애 복구 및 lost-ack 재시도의 중복을 방지한다.
+- 단어가 겹치지 않는 명시적 후속 질문, 문서 번호·제목 참조, 짧은 신청 조건 질문을 연결한다.
+  최신 학번·학기·캠퍼스·학과 정정을 다음 질문에도 유지하며, 이전 출처는 현재 공식 자료를
+  다시 검색하는 단서로만 쓴다. 문서 대상이 모호하면 번호·제목을 묻고, 새 주제와 공지 열람 권한 경계는 보존한다.
+- 생성 후보의 grounding 전 저장을 제거했다. 검증된 최종 생성 답변에만 출처 단서를 보존하며,
+  실패·미확인 후보의 사실을 이력으로 재사용하지 않는다. 검색·생성 및 ask/stream 경로를 함께 검사했다.
+- 구현 agent의 최종 집중 **256 passed**, 전체 빈 DB **1,853 passed / 1 skipped / 기존 경고 10개**.
+  Root의 전체 무작위 순서(`20261017`)도 **1,853 passed / 1 skipped / 기존 경고 10개**다.
+  skip은 기존 gitignored 공지 chunk·lexical 자료가 필요한 deadline recall 검사 1건이다.
+  독립 QA의 최종 집중 **233 passed**와 실제 planner·최종 scope filter를 호출한 합성 검증 **9건**이 통과했다.
+- 독립 QA가 찾은 '참고한/확인한 문서'의 서수 오인과 2학기 정정 후 1학기 자료로 되돌아가는 회귀도
+  수정 후 같은 입력으로 재확인했다. 검토한 범위에 남은 blocking finding은 없다.
+- Root는 운영과 분리한 internal Docker network의 폐기 가능한 Redis에서 실제 런타임 의존성을 사용해
+  기존 JSON 보존, 새 이력 인스턴스의 출처·인용 번호 복원, 장애 중 대화 보존, 복구·중복 방지·세션 분리를 확인했다.
+  최종 코드의 9개 SHA-256과 QA snapshot이 일치하며 secret/staged diff 검사가 통과했다.
+- 최근 20턴을 조회하고 프로세스 로컬 완충은 1,000세션·유휴 1시간으로 제한한다.
+  Redis 장애 중 미동기화 이력은 프로세스 재시작·유휴 만료·용량 퇴출 시 유실될 수 있다.
+  PostgreSQL 화면 기록에서 RAG 이력을 복원하는 기능은 포함하지 않는다.
+  실제 후보 endpoint의 190문항·모델 답변 품질·물리적 기기 검증은 미실행이며, PR 골든 gate의 skip/통과를 출시 근거로 세지 않는다.
 
 ## 2026-10-16 RAG 503 운영 복구 완료
 
@@ -362,6 +392,8 @@ Status 값:
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
 | 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / QA / Orchestrator | `feat/connected-official-knowledge` | `connected-official-knowledge` | In Progress | main 빈 DB 기준선 1,779/1skip, 공개 CSV 사본·공식 URL·실제 HWP staged 검증 | 정보 내용의 조건·기간·서류·절차 연결 및 실제 검색 회귀 검증 중. 전체 수집·운영 적용 미완료 | 정보 단위 그래프·공통 ask/SSE 연결 구현 및 독립 검증 |
+
+| 동일 채팅 이력·문서 참조·조건 정정 | P1 | RAG/Backend / QA / Orchestrator | `fix/conversation-memory` | `conversation-memory` / `conversation-memory-review` | Review | 집중256·빈 DB/무작위 각1,853/1skip·독립QA233+합성9·실 Redis 격리 smoke·secret/diff | 프로세스 로컬 장애 완충의 재시작 유실 한계; 실제 후보190문항 미실행 | PR #80 human 검토·main 병합·운영 RAG 반영 승인 |
 | RAG revision·학식 published 상태 503 복구 | P0 | RAG/Backend / QA / Orchestrator | `fix/rag-lineage-recovery` | 정리 완료 | Completed | 신규 회귀 3개·RAG 1,523/1skip·QA 67·CI·6개 strict lineage·실제 기본 Compose 기동·외부 SSE·기존 PostgreSQL 793행 보존 | 물리적 전원 재부팅·전체 운영 골든 평가는 미실행 | PR #73 병합·운영 적용·503 해소 완료 |
 | Compose 단일 명령 전체 기동 | P0 | RAG/Backend / QA | `fix/compose-one-command-startup` | 정리 완료 | Completed | 후보 RAG 1,509/1skip·QA 48·CI, 최신 운영 기본 Compose 기동·ready200·외부 SSE 확인 | 엔진/물리적 전원 재부팅 자체는 미실행 | PR #68·#69 병합 및 primary·운영 반영 완료 |
 | API 기동 EF 모델·스냅샷 일치 | P0 | RAG/Backend / QA | `fix/api-model-snapshot` | 정리 완료 | Completed | 회귀 실패→통과, Release/계약, 독립 QA·CI, 격리 DB 전환/복구, 운영 백업·migration11·기존753행 보존·health/ready200 | 운영 인증·UI 최종 검증 완료 | PR #65 병합·운영 반영 완료 |
@@ -427,6 +459,16 @@ Status:
   `tests/replay/latest/results.jsonl`과 `manifest.json`은 현재 체크아웃에 없다.
 
 ## Known Issues
+
+### ISSUE-005 — 대화 기억 수정 후보의 운영 반영 대기
+
+Impact: High
+
+같은 채팅의 Redis 이력 초기화 실패와 새 임시 이력 생성, 후속 질문·문서 참조 및 조건 정정 오류를
+PR #80에서 수정·독립 검증했다. 현재 운영 반영 전이며, 로컬·fixture·격리 Redis 검증을 운영 답변 품질로 해석하지 않는다.
+
+Next Action:
+Human의 main 병합·운영 RAG 반영 승인 후 기존 Redis 기록 보존과 동일 방 연속 질문·문서 참조를 운영에서 확인한다.
 
 ### ISSUE-001 — 실제 질문의 정량 회귀 판정 근거 부족
 

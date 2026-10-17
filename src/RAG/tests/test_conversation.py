@@ -99,15 +99,27 @@ def test_어휘가_겹치는_후속_발화만_재구성_대상이다(query):
 
 @pytest.mark.parametrize("query", [
     "샤갈",
-    "자세히 알려줘",
-    "그 강의 신청해도 돼?",
-    "거기 오늘 열어?",
     "너가 예시로 짜줘",
-    "방금 뭐 물어봤지?",
+    "오늘 학식 뭐야",
+    "그럼 장학금 알려줘",
+    "이번 학기 기숙사 신청 방법 알려줘",
 ])
 def test_직전_질문과_어휘가_안_겹치면_새_주제로_취급한다(query):
     assert needs_context_rewrite(query, HISTORY) is False
     assert history_allows_context_rewrite(query, HISTORY) is False
+
+
+@pytest.mark.parametrize("query", [
+    "자세히 알려줘", "그 강의 신청해도 돼?", "거기 오늘 열어?",
+    "방금 뭐 물어봤지?", "그 문서 다시 보여줘", "그럼 신청 기간은?",
+])
+def test_explicit_references_do_not_require_shared_nouns(query):
+    # These used to be asserted independent merely for lacking lexical overlap.
+    # Explicit references must resolve context; scope/grounding still run later.
+    assert needs_context_rewrite(query, HISTORY)
+    assert history_allows_context_rewrite(query, HISTORY)
+    rewritten = rewrite_with_context(query, HISTORY)
+    assert query in rewritten and "통계학과" in rewritten
 
 
 def test_이력이_없으면_재구성하지_않는다():
