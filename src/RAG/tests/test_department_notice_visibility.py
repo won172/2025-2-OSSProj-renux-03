@@ -87,6 +87,24 @@ def test_home_briefing_keeps_department_notice_out_of_guest_and_other_major_scop
         session.close()
 
 
+
+def test_home_briefing_skips_notices_published_after_today():
+    session = _session()
+    try:
+        session.add_all(
+            [
+                Notice(board="일반공지", title="어제 공지", published_date="2026-10-17", visibility=PUBLIC_VISIBILITY),
+                Notice(board="일반공지", title="오늘 공지", published_date="2026-10-18", visibility=PUBLIC_VISIBILITY),
+                Notice(board="도서관", title="내일 운영시간", published_date="2026-10-19", visibility=PUBLIC_VISIBILITY),
+            ]
+        )
+        session.commit()
+
+        titles = [row["title"] for row in rag_service._briefing_notices(session, today="2026-10-18")]
+        assert titles == ["오늘 공지", "어제 공지"]
+    finally:
+        session.close()
+
 def test_retrieval_scope_filter_rejects_other_department_notice():
     where_filter = rag_service._notice_visibility_where_filter("통계학과")
 

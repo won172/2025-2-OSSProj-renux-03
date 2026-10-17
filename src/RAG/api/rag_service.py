@@ -1045,12 +1045,18 @@ def _briefing_notices(
     session,
     limit: int = 3,
     user_major: str | None = None,
+    today: str | None = None,
 ) -> list[dict[str, str | None]]:
-    """공개 범위 안에서만 가장 최근에 게시된 공지를 돌려준다."""
+    """공개 범위 안에서 오늘(KST)까지 게시된 공지를 최근 순으로 돌려준다.
+
+    게시일이 내일 이후인 공지(예: 다음 날 도서관 운영시간)가 '새 공지' 맨 위를 차지하지 않게 한다.
+    """
+    cutoff = today or kst_now().strftime("%Y-%m-%d")
     try:
         rows = (
             session.query(Notice)
             .filter(_visible_notice_scope(user_major))
+            .filter(Notice.published_date <= cutoff)
             .order_by(Notice.published_date.desc(), Notice.id.desc())
             .limit(limit)
             .all()
