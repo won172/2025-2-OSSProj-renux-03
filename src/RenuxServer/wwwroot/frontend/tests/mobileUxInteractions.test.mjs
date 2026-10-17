@@ -394,3 +394,23 @@ test('master/detail keeps the original list opener through resubmission and uses
     }
   } finally { if (root) flushSync(() => root.unmount()); await settle(); dom.restore(); await server.close() }
 })
+
+test('settings open the screen another page asks for (home bell → inbox) and ignore unknown screens', async () => {
+  for (const [state, expected] of [[{ screen: 'inbox' }, 'inbox'], [{ screen: 'nope' }, 'preferences'], [null, 'preferences']]) {
+    const server = await serverForTest(); const dom = testDocument(); const originalFetch = globalThis.fetch
+    let root; let router
+    try {
+      const { default: Settings } = await server.ssrLoadModule('/src/pages/settings/SettingsPage.tsx')
+      globalThis.fetch = async (input) => {
+        const url = new URL(input, 'http://localhost')
+        return new Response(JSON.stringify(url.pathname === '/notifications/preferences' ? { preferences: [] } : []))
+      }
+      router = createMemoryRouter([{ path: '/settings', element: React.createElement(Settings) }], { initialEntries: [{ pathname: '/settings', state }] })
+      root = createRoot(dom.container)
+      flushSync(() => root.render(React.createElement(RouterProvider, { router }))); await settle()
+      for (const id of ['preferences', 'deadlines', 'inbox', 'account']) {
+        assert.equal(dom.container.querySelector(`[id="settings-${id}"]`).hasAttribute('hidden'), id !== expected, `${JSON.stringify(state)} → ${id}`)
+      }
+    } finally { if (root) flushSync(() => root.unmount()); router?.dispose(); await settle(); globalThis.fetch = originalFetch; dom.restore(); await server.close() }
+  }
+})

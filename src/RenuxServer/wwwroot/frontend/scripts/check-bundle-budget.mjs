@@ -11,8 +11,9 @@ const PRECACHE_MAX_BYTES = 1_250_000
 
 const adminAsset = /^assets\/(?:admin[^/]*|Admin[^/]*|DashboardPage|ReviewPage|ContentPage|ChatLogPage|FeedbackPage|UsersPage|SystemPage|DepartmentAdminPage|UniversityOnly|TrendChart|QuickFaqModal|Modal|ui|format)-[^/]+\.(?:js|css)$/
 const nonCriticalAsset = /^assets\/dongddoki-logo-[^/]+\.png$|\.(?:otf|ttf|woff2)$/
-// Calendar is a lazy route; it is fetched on first visit and kept by the runtime asset cache.
-const lazyRouteAsset = /^assets\/CalendarPage-[^/]+\.(?:js|css)$/
+// Calendar and Today are lazy routes (with their shared calendar API chunk); they are fetched on
+// first visit and kept by the runtime asset cache.
+const lazyRouteAsset = /^assets\/(?:CalendarPage|TodayPage|calendarApi)-[^/]+\.(?:js|css)$/
 
 export function checkBundleBudget(distDir = join(projectRoot, 'dist')) {
   const html = readFileSync(join(distDir, 'index.html'), 'utf8')

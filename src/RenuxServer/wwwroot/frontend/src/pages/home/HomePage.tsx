@@ -889,7 +889,7 @@ const HomePage = () => {
       showToast(`“${deleteTarget.title}” 대화를 삭제했습니다.`)
       const wasCurrent = selectedChatId === deleteTarget.id
       setDeleteTarget(null)
-      if (wasCurrent) navigate('/')
+      if (wasCurrent) navigate('/chat')
     } catch (error) {
       console.error('Failed to delete chat', error)
       showToast('대화를 삭제하지 못했습니다. 잠시 후 다시 시도해주세요.', 'error')
@@ -992,7 +992,7 @@ const HomePage = () => {
       setChatMessages([])
       setSelectedChatId(null)
       setSelectedChatTitle(null)
-      navigate('/')
+      navigate('/chat')
       showToast('로그아웃했습니다.')
     } catch (error) {
       console.error('Failed to logout', error)
@@ -1120,7 +1120,7 @@ const HomePage = () => {
         isAuthenticated={isAuthenticated}
         onNewChat={() => {
           if (isMobileLayout) closeSidebar(false)
-          navigate('/')
+          navigate('/chat')
           setChatInput('')
           window.requestAnimationFrame(() => chatInputRef.current?.focus())
         }}
@@ -1176,7 +1176,7 @@ const HomePage = () => {
                 <p>게스트 대화는 대화를 시작한 기기의 브라우저에만 저장됩니다. 로그인하면 어느 기기에서나 이어볼 수 있어요.</p>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button type="button" className="ch-btn" onClick={() => navigate('/auth/in')}>로그인</button>
-                  <button type="button" className="ch-btn ch-btn--primary" onClick={() => navigate('/')}>
+                  <button type="button" className="ch-btn ch-btn--primary" onClick={() => navigate('/chat')}>
                     새 대화 시작
                   </button>
                 </div>

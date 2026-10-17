@@ -268,7 +268,7 @@ const AdminLayout = () => {
             })}
           </nav>
           <div className="ac-sidebar__footer">
-            <Link to="/" className="ac-nav__item ac-nav__item--muted">← 챗봇으로 돌아가기</Link>
+            <Link to="/chat" className="ac-nav__item ac-nav__item--muted">← 챗봇으로 돌아가기</Link>
           </div>
         </aside>
 

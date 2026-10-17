@@ -904,8 +904,8 @@ async def notifications_dummy():
     return []
 
 
-def _briefing_meals(limit: int = 3) -> list[dict[str, str]]:
-    """오늘 운영하는 식당의 대표 코너 몇 개를 뽑는다."""
+def _todays_open_meal_rows() -> list[tuple[str, str]]:
+    """오늘 운영하는 식당의 (식당 이름, 학식 원문) 목록. 휴무·빈 메뉴는 뺀다."""
     today = kst_now().strftime("%Y-%m-%d")
     try:
         frame = load_meals_from_db()
@@ -917,19 +917,45 @@ def _briefing_meals(limit: int = 3) -> list[dict[str, str]]:
         return []
 
     todays = frame[frame["date"].astype(str).str.strip() == today]
-    results: list[dict[str, str]] = []
+    rows: list[tuple[str, str]] = []
     for _, row in todays.iterrows():
         menu_text = str(row.get("menu_text", "")).strip()
         if not menu_text or is_closed_row(row.get("is_closed", ""), menu_text):
             continue
+        rows.append((str(row.get("restaurant", "")).strip() or "학생식당", menu_text))
+    return rows
 
-        restaurant = str(row.get("restaurant", "")).strip() or "학생식당"
+
+def _briefing_meals(limit: int = 3, rows: list[tuple[str, str]] | None = None) -> list[dict[str, str]]:
+    """오늘 운영하는 식당의 대표 코너 몇 개를 뽑는다."""
+    results: list[dict[str, str]] = []
+    for restaurant, menu_text in _todays_open_meal_rows() if rows is None else rows:
         for corner in split_meal_corners(menu_text, limit):
             results.append({"corner": f"{restaurant} {corner['corner']}".strip(), "menu": corner["menu"]})
             if len(results) >= limit:
                 return results
 
     return results
+
+
+def _briefing_restaurants(
+    rows: list[tuple[str, str]] | None = None,
+    *,
+    max_restaurants: int = 8,
+    corners_per_restaurant: int = 6,
+) -> list[dict[str, object]]:
+    """오늘 운영하는 식당별 코너 목록(홈의 식당 선택용). 같은 이름의 식당은 하나로 합친다."""
+    restaurants: dict[str, list[dict[str, str]]] = {}
+    for restaurant, menu_text in _todays_open_meal_rows() if rows is None else rows:
+        if restaurant not in restaurants:
+            if len(restaurants) >= max_restaurants:
+                continue
+            restaurants[restaurant] = []
+        corners = restaurants[restaurant]
+        remaining = corners_per_restaurant - len(corners)
+        if remaining > 0:
+            corners.extend(split_meal_corners(menu_text, remaining))
+    return [{"name": name, "corners": corners} for name, corners in restaurants.items() if corners]
 
 
 def _briefing_schedules(session, limit: int = 3) -> list[dict[str, str]]:
@@ -1028,6 +1054,7 @@ def _briefing_notices(
             "title": (row.title or "").strip(),
             "url": row.detail_url,
             "publishedAt": row.published_date,
+            "board": (row.board or "").strip() or None,
         }
         for row in rows
     ]
@@ -1042,9 +1069,12 @@ async def home_briefing(major: str | None = None):
     """
     session = SessionLocal()
     try:
+        meal_rows = _todays_open_meal_rows()
         return {
             "generatedAt": kst_now().isoformat(),
-            "meals": _briefing_meals(),
+            "meals": _briefing_meals(rows=meal_rows),
+            # 홈의 식당 선택용(추가 필드). 기존 meals는 채팅 첫 화면 브리핑이 그대로 쓴다.
+            "restaurants": _briefing_restaurants(meal_rows),
             "schedules": _briefing_schedules(session),
             "notices": _briefing_notices(session, user_major=major),
         }
