@@ -18,6 +18,7 @@ static public class HomeApis
     {
         generatedAt = (string?)null,
         meals = Array.Empty<object>(),
+        restaurants = Array.Empty<object>(),
         schedules = Array.Empty<object>(),
         notices = Array.Empty<object>(),
     };

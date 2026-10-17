@@ -120,3 +120,87 @@ def test_홈_브리핑과_직접답변은_학식_csv가_아닌_정본을_읽는�
     rows = rag_service._load_meal_rows_for_direct_answer()
     assert len(rows) == 1
     assert rows[0].restaurant == "학생식당"
+
+
+def test_식당별_코너_목록은_같은_식당을_합치고_상한을_지킨다():
+    import api.rag_service as rag_service
+
+    rows = [
+        ("경영관 D-Flex", "[중식 A 6,500원] 쌀밥 치킨커틀렛 / [중식 B 7,500원] 볶음밥"),
+        ("상록원 2층", "[중식] 김치찌개"),
+        ("경영관 D-Flex", "[석식 6,500원] 쌀밥 제육볶음"),
+        ("상록원 3층", "[중식] 우동"),
+    ]
+
+    restaurants = rag_service._briefing_restaurants(rows, max_restaurants=2, corners_per_restaurant=2)
+
+    assert restaurants == [
+        {
+            "name": "경영관 D-Flex",
+            "corners": [
+                {"corner": "중식 A 6,500원", "menu": "쌀밥 치킨커틀렛"},
+                {"corner": "중식 B 7,500원", "menu": "볶음밥"},
+            ],
+        },
+        {"name": "상록원 2층", "corners": [{"corner": "중식", "menu": "김치찌개"}]},
+    ]
+
+
+def test_홈_브리핑은_기존_meals를_유지하고_식당별_목록과_공지_게시판을_더한다(monkeypatch):
+    import api.rag_service as rag_service
+
+    today = rag_service.kst_now().strftime("%Y-%m-%d")
+    canonical = pd.DataFrame([
+        {"date": today, "restaurant": "학생식당", "menu_text": "[중식] 김치찌개 / [석식] 제육", "is_closed": "0"},
+        {"date": today, "restaurant": "교직원식당", "menu_text": "휴무", "is_closed": "1"},
+    ])
+    monkeypatch.setattr(rag_service, "load_meals_from_db", lambda: canonical)
+    monkeypatch.setattr(rag_service, "_briefing_schedules", lambda session: [])
+
+    class _Notice:
+        title = " 장학 신청 안내 "
+        detail_url = "https://www.dongguk.edu/article/1"
+        published_date = "2026-10-16"
+        board = "장학공지"
+
+    class _Query:
+        def filter(self, *args):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def limit(self, *args):
+            return self
+
+        def all(self):
+            return [_Notice()]
+
+    class _Session:
+        def query(self, *args):
+            return _Query()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(rag_service, "SessionLocal", _Session)
+
+    import asyncio
+
+    briefing = asyncio.run(rag_service.home_briefing())
+
+    assert briefing["meals"] == [
+        {"corner": "학생식당 중식", "menu": "김치찌개"},
+        {"corner": "학생식당 석식", "menu": "제육"},
+    ]
+    assert briefing["restaurants"] == [
+        {"name": "학생식당", "corners": [{"corner": "중식", "menu": "김치찌개"}, {"corner": "석식", "menu": "제육"}]}
+    ]
+    assert briefing["notices"] == [
+        {
+            "title": "장학 신청 안내",
+            "url": "https://www.dongguk.edu/article/1",
+            "publishedAt": "2026-10-16",
+            "board": "장학공지",
+        }
+    ]

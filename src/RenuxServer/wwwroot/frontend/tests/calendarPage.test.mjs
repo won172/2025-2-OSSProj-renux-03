@@ -28,7 +28,7 @@ async function withCalendar(respond, run, { desktop = false } = {}) {
     }
     router = createMemoryRouter([
       { path: '/calendar/*', element: React.createElement(CalendarPage) },
-      { path: '/', element: React.createElement('p', null, 'HOME') },
+      { path: '/chat', element: React.createElement('p', null, 'CHAT') },
     ], { initialEntries: ['/calendar'] })
     root = createRoot(dom.container)
     flushSync(() => root.render(React.createElement(RouterProvider, { router })))
@@ -129,7 +129,7 @@ test('detail route shows evidence and source, and 질문 opens chat with a prefi
     assert.equal(detail.textContent.includes('저장'), false, 'no save/star control yet')
     click(button(dom.container, '이 일정 질문하기'))
     await settle()
-    assert.equal(router.state.location.pathname, '/')
+    assert.equal(router.state.location.pathname, '/chat')
     assert.equal(router.state.location.state.prefillQuestion, '중간고사 시간표 일정 자세히 알려줘')
   })
 })

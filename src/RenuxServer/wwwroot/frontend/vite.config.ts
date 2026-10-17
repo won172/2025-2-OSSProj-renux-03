@@ -49,8 +49,9 @@ export default defineConfig(({ mode }) => {
           globIgnores: [
             '**/assets/dongddoki-logo-*.png',
             '**/assets/{admin*,Admin*,DashboardPage*,ReviewPage*,ContentPage*,ChatLogPage*,FeedbackPage*,UsersPage*,SystemPage*,DepartmentAdminPage*,UniversityOnly*,TrendChart*,QuickFaqModal*,StaffRefreshPreview*,display-*,Modal-*,ui-*,format-*}.{js,css}',
-            // 캘린더 화면은 열 때 받아 런타임 캐시(dongttok-assets)에 둔다. 사전 캐시 예산 밖이다.
-            '**/assets/CalendarPage-*.{js,css}',
+            // 캘린더·오늘 홈 화면과 둘이 함께 쓰는 캘린더 API 청크는 열 때 받아 런타임 캐시(dongttok-assets)에
+            // 둔다. 사전 캐시 예산 밖이다.
+            '**/assets/{CalendarPage,TodayPage,calendarApi}-*.{js,css}',
           ],
           runtimeCaching: [
             {
@@ -101,10 +102,18 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        // 화면 경로(/chat, /chat/:id)와 API(/chat/stream 등)가 접두사를 공유한다. /admin과 같은 방식.
         '/chat': {
           target: DEV_PROXY_TARGET,
           changeOrigin: true,
           secure: false,
+          bypass: (req) => {
+            const accept = req.headers.accept ?? ''
+            if (req.method === 'GET' && accept.includes('text/html')) {
+              return '/index.html'
+            }
+            return undefined
+          },
         },
         '/admin': {
           target: DEV_PROXY_TARGET,

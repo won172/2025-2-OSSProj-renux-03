@@ -11,6 +11,8 @@ const SettingsPage = lazy(() => importWithRecovery(() => import('./pages/setting
 const PrivacyPolicyPage = lazy(() => importWithRecovery(() => import('./pages/legal/PrivacyPolicyPage')))
 // 캘린더는 별도 청크·CSS로 지연 로드하고 PWA 사전 캐시에서 제외한다(vite.config.ts globIgnores).
 const CalendarPage = lazy(() => importWithRecovery(() => import('./pages/calendar/CalendarPage')))
+// 앱의 첫 화면('/'). 채팅은 '/chat'으로 옮겼다.
+const TodayPage = lazy(() => importWithRecovery(() => import('./pages/today/TodayPage')))
 
 const AdminLayout = lazy(() => importWithRecovery(() => import('./components/admin/AdminLayout')))
 const AdminIndex = lazy(() => importWithRecovery(() => import('./components/admin/AdminIndex')))
@@ -37,9 +39,10 @@ function AppShell() {
 // A data router supplies navigation blocking for unsaved settings, including browser Back.
 const router = createBrowserRouter(createRoutesFromElements(
   <Route element={<AppShell />}>
-    <Route path="/" element={<HomePage />} />
+    <Route path="/" element={<TodayPage />} />
     <Route path="/auth/in" element={<SignInPage />} />
     <Route path="/auth/up" element={<SignUpPage />} />
+    <Route path="/chat" element={<HomePage />} />
     <Route path="/chat/:chatId" element={<HomePage />} />
     <Route path="/settings" element={<SettingsPage />} />
     <Route path="/privacy" element={<PrivacyPolicyPage />} />

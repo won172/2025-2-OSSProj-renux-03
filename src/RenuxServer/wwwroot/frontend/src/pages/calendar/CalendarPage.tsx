@@ -185,7 +185,7 @@ const CalendarPage = () => {
     else next.add(kind)
     return next
   })
-  const ask = (event: CalendarEvent) => navigate('/', { state: { prefillQuestion: buildCalendarQuestion(event) } })
+  const ask = (event: CalendarEvent) => navigate('/chat', { state: { prefillQuestion: buildCalendarQuestion(event) } })
   const back = () => {
     if (location.key !== 'default') navigate(-1)
     else navigate('/calendar', { replace: true })

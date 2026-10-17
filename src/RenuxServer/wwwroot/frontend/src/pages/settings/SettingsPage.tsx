@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useBlocker, useNavigate } from 'react-router-dom'
+import { Link, useBlocker, useLocation, useNavigate } from 'react-router-dom'
 import { apiFetch, type ApiError } from '../../api/client'
 import AppNav from '../../components/AppNav'
 import Pagination from '../../components/Pagination'
@@ -51,7 +51,10 @@ const isApiError = (error: unknown): error is ApiError => error instanceof Error
 
 const SettingsPage = () => {
   const navigate = useNavigate()
-  const [screen, setScreen] = useState<Screen>('preferences')
+  // 홈의 알림 벨처럼 다른 화면이 특정 화면(예: 알림함)을 바로 열 수 있다.
+  const requestedScreen = (useLocation().state as { screen?: unknown } | null)?.screen
+  const [screen, setScreen] = useState<Screen>(() =>
+    SCREENS.some((item) => item.id === requestedScreen) ? (requestedScreen as Screen) : 'preferences')
   const [savedPreferences, setSavedPreferences] = useState<NotificationPreference[]>([])
   const [notificationBusy, setNotificationBusy] = useState(false)
   const [deadlinePage, setDeadlinePage] = useState(0)
