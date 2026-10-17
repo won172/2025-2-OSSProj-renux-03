@@ -10,7 +10,10 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass
+
+from src.utils.query_years import extract_explicit_years
 
 
 # ---------------------------------------------------------------- 스몰톡
@@ -116,6 +119,7 @@ _LEXICAL_STOPWORDS = {
     "오늘", "지금", "현재", "요즘", "언제", "어디", "뭐", "무엇", "누구",
     "알려줘", "알려주세요", "말해줘", "보여줘", "해줘", "해주세요", "자세히",
     "가능", "관련", "대한", "대해", "질문", "정보",
+    "문서", "자료", "내용", "기간", "방법", "신청",
 }
 _KOREAN_PARTICLE_SUFFIXES = (
     "으로부터", "에서부터", "에게서", "이라도", "이라면", "이라고", "에서는",
@@ -161,9 +165,237 @@ def has_lexical_overlap(left: str, right: str) -> bool:
 
 
 def history_allows_context_rewrite(query: str, history_text: str) -> bool:
-    """Allow history only when the current and previous user topics overlap."""
+    """Explicit references may omit nouns; standalone topics still need overlap."""
     previous = extract_last_user_question(history_text)
-    return bool(previous and has_lexical_overlap(query, previous))
+    return bool(previous and detect_smalltalk(query) is None and (
+        has_lexical_overlap(query, previous) or _explicit_reference(query)
+    ))
+
+
+def _explicit_reference(query: str) -> bool:
+    text = query.strip()
+    return bool(
+        re.search(r"(?:그|이|저|해당)\s*(?:문서|자료|공지|규정|과목|강의|장학금|공모전|프로그램|일정)|"
+                  r"그거|그것|그건|거기|그때|아까|방금|위에서", text)
+        or re.fullmatch(r"(?:그럼\s*|그러면\s*)?(?:좀\s*)?(?:자세히|더|구체적으로|다시)\s*"
+                        r"(?:알려\s*줘|알려주세요|설명해\s*줘|보여\s*줘)[?.!\s]*", text)
+        or re.fullmatch(r"(?:그럼|그러면)\s*(?:신청\s*)?(?:기간|방법|조건|대상|마감|언제|어디|비용|내용).*", text)
+        or re.match(r"(?:아니[,\s]*|정정[,\s]*)(?:\d{2,4}\s*(?:학번|학년도|년)|.*(?:말고|아니라|기준))", text)
+        or _SLOT_FOLLOWUP.fullmatch(text)
+        or _document_numbers(text) is not None
+        or _generic_document_reference(text)
+        or (re.search(r"말고|아니라|아니고", text) and any(_scopes(text).values()))
+    )
+
+
+_SLOT_FOLLOWUP = re.compile(
+    r"(?:(?:그럼|그러면)\s*)?(?:(?:신청|접수|지원|이수|수강)\s*)?"
+    r"(?:조건|기간|마감|대상|자격|방법|절차|비용|장소|제출\s*서류)"
+    r"(?:은|는|도|이|가)?\s*(?:언제야|언제|어떻게|뭐야|알려줘|알려주세요)?[?.!\s]*"
+)
+_YEAR_SCOPE = re.compile(
+    r"(?<!\d)(20\d{2}|\d{2}(?=\s*(?:학번|학년도|[-./]\s*[12])))"
+    r"(?:\s*(?:학번|학년도|년)|[-./]\s*[12](?:학기)?)?(?!\d)"
+)
+_CAMPUS_SCOPE = re.compile(
+    r"(?:WISE|와이즈|경주|서울|바이오메디|바이오메디컬|BMC)\s*(?:캠퍼스)?", re.IGNORECASE
+)
+_MAJOR_SCOPE = re.compile(r"[가-힣A-Za-z·]+(?:학과|학부|전공)")
+_SEMESTER_SCOPE = re.compile(
+    r"(?<!\d)(?:[12]\s*학기|[하동]계(?:\s*계절학기)?|여름(?:\s*계절학기)?|겨울(?:\s*계절학기)?|계절학기)"
+)
+
+
+def effective_scope_query(query: str) -> str:
+    """Exclude explicitly negated values when deriving filters, keeping raw text elsewhere."""
+    return re.sub(r"\S+\s*(?:말고|아니라|아니고)\s*", "", query)
+
+
+def _scopes(text: str) -> dict[str, set]:
+    text = effective_scope_query(text)
+    campus_aliases = {"서울": "seoul", "와이즈": "wise", "경주": "wise",
+                      "바이오메디": "bmc", "바이오메디컬": "bmc"}
+    campuses = {re.sub(r"\s+|캠퍼스", "", value).lower() for value in _CAMPUS_SCOPE.findall(text)}
+    return {
+        "years": extract_explicit_years(text),
+        "semester": {_semester(value) for value in _SEMESTER_SCOPE.findall(text)} | {
+            value + "학기" for value in re.findall(r"\b(?:20\d{2}|\d{2})\s*[-./]\s*([12])(?!\d)", text)
+        },
+        "campus": {campus_aliases.get(value, value) for value in campuses},
+        "major": set(_MAJOR_SCOPE.findall(text)),
+    }
+
+
+def _semester(value: str) -> str:
+    compact = re.sub(r"\s+", "", value)
+    if compact.startswith(("하계", "여름")):
+        return "summer"
+    if compact.startswith(("동계", "겨울")):
+        return "winter"
+    return compact
+
+
+def _document_numbers(query: str) -> list[int] | None:
+    numbers = re.findall(r"\[\s*문서\s*(\d+)\s*\]|(?<![0-9A-Za-z가-힣])문서\s*(\d+)\s*번", query)
+    result = [int(left or right) for left, right in numbers]
+    ordinals = {"첫": 1, "첫째": 1, "두": 2, "둘째": 2, "세": 3, "셋째": 3,
+                "네": 4, "넷째": 4, "다섯": 5, "여섯": 6}
+    # An ordinal is a token, never a syllable inside 참고한/확인한/연구세.
+    for word in re.findall(r"(?<![0-9A-Za-z가-힣])(첫째|둘째|셋째|넷째|첫|두|세|네|다섯|여섯|\d+)"
+                           r"\s*(?:번째|번)\s*(?:문서|자료)", query):
+        result.append(int(word) if word.isdigit() else ordinals[word])
+    return list(dict.fromkeys(result)) if result else None
+
+
+def _generic_document_reference(query: str) -> bool:
+    if re.search(r"(?:문서|자료)들|(?:모든|전체|각)\s*(?:문서|자료)", query):
+        return False
+    return bool(re.search(
+        r"(?<![0-9A-Za-z가-힣])(?:그|이|저|해당|이전(?:에)?|앞서|아까|방금)"
+        r"(?:\s+|(?=문서|자료|참고|확인)).*?(?:문서|자료)", query
+    ))
+
+
+def _history_turns(history_text: str) -> list[dict]:
+    turns: list[dict] = []
+    for line in history_text.splitlines():
+        question = extract_last_user_question(line)
+        if question:
+            turns.append({"question": question, "sources": [], "lines": [line]})
+        elif turns:
+            turns[-1]["lines"].append(line)
+            if line.startswith("이전 출처(검색 단서): "):
+                try:
+                    cue = json.loads(line.split(": ", 1)[1])
+                    if isinstance(cue, dict):
+                        turns[-1]["sources"].append(cue)
+                except (ValueError, TypeError):
+                    pass
+    return turns
+
+
+def _referenced_thread(query: str, history_text: str) -> list[dict]:
+    if not history_allows_context_rewrite(query, history_text):
+        return []
+    turns = _history_turns(history_text)
+    if not turns:
+        return []
+    end = len(turns)
+    # A named older document can be referenced beyond the old three-turn window.
+    if _FOLLOW_UP_MARKERS.search(query) and _document_numbers(query) is None:
+        for index in range(end - 1, -1, -1):
+            turn = turns[index]
+            if any(has_lexical_overlap(query, str(cue.get("title", ""))) for cue in turn["sources"]):
+                end = index + 1
+                break
+    start = end - 1
+    while start > 0 and (detect_smalltalk(turns[start]["question"]) or _explicit_reference(turns[start]["question"])):
+        start -= 1
+    return turns[start:end]
+
+
+def _resolved_context(query: str, history_text: str) -> tuple[list[str], list[dict], bool]:
+    turns = _referenced_thread(query, history_text)
+    effective = {"years": set(), "semester": set(), "campus": set(), "major": set()}
+    for text in [turn["question"] for turn in turns] + [query]:
+        for kind, values in _scopes(text).items():
+            if values:
+                effective[kind] = values
+
+    def clean(text: str) -> str:
+        # Remove a whole superseded constraint, including its suffix. Never leave
+        # an orphan '학번'/'학년도', and never treat a title as permission for a year.
+        text = effective_scope_query(text)
+        def clean_year(match):
+            if not extract_explicit_years(match.group()) <= effective["years"]:
+                return ""
+            compact = re.fullmatch(r"(20\d{2}|\d{2})\s*[-./]\s*([12])(?:학기)?", match.group())
+            if compact and effective["semester"] and compact.group(2) + "학기" not in effective["semester"]:
+                year = int(compact.group(1))
+                return f"{year if year >= 2000 else year + 2000}학년도"
+            return match.group()
+        text = _YEAR_SCOPE.sub(clean_year, text)
+        for pattern, kind in ((_SEMESTER_SCOPE, "semester"), (_CAMPUS_SCOPE, "campus"), (_MAJOR_SCOPE, "major")):
+            if effective[kind]:
+                text = pattern.sub(lambda m: m.group() if _scopes(m.group())[kind] <= effective[kind] else "", text)
+        return " ".join(text.split())
+
+    questions = [clean(turn["question"]) for turn in turns if not detect_smalltalk(turn["question"])]
+    sources = next((turn["sources"] for turn in reversed(turns) if turn["sources"]), [])
+    numbers = _document_numbers(query)
+    if numbers is not None:
+        # Citation numbers belong to the latest referenced answer. Missing or
+        # duplicated labels cannot safely select a document.
+        matches = [cue for cue in sources if cue.get("citation_number") in numbers]
+        if len(numbers) != 1 or len(matches) != 1:
+            return questions, [], True
+        sources = matches
+        # A multi-document original question must not pull source 1 back into a
+        # request for source 2. The chosen title is the discovery query instead.
+        questions = []
+    else:
+        selections = [index for index, turn in enumerate(turns) if _document_numbers(turn["question"]) is not None]
+        if selections:
+            questions = [clean(turn["question"]) for turn in turns[selections[-1]:]]
+        if _FOLLOW_UP_MARKERS.search(query):
+            named = [cue for cue in sources if has_lexical_overlap(query, str(cue.get("title", "")))]
+            if len(named) == 1:
+                sources, questions = named, []
+    safe_sources = []
+    for cue in sources:
+        # Retain identity only when its title does not contradict newer scope.
+        title = str(cue.get("title", ""))
+        scopes = _scopes(title)
+        if any(effective[kind] and values and not values <= effective[kind]
+               for kind, values in scopes.items()):
+            continue
+        campus = str(cue.get("campus_scope", "")).lower()
+        if effective["campus"] and campus in {"seoul", "bmc", "wise"} and campus not in effective["campus"]:
+            continue
+        safe_sources.append({**cue, "title": clean(title)})
+    # A document selection replaces the multi-document topic, but user-supplied
+    # scope must survive that selection and any later noun-free follow-up.
+    constraints = []
+    for turn in turns:
+        for pattern in (_YEAR_SCOPE, _SEMESTER_SCOPE, _CAMPUS_SCOPE, _MAJOR_SCOPE):
+            constraints.extend(clean(match.group()) for match in pattern.finditer(turn["question"]))
+    scope_text = " ".join(dict.fromkeys(value for value in constraints if value))
+    if scope_text and not any(scope_text in question for question in questions):
+        questions.append(scope_text)
+    documents = {cue.get("document_key") or cue.get("doc_id") or cue.get("url") or cue.get("title")
+                 or cue.get("chunk_id") or cue.get("source_ref") for cue in safe_sources}
+    ambiguous = (numbers is not None and not safe_sources) or (
+        _generic_document_reference(query) and len(documents) > 1
+    )
+    return questions, safe_sources, bool(ambiguous)
+
+
+def followup_source_clarification(query: str, history_text: str) -> bool:
+    return (_document_numbers(query) is not None or _generic_document_reference(query)) and (
+        not history_allows_context_rewrite(query, history_text) or _resolved_context(query, history_text)[2]
+    )
+
+
+def relevant_history(query: str, history_text: str) -> str:
+    """Expose effective user constraints and source cues, never old answer facts."""
+    if not history_allows_context_rewrite(query, history_text):
+        return ""
+    questions, sources, ambiguous = _resolved_context(query, history_text)
+    if ambiguous:
+        return ""
+    return "\n".join([f"사용자: {question}" for question in questions] + [
+        "이전 출처(검색 단서): " + json.dumps(cue, ensure_ascii=False) for cue in sources
+    ])
+
+
+def conversation_recall(query: str, history_text: str) -> SmalltalkReply | None:
+    if re.fullmatch(r"(?:방금|아까|직전에?)\s*(?:내가\s*)?(?:뭐|무엇을)\s*(?:물어봤지|물었지|질문했지)[?.!\s]*", query.strip()):
+        previous = extract_last_user_question(history_text)
+        return SmalltalkReply(
+            f'직전에 "{previous}"라고 물어보셨어요.' if previous else "이 채팅에서 확인할 수 있는 이전 질문이 없어요.",
+            "conversation_recall",
+        )
+    return None
 
 
 def preserve_original_query(query: str, candidate: str) -> str | None:
@@ -194,11 +426,11 @@ def needs_context_rewrite(query: str, history_text: str) -> bool:
     # 스몰톡은 검색 대상이 아니므로 재구성하지 않는다.
     if detect_smalltalk(text) is not None:
         return False
-    # 짧다는 이유만으로 직전 주제를 상속하지 않는다. 현재 발화와 직전 사용자
-    # 질문 사이에 실질 어휘가 없으면 새 주제로 취급한다.
+    # Short standalone questions do not inherit a topic. Explicit references
+    # (including noun-free elaboration) are a separate continuation signal.
     if not history_allows_context_rewrite(text, history_text):
         return False
-    if _FOLLOW_UP_MARKERS.search(text):
+    if _FOLLOW_UP_MARKERS.search(text) or _explicit_reference(text):
         return True
     # 지시어가 없어도 너무 짧으면 단독 검색이 어렵다("시험 언제 봐?" 수준은 통과).
     return len(text) <= _SHORT_UTTERANCE_LEN and "?" not in text and not _has_content_noun(text)
@@ -244,12 +476,13 @@ def rewrite_with_context(query: str, history_text: str) -> str:
     LLM 질의 분석이 이미 같은 일을 하지만, 분석이 꺼져 있거나 실패했을 때를 위한
     결정적 안전망이다. 원문을 버리지 않고 앞에 맥락을 덧붙이기만 한다.
     """
-    previous = extract_last_user_question(history_text)
-    if not previous or not has_lexical_overlap(query, previous):
+    if not history_allows_context_rewrite(query, history_text):
         return query
-    if previous.strip() == query.strip():
+    questions, sources, ambiguous = _resolved_context(query, history_text)
+    if ambiguous:
         return query
-    return f"{previous} {query}".strip()
+    parts = list(dict.fromkeys([query.strip(), *questions, *(str(cue.get("title", "")) for cue in sources)]))
+    return " ".join(part for part in parts if part).strip()
 
 
 __all__ = [
@@ -263,4 +496,8 @@ __all__ = [
     "needs_context_rewrite",
     "preserve_original_query",
     "rewrite_with_context",
+    "relevant_history",
+    "conversation_recall",
+    "followup_source_clarification",
+    "effective_scope_query",
 ]
