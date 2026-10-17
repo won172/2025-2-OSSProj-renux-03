@@ -124,6 +124,7 @@ static public class NotificationApis
         ["tuition_payment"] = "등록/납부",
         ["document_submission"] = "서류 제출",
         ["academic_schedule"] = "학사일정",
+        [SavedEventApis.Topic] = SavedEventApis.TopicLabel,
     };
 
     /// <summary>
@@ -241,7 +242,11 @@ static public class NotificationApis
 
             var preferences = await EnsurePreferencesAsync(db, userId, context.RequestAborted);
             var enabledPreferences = preferences.Where(p => p.Enabled).ToList();
-            if (enabledPreferences.Count == 0)
+            // 관심 주제를 모두 꺼도 저장한 일정의 알림은 따로 받는다.
+            var savedEvents = await db.SavedEvents
+                .Where(e => e.UserId == userId)
+                .ToListAsync(context.RequestAborted);
+            if (enabledPreferences.Count == 0 && savedEvents.Count == 0)
             {
                 return Results.Ok(new NotificationSyncResult(0, 0));
             }
@@ -251,6 +256,18 @@ static public class NotificationApis
             var now = DateTime.UtcNow;
             var dueNotifications = new List<UserNotification>();
             var upcomingMatched = 0;
+
+            // 저장한 일정의 제목·기간을 최신 후보로 맞춘 뒤 알림을 만든다. 아래 중복 처리(ChangeTracker.Clear)에
+            // 이 변경이 휩쓸리지 않도록 먼저 저장한다.
+            if (SavedEventApis.RefreshSnapshots(savedEvents, candidates, now, logger))
+            {
+                await db.SaveChangesAsync(context.RequestAborted);
+            }
+
+            foreach (var saved in savedEvents)
+            {
+                dueNotifications.AddRange(SavedEventApis.BuildDueNotifications(saved, today, now));
+            }
 
             foreach (var candidate in candidates)
             {
@@ -454,7 +471,7 @@ static public class NotificationApis
         });
     }
 
-    private static bool TryGetUserId(HttpContext context, out Guid userId)
+    internal static bool TryGetUserId(HttpContext context, out Guid userId)
     {
         userId = Guid.Empty;
         var userIdStr = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub);
@@ -705,10 +722,10 @@ static public class NotificationApis
     internal static DateOnly TodayKst()
         => DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(9)).DateTime);
 
-    private static DateTime ToUtcDateTime(DateOnly date)
+    internal static DateTime ToUtcDateTime(DateOnly date)
         => DateTime.SpecifyKind(date.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
 
-    private static string ResolveCandidateSourceId(NotificationCandidateDto candidate)
+    internal static string ResolveCandidateSourceId(NotificationCandidateDto candidate)
         => !string.IsNullOrWhiteSpace(candidate.SourceId)
             ? candidate.SourceId!
             : !string.IsNullOrWhiteSpace(candidate.ChunkId)
