@@ -1,0 +1,18 @@
+[
+  {
+    "url": "https://gsbs.dongguk.edu/",
+    "file": "actual-discovery-parent.html",
+    "raw_sha256": "df0b9b5bdfbb49be67f6816305c015969cc47113f14290128824f0b5ae0a694e",
+    "bytes": 163057,
+    "observed_at": "2026-10-17T07:35:17.051858+00:00",
+    "http_status": 200
+  },
+  {
+    "url": "https://gsbs.dongguk.edu/resources/site/gsbs/resource/pdf/2023_cover_letter.hwp",
+    "file": "actual-discovery-child.hwp",
+    "raw_sha256": "19551992c228ba2d2c81ddbe0124e237018cef1193c70a5e11f9f1cf18f3d620",
+    "bytes": 33792,
+    "observed_at": "2026-10-17T08:36:49.916759+00:00",
+    "http_status": 200
+  }
+]

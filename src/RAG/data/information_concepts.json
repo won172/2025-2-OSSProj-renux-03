@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "review_status": "explicit terminology navigation only; aliases assert no eligibility or authority",
+  "concepts": [
+    {
+      "key": "leave",
+      "name": "휴학",
+      "kind": "academic_process",
+      "aliases": [
+        "휴학",
+        "일반휴학",
+        "질병휴학",
+        "군휴학",
+        "병사휴학",
+        "육아휴학",
+        "창업휴학"
+      ]
+    },
+    {
+      "key": "return",
+      "name": "복학",
+      "kind": "academic_process",
+      "aliases": [
+        "복학"
+      ]
+    },
+    {
+      "key": "transfer_major",
+      "name": "전과",
+      "kind": "academic_process",
+      "aliases": [
+        "전과",
+        "전공변경"
+      ]
+    },
+    {
+      "key": "major_selection",
+      "name": "전공결정",
+      "kind": "academic_process",
+      "aliases": [
+        "전공결정",
+        "전공 결정",
+        "전공배정",
+        "전공 배정",
+        "전공미결정 학부생 전공신청"
+      ]
+    },
+    {
+      "key": "registration",
+      "name": "수강신청",
+      "kind": "academic_process",
+      "aliases": [
+        "수강신청",
+        "수강 신청",
+        "수강정정",
+        "수강 정정",
+        "수강취소"
+      ]
+    },
+    {
+      "key": "tuition_payment",
+      "name": "등록금 납부",
+      "kind": "academic_process",
+      "aliases": [
+        "등록금 납부",
+        "등록금납부",
+        "등록방법",
+        "등록절차"
+      ]
+    },
+    {
+      "key": "tuition_refund",
+      "name": "등록금 반환",
+      "kind": "academic_process",
+      "aliases": [
+        "등록금 반환",
+        "등록금반환",
+        "등록금 환불",
+        "등록금환불"
+      ]
+    },
+    {
+      "key": "graduation",
+      "name": "졸업요건",
+      "kind": "academic_requirement",
+      "aliases": [
+        "졸업요건",
+        "졸업 요건",
+        "졸업기준",
+        "졸업 기준",
+        "졸업이수요건",
+        "졸업 이수",
+        "졸업학점",
+        "수료 및 졸업"
+      ]
+    },
+    {
+      "key": "general_education",
+      "name": "교양 이수",
+      "kind": "academic_requirement",
+      "aliases": [
+        "교양교육과정 이수",
+        "교양 이수",
+        "교양이수"
+      ]
+    },
+    {
+      "key": "retake",
+      "name": "재수강",
+      "kind": "academic_process",
+      "aliases": [
+        "재수강"
+      ]
+    },
+    {
+      "key": "double_major",
+      "name": "복수전공",
+      "kind": "academic_process",
+      "aliases": [
+        "복수전공",
+        "복수 전공"
+      ]
+    },
+    {
+      "key": "minor",
+      "name": "부전공",
+      "kind": "academic_process",
+      "aliases": [
+        "부전공"
+      ]
+    },
+    {
+      "key": "certificate",
+      "name": "증명서 발급",
+      "kind": "academic_process",
+      "aliases": [
+        "증명서발급",
+        "증명서 발급"
+      ]
+    },
+    {
+      "key": "seasonal",
+      "name": "계절학기",
+      "kind": "academic_process",
+      "aliases": [
+        "계절학기"
+      ]
+    },
+    {
+      "key": "meal",
+      "name": "식단",
+      "kind": "meal_offering",
+      "aliases": [
+        "학식",
+        "식단",
+        "메뉴",
+        "상록원",
+        "점심",
+        "학생식당"
+      ]
+    },
+    {
+      "key": "academic_warning",
+      "name": "성적 경고",
+      "kind": "academic_process",
+      "aliases": [
+        "성적 경고",
+        "성적경고"
+      ]
+    },
+    {
+      "key": "multiple_majors",
+      "name": "다전공",
+      "kind": "academic_process",
+      "aliases": [
+        "다전공"
+      ]
+    },
+    {
+      "key": "student_card",
+      "name": "학생증 발급",
+      "kind": "academic_process",
+      "aliases": [
+        "학생증",
+        "일반학생증"
+      ]
+    }
+  ]
+}

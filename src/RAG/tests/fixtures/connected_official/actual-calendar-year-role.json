@@ -1,0 +1,15 @@
+{
+  "source_url": "https://www.dongguk.edu/schedule/detail",
+  "snapshot_sha256": "82b2e231c39c5fce2b546d764b6c5d1635e6b0132946889cb741f2a463cd4de8",
+  "events": [
+    {
+      "학년도": "2026",
+      "구분": "학사일정",
+      "내용": "2027년 봄 졸업대상자 영어성적 제출 마감",
+      "주관부서": "다르마칼리지 학사운영실",
+      "start": "2027-01-15",
+      "end": "2027-01-15"
+    }
+  ],
+  "raw_sha256": "d1c7d65c3acf7dd6ad1bbb9e5d1e5cd15f7f101b721d5b0166210aced5439c69"
+}

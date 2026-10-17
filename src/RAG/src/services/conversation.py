@@ -190,7 +190,7 @@ def _explicit_reference(query: str) -> bool:
 
 
 _SLOT_FOLLOWUP = re.compile(
-    r"(?:(?:그럼|그러면)\s*)?(?:(?:신청|접수|지원|이수|수강)\s*)?"
+    r"(?:(?:그럼|그러면|그|해당)\s*)?(?:(?:신청|접수|지원|이수|수강)\s*)?"
     r"(?:조건|기간|마감|대상|자격|방법|절차|비용|장소|제출\s*서류)"
     r"(?:은|는|도|이|가)?\s*(?:언제야|언제|어떻게|뭐야|알려줘|알려주세요)?[?.!\s]*"
 )
@@ -253,7 +253,7 @@ def _generic_document_reference(query: str) -> bool:
         return False
     return bool(re.search(
         r"(?<![0-9A-Za-z가-힣])(?:그|이|저|해당|이전(?:에)?|앞서|아까|방금)"
-        r"(?:\s+|(?=문서|자료|참고|확인)).*?(?:문서|자료)", query
+        r"(?:\s+|(?=문서|자료|참고|확인|첨부)).*?(?:문서|자료|첨부파일)", query
     ))
 
 
@@ -390,10 +390,11 @@ def followup_source_clarification(query: str, history_text: str) -> bool:
     )
 
 
-SourceDataset = Literal["notices", "rules", "schedule", "staff", "courses", "meals"]
+SourceDataset = Literal["notices", "rules", "schedule", "staff", "courses", "meals", "guidance", "attachments"]
 _SOURCE_DOMAIN_HINTS: dict[SourceDataset, str] = {
     "notices": "학교 공지사항", "rules": "학교 학칙 규정", "schedule": "학교 학사일정",
     "staff": "학교 교직원 연락처", "courses": "학교 교과목", "meals": "학교 학식",
+    "guidance": "학교 공식 안내", "attachments": "학교 공식 첨부자료",
 }
 
 
@@ -402,6 +403,7 @@ class FollowupSourceReference:
     dataset: SourceDataset
     document_key: str | None = None
     chunk_id: str | None = None
+    attachment_child: bool = False
 
     @property
     def domain_hint(self) -> str:
@@ -440,7 +442,10 @@ def followup_source_reference(query: str, history_text: str) -> FollowupSourceRe
         return None
     if ambiguous or len(sources) != 1:
         return None
-    return _typed_source_reference(sources[0])
+    reference = _typed_source_reference(sources[0])
+    if reference is not None and re.search(r'(?:그|해당|이|저)\s*첨부파일', query):
+        return FollowupSourceReference(reference.dataset, reference.document_key, reference.chunk_id, True)
+    return reference
 
 
 def _names_source(query: str, sources: list[dict]) -> bool:

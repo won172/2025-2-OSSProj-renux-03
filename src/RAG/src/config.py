@@ -254,6 +254,11 @@ RAG_SINGLE_QUERY_RETRIEVAL = os.getenv("RAG_SINGLE_QUERY_RETRIEVAL", "1") == "1"
 # projection before lexical/vector retrieval. Missing or stale evidence falls
 # back to the ordinary hybrid path.
 RAG_STRUCTURED_RETRIEVAL_ENABLED = os.getenv("RAG_STRUCTURED_RETRIEVAL_ENABLED", "1") == "1"
+# Read-only canonical document graph supplement, shared by ask and SSE.
+# Publication remains a separate approved operation; missing/stale projections
+# fall back to the ordinary retrieval path.
+RAG_CONNECTED_RETRIEVAL_ENABLED = os.getenv("RAG_CONNECTED_RETRIEVAL_ENABLED", "0") == "1"
+RAG_CONNECTED_MAINTENANCE_ENABLED = os.getenv('RAG_CONNECTED_MAINTENANCE_ENABLED','0') == '1'
 # 온톨로지 shadow는 기존 검색과 독립적으로 후보를 관찰한다. candidate blend는
 # 별도 flag이며 기본 비활성이다. 켜더라도 검증된 route와 작은 문서 quota 안에서만
 # 기존 필터/evidence selector 앞 shortlist에 후보를 추가한다.
