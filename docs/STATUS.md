@@ -51,6 +51,9 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
   문제와 URL 전송·미입력 표시·curriculum/offering 보존의 후속 수정을 검토했다.
   최종 판정은 **merge / human_review_required**다. 코드 PR에 대한 자문이며 main·운영 승인이 아니다.
   Root는 해당 JSON을 재검증했고, 이전 반례·고정 patch와 실제 증거를 별도로 보존했다.
+- 이후 더 넓은 합성 corpus에서 특정 학부 신청서의 졸업대상·등록학기 조건이 선택 근거의 qualifier에 빠지는 경우를 재현했다.
+  기존 `a456d8f`에 대한 병합 권고는 당시 고정 사본의 검토 기록이며, 현재 병합은 보류하고 같은 PR #85에서 수정·재검토 중이다.
+  실제 모델 오답/운영 노출을 관측한 판정은 아니다. 기존 main/Vercel 승인 요청으로 이 구버전을 병합하지 않는다.
 
 ### 로컬 검증 범위
 
@@ -443,7 +446,7 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `test/integration-connected-information` ([PR #85](https://github.com/won172/2025-2-OSSProj-renux-03/pull/85)) | 핵심·통합·고정 QA 사본 별도 | In Progress | 최종 Root 전체/무작위2,274/1skip·flag668·원천130·독립QA human_review_required·UI155/Root32·C#계약 | 전체 수집·실제 정본·현재 공개 CSV 합성·OCR/범위·모델/사람 평가·운영 적용 미완료 | 코드 human 검토/병합, 출처/버전 보존 합성 및 coverage 확장 |
+| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `test/integration-connected-information` ([PR #85](https://github.com/won172/2025-2-OSSProj-renux-03/pull/85)) | 핵심·통합·고정 QA 사본 별도 | In Progress | 최종 Root 전체/무작위2,274/1skip·flag668·원천130·독립QA human_review_required·UI155/Root32·C#계약 | 추가 corpus에서 신청서 적용 조건 누락 수정 중. 전체 수집·실제 정본·모델/사람 평가·운영 적용 미완료 | 조건 전달 수정·새 고정 후보 검증 후 human 검토, 출처/버전 보존 합성 |
 | 동일 채팅 이력·문서 참조·조건 정정 | P1 | RAG/Backend / QA / Orchestrator | `fix/conversation-memory`·`fix/document-reference-domain-context` | 정리 완료 | Completed | full-main1,925/1skip·이미지1,669/1skip·독립QA305·CI·공개SSE4건·Redis보존·6개lineage·13테이블/63산출물 무결성 | 최근20턴; 장애 중 미동기화 이력의 프로세스 유실 한계; 실제 후보190문항 미실행 | PR #80·#82 병합·운영 반영 및 문서 재질문 확인 완료 |
 | RAG revision·학식 published 상태 503 복구 | P0 | RAG/Backend / QA / Orchestrator | `fix/rag-lineage-recovery` | 정리 완료 | Completed | 신규 회귀 3개·RAG 1,523/1skip·QA 67·CI·6개 strict lineage·실제 기본 Compose 기동·외부 SSE·기존 PostgreSQL 793행 보존 | 물리적 전원 재부팅·전체 운영 골든 평가는 미실행 | PR #73 병합·운영 적용·503 해소 완료 |
 | Compose 단일 명령 전체 기동 | P0 | RAG/Backend / QA | `fix/compose-one-command-startup` | 정리 완료 | Completed | 후보 RAG 1,509/1skip·QA 48·CI, 최신 운영 기본 Compose 기동·ready200·외부 SSE 확인 | 엔진/물리적 전원 재부팅 자체는 미실행 | PR #68·#69 병합 및 primary·운영 반영 완료 |
