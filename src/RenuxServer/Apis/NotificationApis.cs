@@ -40,7 +40,24 @@ public record NotificationCandidateDto(
     double? Confidence,
     [property: JsonPropertyName("date_source")] string? DateSource,
     Dictionary<string, string?>? Metadata
-);
+)
+{
+    /// <summary>
+    /// 날짜의 근거 문구. RAG가 아직 보내지 않을 수 있는 선택 필드라 형식을 넓게 받는다
+    /// (문자열이 아닌 값이 와도 후보 전체의 역직렬화가 실패하지 않도록).
+    /// </summary>
+    [JsonPropertyName("evidence")]
+    public JsonElement? Evidence { get; init; }
+
+    /// <summary>날짜 확인 상태(예: confirmed / unverified). RAG가 보내지 않으면 null.</summary>
+    [JsonPropertyName("date_status")]
+    public JsonElement? DateStatus { get; init; }
+}
+
+/// <summary>
+/// RAG 후보 조회 결과. 실패를 빈 목록과 구분해야 하는 호출부(달력)는 <see cref="Succeeded"/>를 본다.
+/// </summary>
+public sealed record NotificationCandidateFetchResult(List<NotificationCandidateDto> Candidates, bool Succeeded);
 
 public record DeadlineDto(
     string Id,
@@ -570,12 +587,34 @@ static public class NotificationApis
         int limit,
         CancellationToken cancellationToken)
     {
-        var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
         var today = TodayKst();
         var clampedDaysAhead = Math.Clamp(daysAhead, 1, 180);
+        var result = await FetchCandidateRangeAsync(
+            configuration, httpClientFactory, cache, logger, scope,
+            today, today.AddDays(clampedDaysAhead), limit, cancellationToken);
+        // 알림 경로는 RAG 실패 시 기존처럼 빈 목록으로 진행한다(알림 생성 0건).
+        return result.Candidates;
+    }
+
+    /// <summary>
+    /// 명시한 기간 [from, to]의 후보를 RAG에서 가져온다. 결과는 기간·건수·범위별로 캐시한다.
+    /// 실패하면 <see cref="NotificationCandidateFetchResult.Succeeded"/>가 false다.
+    /// </summary>
+    internal static async Task<NotificationCandidateFetchResult> FetchCandidateRangeAsync(
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
+        IMemoryCache cache,
+        ILogger logger,
+        NotificationCandidateScope scope,
+        DateOnly fromDate,
+        DateOnly toDate,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var ragUrl = configuration["RagServiceUrl"] ?? configuration["RAG_SERVICE_URL"] ?? "http://rag-service:8000";
         var clampedLimit = Math.Clamp(limit, 1, 300);
-        var from = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var to = today.AddDays(clampedDaysAhead).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var from = fromDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var to = toDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         const string sources = "notices,schedule";
         var major = string.IsNullOrWhiteSpace(scope.Major) ? null : scope.Major.Trim();
         var allowWise = scope.AllowWise ? "true" : "false";
@@ -590,7 +629,7 @@ static public class NotificationApis
         // 관심 주제 필터·유저별 알림 생성은 이 메서드 바깥에서 수행되므로 캐시에는 개인 데이터가 담기지 않는다.
         var majorKey = major is null ? "public" : $"major={Uri.EscapeDataString(major)}";
         var cacheKey = $"notif:candidates:{from}:{to}:{sources}:{clampedLimit}:{majorKey}:wise={allowWise}";
-        var candidates = await cache.GetOrCreateAsync<List<NotificationCandidateDto>>(cacheKey, async entry =>
+        var result = await cache.GetOrCreateAsync<NotificationCandidateFetchResult>(cacheKey, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(20);
             try
@@ -598,18 +637,23 @@ static public class NotificationApis
                 var client = httpClientFactory.CreateClient();
                 client.Timeout = TimeSpan.FromSeconds(8); // 콜드 상태의 RAG가 페이지를 100초까지 잡아두지 않도록 명시적 제한.
                 var fetched = await client.GetFromJsonAsync<List<NotificationCandidateDto>>(url, JsonOptions, cancellationToken);
-                return fetched ?? [];
+                return new NotificationCandidateFetchResult(fetched ?? [], Succeeded: true);
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+            // 호출자 자신의 요청 취소(RequestAborted)는 RAG 실패가 아니다. 이를 실패로 캐시하면 같은 범위
+            // (특히 게스트 공용 키)의 다른 요청까지 30초간 실패하므로 걸러서 그대로 전파한다.
+            // 전파된 예외 때문에 팩터리가 값을 돌려주지 않으므로 캐시 항목도 만들어지지 않는다.
+            // HttpClient.Timeout에 의한 TaskCanceledException은 호출자 토큰이 취소되지 않았으므로 실패로 처리한다.
+            catch (Exception ex) when ((ex is HttpRequestException or TaskCanceledException or JsonException)
+                                       && !cancellationToken.IsCancellationRequested)
             {
                 logger.LogWarning(ex, "Failed to fetch notification candidates from RAG service.");
-                // 실패는 오래 캐시하지 않고 30초 뒤 재시도되게 한다.
+                // 실패는 오래 캐시하지 않고 30초 뒤 재시도되게 한다. 실패 표시를 남겨 빈 성공과 구분한다.
                 entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30);
-                return [];
+                return new NotificationCandidateFetchResult([], Succeeded: false);
             }
         });
 
-        return candidates ?? [];
+        return result ?? new NotificationCandidateFetchResult([], Succeeded: false);
     }
 
     private static string InferTopic(NotificationCandidateDto candidate)
@@ -655,10 +699,10 @@ static public class NotificationApis
         return string.Join(",", normalized);
     }
 
-    private static bool TryParseDateOnly(string value, out DateOnly date)
+    internal static bool TryParseDateOnly(string? value, out DateOnly date)
         => DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
 
-    private static DateOnly TodayKst()
+    internal static DateOnly TodayKst()
         => DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(9)).DateTime);
 
     private static DateTime ToUtcDateTime(DateOnly date)
