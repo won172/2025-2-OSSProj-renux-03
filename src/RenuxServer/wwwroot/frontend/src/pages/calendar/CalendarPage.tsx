@@ -5,6 +5,8 @@ import AppNav from '../../components/AppNav'
 import {
   KIND_LABEL,
   buildCalendarQuestion,
+  eventDdayBig,
+  eventDdayText,
   calendarErrorMessage,
   fetchCalendarEvents,
   normalizeEvent,
@@ -15,8 +17,6 @@ import {
 import {
   WEEKDAYS,
   addDays,
-  dDayBig,
-  dDayText,
   eventStart,
   firstOfMonth,
   formatPeriod,
@@ -34,11 +34,15 @@ import {
   type EventKind,
   type MonthRef,
 } from './calendarDates'
-import { REMINDER_LABEL, REMINDER_STEPS, normalizeSteps, type ReminderStep, type SavedEvent, type SavedReminder } from './savedEventsApi'
+import PersonalEventForm from './PersonalEventForm'
+import ReminderCard from './ReminderCard'
+import { isPersonalId, personalToEvent, type PersonalEventInput, type SavedEvent, type SavedReminder } from './savedEventsApi'
 import { useSavedEvents, type SavedStatus } from './useSavedEvents'
 import './calendar.css'
 
 const KINDS: EventKind[] = ['academic', 'notice', 'exam']
+/** 로그인하면 '내 일정' 칩이 앞에 붙는다. */
+const ALL_KINDS: EventKind[] = ['personal', ...KINDS]
 const DESKTOP_QUERY = '(min-width: 901px)'
 /** 넓은 화면 달력 칸에 쌓는 막대 줄 수. 넘치면 "+n"으로 줄인다. */
 const MAX_LANES = 3
@@ -99,11 +103,14 @@ interface SaveControls {
   setReminder: (eventId: string, reminder: SavedReminder) => void
   /** 로그인하지 않은 사용자가 저장을 누르면 안내를 띄운다. */
   askLogin: () => void
+  /** 개인 일정 수정 화면으로 간다. */
+  edit: (event: CalendarEvent) => void
+  remove: (event: CalendarEvent) => void
 }
 
 /** 목록·카드 옆 별 버튼. 터치 영역 44px. 불러오는 중·조회 실패면 숨긴다. */
 const SaveStar = ({ event, controls }: { event: CalendarEvent; controls: SaveControls }) => {
-  if (controls.status === 'loading' || controls.status === 'error' || event.dateStatus !== 'confirmed') return null
+  if (controls.status === 'loading' || controls.status === 'error' || event.dateStatus !== 'confirmed' || event.source === 'personal') return null
   const saved = controls.byId.has(event.id)
   const busy = controls.pending.has(event.id)
   return (
@@ -124,7 +131,7 @@ const SaveStar = ({ event, controls }: { event: CalendarEvent; controls: SaveCon
 const EventCard = ({ event, today, replace, controls }: { event: CalendarEvent; today: string; replace?: boolean; controls: SaveControls }) => (
   <li className="cal-item">
     <Link className="cal-card" to={eventPath(event)} state={{ event }} replace={replace}>
-      <span className="cal-card__top"><Tag kind={event.kind} /><span className="cal-dday">{dDayText(event, today)}</span></span>
+      <span className="cal-card__top"><Tag kind={event.kind} /><span className="cal-dday">{eventDdayText(event, today)}</span></span>
       <span className="cal-card__title">{event.title}</span>
       <span className="cal-card__meta">{formatPeriod(event, today)} · {sourceLabel(event)}</span>
     </Link>
@@ -132,47 +139,25 @@ const EventCard = ({ event, today, replace, controls }: { event: CalendarEvent; 
   </li>
 )
 
-/** 저장한 일정의 앱 안 알림 설정. 시점을 모두 끄면 알림도 꺼진다. */
-const ReminderCard = ({ saved, busy, onChange }: { saved: SavedEvent; busy: boolean; onChange: (reminder: SavedReminder) => void }) => {
-  const { enabled, daysBefore } = saved.reminder
-  const toggleStep = (step: ReminderStep) => {
-    const next = daysBefore.includes(step) ? daysBefore.filter((value) => value !== step) : normalizeSteps([...daysBefore, step])
-    onChange({ enabled: next.length > 0, daysBefore: next })
-  }
-  return (
-    <section className="cal-reminder" aria-labelledby="cal-reminder-title">
-      <div className="cal-reminder__head">
-        <div>
-          <h3 id="cal-reminder-title">알림 받기</h3>
-          <p className="cal-muted">앱 안 알림으로 보내요. 기간 일정은 시작일, 시작한 뒤에는 마감일 기준이에요.</p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          className="cal-switch"
-          aria-checked={enabled}
-          aria-labelledby="cal-reminder-title"
-          disabled={busy}
-          onClick={() => onChange(enabled ? { enabled: false, daysBefore } : { enabled: true, daysBefore: daysBefore.length ? daysBefore : [7, 1] })}
-        ><span aria-hidden="true" /></button>
-      </div>
-      {enabled && (
-        <div className="cal-reminder__steps" role="group" aria-label="알림 시점">
-          {REMINDER_STEPS.map((step) => (
-            <button key={step} type="button" className="cal-pill" aria-pressed={daysBefore.includes(step)} disabled={busy} onClick={() => toggleStep(step)}>
-              {REMINDER_LABEL[step]}
-            </button>
-          ))}
-        </div>
-      )}
-    </section>
-  )
-}
-
 /** 상세 하단 버튼 줄. 좁은 화면에서는 탭 위에 붙어 엄지로 바로 누를 수 있다. */
 const DetailActions = ({ event, controls, onAsk }: { event: CalendarEvent; controls: SaveControls; onAsk: () => void }) => {
   const saved = controls.byId.has(event.id)
   const busy = controls.pending.has(event.id)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  if (event.source === 'personal') {
+    return (
+      <div className="cal-detail__actions">
+        <button type="button" className="cal-btn cal-btn--primary cal-save" onClick={() => controls.edit(event)} disabled={busy}>수정</button>
+        <button
+          type="button"
+          className={confirmDelete ? 'cal-btn cal-delete is-confirming' : 'cal-btn cal-delete'}
+          disabled={busy}
+          onClick={() => (confirmDelete ? controls.remove(event) : setConfirmDelete(true))}
+          onBlur={() => setConfirmDelete(false)}
+        >{busy ? '삭제하는 중...' : confirmDelete ? '한 번 더 누르면 삭제' : '삭제'}</button>
+      </div>
+    )
+  }
   const canSave = event.dateStatus === 'confirmed' && controls.status !== 'loading' && controls.status !== 'error'
   return (
     <div className="cal-detail__actions">
@@ -213,7 +198,7 @@ const UnverifiedList = ({ events }: { events: CalendarEvent[] }) => events.lengt
 )
 
 const EventDetail = ({ event, today, onAsk, controls }: { event: CalendarEvent; today: string; onAsk: () => void; controls: SaveControls }) => {
-  const big = dDayBig(event, today)
+  const big = eventDdayBig(event, today)
   const quote = event.evidence ?? event.snippet
   const saved = controls.byId.get(event.id)
   return (
@@ -228,7 +213,7 @@ const EventDetail = ({ event, today, onAsk, controls }: { event: CalendarEvent; 
         </div>
         <div className="cal-detail__dday"><strong>{big.value}</strong>{big.caption && <span>{big.caption}</span>}</div>
       </div>
-      <section className="cal-detail__evidence" aria-label="근거">
+      {event.source !== 'personal' && <section className="cal-detail__evidence" aria-label="근거">
         <h3>근거</h3>
         {quote
           ? event.evidence ? <blockquote>{quote}</blockquote> : <p>{quote}</p>
@@ -237,14 +222,10 @@ const EventDetail = ({ event, today, onAsk, controls }: { event: CalendarEvent; 
           <span>{sourceLabel(event)}</span>
           {event.url && <a href={event.url} target="_blank" rel="noopener noreferrer">원문 보기 <span aria-hidden="true">↗</span></a>}
         </p>
-      </section>
-      {saved ? (
-        <ReminderCard saved={saved} busy={controls.pending.has(event.id)} onChange={(reminder) => controls.setReminder(event.id, reminder)} />
-      ) : controls.status === 'guest' && event.dateStatus === 'confirmed' ? (
-        <p className="cal-save-hint">로그인하면 일정을 저장하고 마감 전에 앱 안 알림을 받을 수 있어요. <Link to="/auth/in">로그인</Link></p>
-      ) : controls.status === 'ready' && event.dateStatus === 'confirmed' ? (
-        <p className="cal-save-hint">저장하면 7일 전과 1일 전에 앱 안 알림으로 알려드려요.</p>
-      ) : null}
+      </section>}
+      {saved && (
+        <ReminderCard reminder={saved.reminder} busy={controls.pending.has(event.id)} onChange={(reminder) => controls.setReminder(event.id, reminder)} />
+      )}
       <DetailActions event={event} controls={controls} onAsk={onAsk} />
     </article>
   )
@@ -255,6 +236,8 @@ const CalendarPage = () => {
   const location = useLocation()
   const [searchParams] = useSearchParams()
   const detailMatch = useMatch('/calendar/event/:eventId')
+  const editMatch = useMatch('/calendar/event/:eventId/edit')
+  const newMatch = useMatch('/calendar/new')
   const isDesktop = useIsDesktop()
   const today = useMemo(() => kstToday(), [])
 
@@ -263,7 +246,8 @@ const CalendarPage = () => {
   const [view, setView] = useState<'month' | 'list'>('month')
   const [month, setMonth] = useState<MonthRef>(() => monthOf(initialDay))
   const [selectedDay, setSelectedDay] = useState(initialDay)
-  const [kinds, setKinds] = useState<Set<EventKind>>(() => new Set(KINDS))
+  const [kinds, setKinds] = useState<Set<EventKind>>(() => new Set(ALL_KINDS))
+  const [formBusy, setFormBusy] = useState(false)
   const [savedOnly, setSavedOnly] = useState(false)
   const [loginPrompt, setLoginPrompt] = useState(false)
 
@@ -278,23 +262,51 @@ const CalendarPage = () => {
     toggle: (event) => { setLoginPrompt(false); void saved.toggle(event) },
     setReminder: (eventId, reminder) => { void saved.setReminder(eventId, reminder) },
     askLogin: () => setLoginPrompt(true),
+    edit: (event) => navigate(`/calendar/event/${encodeURIComponent(event.id)}/edit`),
+    remove: (event) => {
+      void saved.remove(event.id)
+      navigate('/calendar', { replace: true })
+    },
   }
   const filterSaved = savedOnly && saved.status === 'ready'
 
+  // 개인 일정은 저장 목록에서 오므로 보이는 범위와 겹치는 것만 공식 일정과 합친다.
+  const personalEvents = useMemo(() => [...saved.byId.values()]
+    .filter((item) => item.source === 'personal')
+    .map(personalToEvent)
+    .filter((event) => (event.startDate ?? event.endDate) <= range.to && event.endDate >= range.from), [saved.byId, range.from, range.to])
+
   const { confirmed, unverified } = useMemo(() => {
     const split = splitByDateStatus(events ?? [])
+    const official = split.confirmed.filter((event) => kinds.has(event.kind) && (!filterSaved || saved.byId.has(event.id)))
+    const own = kinds.has('personal') ? personalEvents : []
     return {
-      confirmed: split.confirmed.filter((event) => kinds.has(event.kind) && (!filterSaved || saved.byId.has(event.id))),
+      confirmed: [...own, ...official],
       // 날짜 확인 필요 일정은 저장할 수 없으므로 '저장됨'만 볼 때는 숨긴다.
       unverified: filterSaved ? [] : split.unverified.filter((event) => kinds.has(event.kind)),
     }
-  }, [events, kinds, filterSaved, saved.byId])
+  }, [events, kinds, filterSaved, saved.byId, personalEvents])
 
-  const detailId = detailMatch?.params.eventId ? decodeURIComponent(detailMatch.params.eventId) : null
+  const editId = editMatch?.params.eventId ? decodeURIComponent(editMatch.params.eventId) : null
+  const detailId = editId ?? (detailMatch?.params.eventId ? decodeURIComponent(detailMatch.params.eventId) : null)
   const stateEvent = normalizeEvent((location.state as { event?: unknown } | null)?.event)
+  const personal = detailId && isPersonalId(detailId) ? saved.byId.get(detailId) : undefined
   const detailEvent = detailId
-    ? (stateEvent?.id === detailId ? stateEvent : events?.find((event) => event.id === detailId) ?? null)
+    ? personal ? personalToEvent(personal)
+      : stateEvent?.id === detailId ? stateEvent : events?.find((event) => event.id === detailId) ?? null
     : null
+  const formOpen = Boolean(newMatch || (editId && personal))
+
+  const submitPersonal = async (input: PersonalEventInput) => {
+    setFormBusy(true)
+    const result = await saved.savePersonal(input, editId ?? undefined)
+    setFormBusy(false)
+    if (!result) return
+    setSelectedDay(result.startDate ?? result.endDate)
+    setMonth(monthOf(result.startDate ?? result.endDate))
+    navigate(`/calendar/event/${encodeURIComponent(result.eventId)}?d=${result.startDate ?? result.endDate}`, { replace: true })
+  }
+  const addPersonal = () => (saved.status === 'guest' ? setLoginPrompt(true) : navigate(`/calendar/new?d=${selectedDay}`))
 
   const goMonth = (next: MonthRef) => {
     setMonth(next)
@@ -329,22 +341,33 @@ const CalendarPage = () => {
     </div>
   )
 
-  const detailBody = (
+  const form = formOpen && (
+    <PersonalEventForm
+      key={editId ?? 'new'}
+      initial={personal}
+      defaultDay={isYmd(hinted) ? hinted : selectedDay}
+      busy={formBusy}
+      onSubmit={(input) => { void submitPersonal(input) }}
+      onCancel={back}
+    />
+  )
+
+  const detailBody = form || (
     detailEvent ? <EventDetail event={detailEvent} today={today} onAsk={() => ask(detailEvent)} controls={controls} />
       : loading ? <p className="cal-status" role="status">일정을 불러오는 중...</p>
         : errorBox || <p className="cal-empty">일정을 찾을 수 없어요. 캘린더에서 다시 선택해 주세요.</p>
   )
 
   // 좁은 화면의 상세는 전체 화면으로 보인다.
-  if (detailId && !isDesktop) {
+  if ((detailId || newMatch) && !isDesktop) {
     return (
       <Shell>
         <header className="cal-header cal-header--detail">
           <button type="button" className="cal-icon-btn" onClick={back} aria-label="캘린더로 돌아가기">‹</button>
-          <h1>일정 상세</h1>
+          <h1>{newMatch ? '내 일정 추가' : editId ? '내 일정 수정' : '일정 상세'}</h1>
         </header>
         {notice}
-        <div className="cal-scroll"><div className="cal-pad cal-pad--detail">{detailBody}</div></div>
+        <div className="cal-scroll"><div className="cal-pad cal-pad--detail">{form || detailBody}</div></div>
       </Shell>
     )
   }
@@ -361,6 +384,13 @@ const CalendarPage = () => {
         ) : <h1>다가오는 일정</h1>}
       </div>
       <div className="cal-header__actions">
+        {/* 좁은 화면에서는 탭 위 오른쪽 아래에 떠 있는 버튼으로 보인다(CSS). */}
+        {saved.status !== 'loading' && saved.status !== 'error' && (
+          <button type="button" className="cal-add" onClick={addPersonal} aria-label="내 일정 추가">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            <span className="cal-add__label">일정 추가</span>
+          </button>
+        )}
         <div className="cal-segment" role="group" aria-label="보기 방식">
           <button type="button" aria-pressed={view === 'month'} onClick={() => setView('month')}>월</button>
           <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>목록</button>
@@ -372,7 +402,7 @@ const CalendarPage = () => {
   const chips = (
     <div className="cal-chips">
       <div className="cal-chips__kinds" role="group" aria-label="일정 종류">
-        {KINDS.map((kind) => (
+        {(saved.status === 'ready' ? ALL_KINDS : KINDS).map((kind) => (
           <button key={kind} type="button" className={`cal-chip cal-chip--${kind}`} aria-pressed={kinds.has(kind)} onClick={() => toggleKind(kind)}>
             <span className="cal-dot" aria-hidden="true" />{KIND_LABEL[kind]}
           </button>
@@ -413,7 +443,7 @@ const CalendarPage = () => {
                     <Link className="cal-row" to={eventPath(event)} state={{ event }} replace={replace}>
                       <span className={`cal-row__date cal-wd-${weekdayOf(anchor)}`}><b>{Number(anchor.slice(8, 10))}</b>{weekdayLabel(anchor)}</span>
                       <span className="cal-row__body">
-                        <span className="cal-card__top"><Tag kind={event.kind} /><span className="cal-dday">{dDayText(event, today)}</span></span>
+                        <span className="cal-card__top"><Tag kind={event.kind} /><span className="cal-dday">{eventDdayText(event, today)}</span></span>
                         <span className="cal-card__title">{event.title}</span>
                         <span className="cal-card__meta">{formatPeriod(event, today)}</span>
                       </span>
@@ -456,7 +486,7 @@ const CalendarPage = () => {
       {grid.weeks.map((week) => (
         <div key={week[0]} className="cal-week">
           {week.map((day) => {
-            const present = KINDS.filter((kind) => confirmed.some((event) => event.kind === kind && occursOn(event, day)))
+            const present = ALL_KINDS.filter((kind) => confirmed.some((event) => event.kind === kind && occursOn(event, day)))
             const count = confirmed.filter((event) => occursOn(event, day)).length
             return dayButton(day, count, (
               <>
@@ -528,7 +558,7 @@ const CalendarPage = () => {
           {isDesktop && (
             <aside className="cal-panel" aria-label="선택한 날짜와 일정">
               {view === 'month' && dayList}
-              {detailId && <div className="cal-panel__detail">{detailBody}</div>}
+              {(detailId || newMatch) && <div className="cal-panel__detail">{detailBody}</div>}
               <UnverifiedList events={unverified} />
             </aside>
           )}

@@ -45,6 +45,7 @@
 .kind-academic { background: var(--today-academic-bg); color: var(--today-academic-fg); }
 .kind-notice { background: var(--today-notice-bg); color: var(--today-notice-fg); }
 .kind-exam { background: var(--today-exam-bg); color: var(--today-exam-fg); }
+.kind-personal { background: #e6f4ec; color: #14613b; }
 
 .today-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .today-chip { padding: 0 12px; font-size: 12px; }

@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { createServer } from 'vite'
-import { testDocument, click, settle, button } from './domHarness.mjs'
+import { testDocument, click, settle, button, change, props } from './domHarness.mjs'
 import { kstToday, monthGrid, monthOf, shiftMonth } from '../src/pages/calendar/calendarDates.ts'
 
 // 상태·DOM 구조만 확인한다. CSS 배치(겹침·가로 넘침)는 브라우저 스크린샷으로 따로 본다.
@@ -26,7 +26,7 @@ async function withCalendar(respond, run, { desktop = false, saved = () => json(
     const { default: CalendarPage } = await server.ssrLoadModule('/src/pages/calendar/CalendarPage.tsx')
     globalThis.fetch = async (input, init = {}) => {
       const url = new URL(input, 'http://localhost')
-      if (url.pathname === '/calendar/saved') {
+      if (url.pathname.startsWith('/calendar/saved')) {
         const request = { url, method: init.method ?? 'GET', body: init.body ? JSON.parse(init.body) : null }
         savedRequests.push(request)
         return saved(request, savedRequests.length)
@@ -135,7 +135,8 @@ test('detail route shows evidence and source, and 질문 opens chat with a prefi
     const source = Array.from(detail.getElementsByTagName('a')).find((node) => node.textContent.includes('원문 보기'))
     assert.equal(source.getAttribute('href'), 'https://www.dongguk.edu/n/7')
     assert.equal(source.getAttribute('target'), '_blank')
-    assert.match(detail.textContent, /로그인하면 일정을 저장하고/, 'guests see why saving needs a login')
+    assert.ok(button(detail, '일정 저장'), 'guests see the save button; saving asks them to log in (covered below)')
+    assert.doesNotMatch(detail.textContent, /로그인하면/, 'no standing login paragraph in the detail')
     click(byLabel(dom.container, '이 일정 질문하기'))
     await settle()
     assert.equal(router.state.location.pathname, '/chat')
@@ -188,7 +189,6 @@ test('detail: saving uses the official event id and date, then the reminder card
     await router.navigate(`/calendar/event/${encodeURIComponent(event.id)}?d=${event.startDate}`, { state: { event } })
     await settle()
     const detail = dom.container.querySelector('.cal-detail')
-    assert.match(detail.textContent, /저장하면 7일 전과 1일 전에 앱 안 알림으로 알려드려요/)
     const save = button(detail, '일정 저장')
     assert.equal(save.getAttribute('aria-pressed'), 'false')
     click(save)
@@ -263,3 +263,106 @@ function addDaysLocal(ymd, days) {
   date.setUTCDate(date.getUTCDate() + days)
   return date.toISOString().slice(0, 10)
 }
+
+const personalRow = (overrides) => savedRow({ eventId: `personal:${'a'.repeat(32)}`, source: 'personal', kind: 'personal', title: '동아리 회의', startDate: null, endDate: today, url: null, ...overrides })
+const textOf = (node) => node.textContent
+// 테스트 DOM은 하위 선택자를 지원하지 않으므로 폼 안의 input을 직접 찾는다.
+const formInputs = (dom) => Array.from(dom.container.querySelector('form.cal-form').getElementsByTagName('input'))
+const textInputs = (dom) => formInputs(dom).filter((node) => props(node).type !== 'checkbox')
+
+test('signed-in: personal events show on the calendar with their own tag and chip, no star, and edit/delete instead of save', async () => {
+  let deleted = null
+  await withCalendar(calendarJson(events), async ({ dom, router, savedRequests }) => {
+    const titles = Array.from(dom.container.querySelectorAll('.cal-card__title')).map(textOf)
+    assert.ok(titles.includes('동아리 회의'), titles.join(','))
+    const item = Array.from(dom.container.querySelectorAll('.cal-item')).find((node) => node.textContent.includes('동아리 회의'))
+    assert.match(item.textContent, /내 일정/)
+    assert.equal(item.querySelector('.cal-star'), null, 'personal events have no save star')
+    assert.doesNotMatch(item.textContent, /마감/, 'personal events are not called deadlines')
+    const todayCell = cellFor(dom, `${Number(today.slice(5, 7))}월 ${Number(today.slice(8, 10))}일 오늘`)
+    assert.equal(todayCell.querySelectorAll('.cal-dot--personal').length, 1, 'personal events get their own dot on the month grid')
+    const chip = button(dom.container, '내 일정')
+    assert.equal(chip.getAttribute('aria-pressed'), 'true')
+    click(chip)
+    assert.ok(!Array.from(dom.container.querySelectorAll('.cal-card__title')).map(textOf).includes('동아리 회의'), 'the chip hides personal events')
+    click(button(dom.container, '내 일정'))
+
+    await router.navigate(`/calendar/event/${encodeURIComponent(personalRow().eventId)}`)
+    await settle()
+    const detail = dom.container.querySelector('.cal-detail')
+    assert.doesNotMatch(detail.textContent, /근거|원문/, 'personal events have no evidence card')
+    assert.equal(button(detail, '일정 저장'), undefined)
+    assert.ok(button(detail, '수정'))
+    click(button(detail, '삭제'))
+    assert.ok(button(dom.container, '한 번 더 누르면 삭제'), 'deleting needs a second tap')
+    assert.equal(savedRequests.filter((request) => request.method === 'DELETE').length, 0)
+    click(button(dom.container, '한 번 더 누르면 삭제'))
+    await settle()
+    assert.equal(deleted, personalRow().eventId)
+    assert.equal(router.state.location.pathname, '/calendar')
+    assert.ok(!Array.from(dom.container.querySelectorAll('.cal-card__title')).map(textOf).includes('동아리 회의'))
+  }, {
+    saved: (request) => {
+      if (request.method === 'DELETE') { deleted = request.url.searchParams.get('eventId'); return json(null, 204) }
+      return json([personalRow()])
+    },
+  })
+})
+
+test('adding a personal event validates the title, posts the form and opens the new event', async () => {
+  const created = personalRow({ eventId: `personal:${'b'.repeat(32)}`, title: '과제 제출', endDate: addDaysLocal(today, 2) })
+  await withCalendar(calendarJson([]), async ({ dom, router, savedRequests }) => {
+    click(byLabel(dom.container, '내 일정 추가'))
+    await settle()
+    assert.equal(router.state.location.pathname, '/calendar/new')
+    const form = dom.container.querySelector('form.cal-form')
+    assert.ok(form)
+    props(form).onSubmit({ preventDefault() {} })
+    await settle()
+    assert.match(dom.container.querySelector('.cal-form__error').textContent, /제목을 입력해 주세요/)
+    assert.equal(savedRequests.filter((request) => request.method === 'POST').length, 0, 'no request until the form is valid')
+
+    const [titleInput, dateInput] = textInputs(dom)
+    change(titleInput, '  과제 제출  ')
+    change(dateInput, created.endDate)
+    props(dom.container.querySelector('form.cal-form')).onSubmit({ preventDefault() {} })
+    await settle()
+    const post = savedRequests.find((request) => request.method === 'POST')
+    assert.equal(post.url.pathname, '/calendar/saved/personal')
+    assert.deepEqual(post.body, { title: '과제 제출', startDate: null, endDate: created.endDate, reminder: { enabled: true, daysBefore: [7, 1] } })
+    assert.equal(router.state.location.pathname, `/calendar/event/${encodeURIComponent(created.eventId)}`)
+    assert.match(dom.container.querySelector('.cal-detail').textContent, /과제 제출/)
+  }, { saved: (request) => request.method === 'POST' ? json(created, 201) : json([]) })
+})
+
+test('editing a personal event prefills the form and puts a multi-day period', async () => {
+  const existing = personalRow()
+  await withCalendar(calendarJson([]), async ({ dom, router, savedRequests }) => {
+    await router.navigate(`/calendar/event/${encodeURIComponent(existing.eventId)}/edit`)
+    await settle()
+    const titleInput = textInputs(dom)[0]
+    assert.equal(titleInput.getAttribute('value') ?? titleInput.value, '동아리 회의')
+    const multi = formInputs(dom).find((node) => props(node).type === 'checkbox')
+    props(multi).onChange({ target: { checked: true } })
+    await settle()
+    const inputs = textInputs(dom)
+    assert.equal(inputs.length, 3, 'a 종료일 field appears')
+    change(inputs[2], addDaysLocal(today, 3))
+    props(dom.container.querySelector('form.cal-form')).onSubmit({ preventDefault() {} })
+    await settle()
+    const put = savedRequests.find((request) => request.method === 'PUT')
+    assert.equal(put.url.pathname, '/calendar/saved/personal')
+    assert.deepEqual(put.body, { eventId: existing.eventId, title: '동아리 회의', startDate: today, endDate: addDaysLocal(today, 3), reminder: { enabled: true, daysBefore: [7, 1] } })
+  }, { saved: (request) => request.method === 'PUT' ? json(personalRow({ startDate: request.body.startDate, endDate: request.body.endDate }), 200) : json([existing]) })
+})
+
+test('guests asked to log in when adding a personal event', async () => {
+  await withCalendar(calendarJson(events), async ({ dom, router, savedRequests }) => {
+    assert.equal(button(dom.container, '내 일정'), undefined, 'no personal chip for guests')
+    click(byLabel(dom.container, '내 일정 추가'))
+    await settle()
+    assert.equal(router.state.location.pathname, '/calendar')
+    assert.match(dom.container.querySelector('.cal-notice').textContent, /로그인하면/)
+    assert.deepEqual(savedRequests.map((request) => request.method), ['GET'])
+  })
+})

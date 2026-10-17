@@ -137,7 +137,10 @@ const respondWith = ({ auth = null, calendarStatus = 200, notifications = [] } =
     : json({ error: 'calendar_unavailable' }, calendarStatus)
   if (url.pathname === '/notifications') return json(notifications)
   if (url.pathname === '/calendar/saved') return auth
-    ? json([{ eventId: 'soon', source: 'schedule', kind: 'academic', title: '수강 정정', startDate: null, endDate: addDays(today, 2), url: null, reminder: { enabled: true, daysBefore: [1] } }])
+    ? json([
+      { eventId: 'soon', source: 'schedule', kind: 'academic', title: '수강 정정', startDate: null, endDate: addDays(today, 2), url: null, reminder: { enabled: true, daysBefore: [1] } },
+      { eventId: `personal:${'c'.repeat(32)}`, source: 'personal', kind: 'personal', title: '동아리 회의', startDate: null, endDate: addDays(today, 1), url: null, reminder: { enabled: true, daysBefore: [1] } },
+    ])
     : json({}, 401)
   return json({}, 404)
 }
@@ -187,9 +190,11 @@ test('signed-in home shows the department, an unread badge and a bell into the s
     assert.ok(bell)
     assert.equal(bell.getAttribute('href'), '/settings')
     assert.equal(bell.querySelector('.today-bell__badge').textContent, '1')
-    const savedCard = Array.from(section(dom, '다가오는 일정').getElementsByTagName('a')).find((node) => node.getAttribute('class') === 'today-event')
+    const savedCard = Array.from(section(dom, '다가오는 일정').getElementsByTagName('a')).find((node) => node.getAttribute('class') === 'today-event' && node.getAttribute('aria-label').includes('수강 정정'))
     assert.match(savedCard.getAttribute('aria-label'), /, 저장한 일정$/)
     assert.ok(savedCard.querySelector('.today-event__star'), 'saved events show a star on the home card')
+    const titles = Array.from(section(dom, '다가오는 일정').getElementsByTagName('a')).filter((node) => node.getAttribute('class') === 'today-event').map((node) => node.getAttribute('aria-label'))
+    assert.ok(titles.some((label) => label.startsWith('내 일정 동아리 회의')), `personal events join the home list: ${titles.join(' | ')}`)
     assert.equal(bell.getAttribute('aria-label'), '알림함, 읽지 않은 알림 1개')
     assert.ok(section(dom, '새 공지 · 내 학과 포함'))
     const event = { button: 0, metaKey: false, altKey: false, ctrlKey: false, shiftKey: false, defaultPrevented: false, preventDefault() { this.defaultPrevented = true }, stopPropagation() {}, currentTarget: bell, target: bell }

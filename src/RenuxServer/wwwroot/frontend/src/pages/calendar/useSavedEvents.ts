@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DEFAULT_REMINDER, fetchSavedEvents, saveEvent, savedErrorMessage, unsaveEvent, type SavedEvent, type SavedReminder } from './savedEventsApi.ts'
+import {
+  DEFAULT_REMINDER,
+  createPersonalEvent,
+  fetchSavedEvents,
+  saveEvent,
+  savedErrorMessage,
+  unsaveEvent,
+  updatePersonalEvent,
+  type PersonalEventInput,
+  type SavedEvent,
+  type SavedReminder,
+} from './savedEventsApi.ts'
 
 export type SavedStatus = 'loading' | 'guest' | 'ready' | 'error'
 
@@ -77,5 +88,33 @@ export const useSavedEvents = () => {
     }
   }), [byId, track])
 
-  return { status, byId, pending, message, clearMessage: useCallback(() => setMessage(null), []), toggle, setReminder }
+  /** 개인 일정 만들기·고치기. 성공하면 저장된 일정을, 실패하면 null을 돌려주고 안내를 띄운다. */
+  const savePersonal = useCallback(async (input: PersonalEventInput, eventId?: string): Promise<SavedEvent | null> => {
+    setMessage(null)
+    try {
+      const saved = eventId ? await updatePersonalEvent(eventId, input) : await createPersonalEvent(input)
+      if (mounted.current) put(saved)
+      return saved
+    } catch (error) {
+      if (mounted.current) setMessage(savedErrorMessage(error))
+      return null
+    }
+  }, [])
+
+  /** 개인 일정 삭제. 바로 반영하고 실패하면 되돌린다. */
+  const remove = useCallback((eventId: string) => track(eventId, async () => {
+    const existing = byId.get(eventId)
+    if (!existing) return
+    setMessage(null)
+    drop(eventId)
+    try {
+      await unsaveEvent(eventId)
+    } catch (error) {
+      if (!mounted.current) return
+      put(existing)
+      setMessage(savedErrorMessage(error))
+    }
+  }), [byId, track])
+
+  return { status, byId, pending, message, clearMessage: useCallback(() => setMessage(null), []), toggle, setReminder, savePersonal, remove }
 }
