@@ -1,0 +1,461 @@
+<html><head><title>동국대학교 회계학과 > 게시판 > 학부학사공지 </title></head><body><div id="sub_container">
+
+
+<!-- left_menu -->
+<div class="snb_wrap">
+<div class="snb">
+<ul>
+<li class="home"><a href="/main"><span class="blind">홈</span></a></li>
+<li class="depth">
+<a href="#" title="펼치기">
+<span>
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                                  게시판
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                      </span>
+</a>
+<ul class="first" style="display: none">
+<li class=""><a href="/page/359" target="">학과소개</a></li>
+<li class=""><a href="https://www.dongguk.edu/schedule/detail?schedule_info_seq=22" target="_blank">학사안내</a></li>
+<li class=""><a href="/professor/list?professor_haggwa_type=PROFH_069" target="">교수진</a></li>
+<li class=""><a href="https://sba.dongguk.edu/page/347" target="_blank">공인회계사반</a></li>
+<li class=""><a href="/page/31367" target="">대학생활</a></li>
+<li class="active"><a href="/article/notice1/list" target="">게시판</a></li>
+<li class=""><a href="/page/30691" target="">발전기금</a></li>
+</ul>
+</li>
+<li class="depth" id="depth2">
+<a href="#" title="펼치기">
+<span>
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                                  학부학사공지
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                              
+                                          
+                                      </span>
+</a>
+<ul class="first" style="display: none">
+<li class="active"><a href="/article/notice1/list" target="">학부학사공지</a></li>
+<li class=""><a href="https://gs.dongguk.edu/article/search" target="_blank">대학원공지</a></li>
+<li class=""><a href="/article/gallery/list" target="">갤러리</a></li>
+<li class=""><a href="/article/news1/list" target="">학과소식</a></li>
+<li class=""><a href="https://sba.dongguk.edu/article/form/list" target="_blank">양식함</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<!--// left_menu -->
+<!--contents-->
+<div id="contents">
+<div class="sub_top">
+<div class="location">
+</div>
+</div>
+<div class="subpage_top">
+<h2 class="page_tit">
+        
+            
+            
+                학부학사공지
+            
+        </h2>
+<ul class="util">
+<li class="print"><a href="javascript:$('.contents').printThis(); void 0;" title="프린트"><span class="blind">인쇄</span></a></li>
+<li class="share"><a href="#" title="공유"><span class="blind">공유</span></a>
+<div class="social">
+<a class="share_icon facebook" href="javascript:shareSNS('facebook');" title="새창열림"><span class="blind">페이스북 공유하기</span></a>
+<a class="share_icon twitter" href="javascript:shareSNS('twitter');" title="새창열림"><span class="blind">트위터 공유하기</span></a>
+</div>
+</li>
+</ul>
+</div>
+<!--컨텐츠영역-->
+<div class="contents">
+
+<div class="menu_tabs">
+<div class="depth4">
+<ul>
+<li class="active"><a href="javascript:selectCategory('')" target="">전체</a></li>
+<li class=""><a href="javascript:selectCategory('일반')">일반</a></li>
+<li class=""><a href="javascript:selectCategory('수업/수강')">수업/수강</a></li>
+<li class=""><a href="javascript:selectCategory('학적')">학적</a></li>
+<li class=""><a href="javascript:selectCategory('졸업')">졸업</a></li>
+<li class=""><a href="javascript:selectCategory('조교')">조교</a></li>
+<li class=""><a href="javascript:selectCategory('대학원')">대학원</a></li>
+<li class=""><a href="javascript:selectCategory('공인회계사반')">공인회계사반</a></li>
+</ul>
+</div>
+</div>
+<div class="board_wrap">
+<form action="/article/notice1/list" enctype="multipart/form-data" id="articleFrm" method="post" name="articleFrm">
+<input id="article_seq" name="article_seq" type="hidden" value=""/>
+<input id="prt_seq" name="prt_seq" type="hidden" value=""/>
+<input id="category_cd" name="category_cd" type="hidden" value=""/>
+<div class="board_filter">
+<p class="count">총 <span>595</span>개의 게시물이 등록되어 있습니다</p>
+<div class="board_search">
+<div class="select">
+<select id="searchCondition" name="searchCondition">
+<option selected="" value="TA.SUBJECT">제목</option>
+<option value="TA.CONTENT">내용</option>
+<option value="TA.INPT_USER_NAME">작성자</option>
+</select>
+</div>
+<div class="input_addition">
+<input class="inp_t" id="searchKeyword" maxlength="20" name="searchKeyword" size="7" title="검색어 입력" type="text" value=""/>
+<button class="btn_search" onclick="javascript:boardSearch();"><span class="blind">검색</span></button>
+</div>
+</div>
+</div>
+<div>
+</div></form>
+<table class="board" summary="공지사항 게시판으로 글 번호, 제목, 작성자, 작성일, 조회수를 제공하고 있습니다.">
+<caption>공지사항 목록</caption>
+<thead>
+<tr>
+<th class="num" scope="col">번호</th>
+<th class="tit" scope="col">제목</th>
+<th scope="col">작성자</th>
+<th scope="col">작성일</th>
+<th scope="col">조회수</th>
+<th scope="col">파일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="td_num"><span class="mark">공지</span></td>
+<td class="td_tit">
+<a href="#none" onclick="goDetail(214477);">
+<span>일반</span>
+                                
+                                미출석 조기취업자 '취업사실 확인서' 발급 안내
+                        </a> <!--new일때-->
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-09-03</td>
+<td>177</td>
+<td class="td_file">
+<span class="has_file" title="첨부파일 있음"></span>
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="mark">공지</span></td>
+<td class="td_tit">
+<a href="#none" onclick="goDetail(213256);">
+<span>일반</span>
+                                
+                                [교환학생 필독] 국외 교환학생 학점인정 방법 및 유의사항
+                        </a> <!--new일때-->
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-07-24</td>
+<td>405</td>
+<td class="td_file">
+<span class="has_file" title="첨부파일 있음"></span>
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="mark">공지</span></td>
+<td class="td_tit">
+<a href="#none" onclick="goDetail(208489);">
+<span>졸업</span>
+                                
+                                ★2026학년도 서울캠퍼스 외국어패스제 폐지 안내
+                        </a> <!--new일때-->
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-04-01</td>
+<td>1360</td>
+<td class="td_file">
+<span class="has_file" title="첨부파일 있음"></span>
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="mark">공지</span></td>
+<td class="td_tit">
+<a href="#none" onclick="goDetail(205782);">
+<span>수업/수강</span>
+                                
+                                경영대학 내 이수구분 정정 신청방법(nDRIMS)
+                        </a> <!--new일때-->
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-01-13</td>
+<td>1941</td>
+<td class="td_file">
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="mark">공지</span></td>
+<td class="td_tit">
+<a href="#none" onclick="goDetail(185093);">
+<span>일반</span>
+                                
+                                "취업사실확인서" 발급 관련 안내
+                        </a> <!--new일때-->
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2024-03-05</td>
+<td>6845</td>
+<td class="td_file">
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="mark">공지</span></td>
+<td class="td_tit">
+<a href="#none" onclick="goDetail(27100);">
+<span>졸업</span>
+                                
+                                ★[학부] 회계학과 졸업논문 및 졸업시험 면제조건 안내
+                        </a> <!--new일때-->
+</td>
+<td class="td_write">학과관리자</td>
+<td>2021-10-05</td>
+<td>9985</td>
+<td class="td_file">
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">595</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/215892?pageIndex=1&amp;">
+<span>학적</span>
+                                    
+                                    [광역화] 2026학년도 2학기 전공결정 시행 안내
+									
+									
+
+                                </a>
+<img alt="new" src="/images/site/common/board_new.png"/>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-10-16</td>
+<td>13</td>
+<td class="td_file">
+<span class="has_file" title="첨부파일 있음"></span>
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">594</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/215742?pageIndex=1&amp;">
+<span>일반</span>
+                                    
+                                    2027학년도 상반기 현장실습(학기/계절) 설명회 참석 학생 모집 안내
+									
+									
+
+                                </a>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-10-14</td>
+<td>23</td>
+<td class="td_file">
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">593</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/215310?pageIndex=1&amp;">
+<span>일반</span>
+                                    
+                                    2026학년도 2학기 캡스톤디자인 과제 신청 안내
+									
+									
+
+                                </a>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-09-29</td>
+<td>115</td>
+<td class="td_file">
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">592</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/215309?pageIndex=1&amp;">
+<span>졸업</span>
+                                    
+                                    2027년 봄 조기졸업 신청 안내
+									
+									
+
+                                </a>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-09-29</td>
+<td>123</td>
+<td class="td_file">
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">591</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/215308?pageIndex=1&amp;">
+<span>일반</span>
+                                    
+                                    [취업팀] 2026 취업박람회 유고결석인정서 등록 완료 안내
+									
+									
+
+                                </a>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-09-29</td>
+<td>109</td>
+<td class="td_file">
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">590</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/215307?pageIndex=1&amp;">
+<span>학적</span>
+                                    
+                                    2026학년도 2학기 다전공 1차 포기 신청 안내 (기간 : 9/28~9/30)
+									
+									
+
+                                </a>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-09-29</td>
+<td>76</td>
+<td class="td_file">
+<span class="has_file" title="첨부파일 있음"></span>
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">589</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/215306?pageIndex=1&amp;">
+<span>일반</span>
+                                    
+                                    10월 6일 모의토익 응시 및 성적확인 방법 안내
+									
+									
+
+                                </a>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-09-29</td>
+<td>73</td>
+<td class="td_file">
+<span class="has_file" title="첨부파일 있음"></span>
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">588</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/215305?pageIndex=1&amp;">
+<span>일반</span>
+                                    
+                                    2027학년도 상반기 일학습병행 설명회 참석모집
+									
+									
+
+                                </a>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-09-29</td>
+<td>73</td>
+<td class="td_file">
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">587</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/215304?pageIndex=1&amp;">
+<span>일반</span>
+                                    
+                                    [영캠프] 2026 영캠프 유고결석 인정서 등록 완료 안내
+									
+									
+
+                                </a>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-09-29</td>
+<td>86</td>
+<td class="td_file">
+</td>
+</tr>
+<tr>
+<td class="td_num"><span class="num">586</span></td>
+<td class="td_tit">
+<a href="/article/notice1/detail/214921?pageIndex=1&amp;">
+<span>공인회계사반</span>
+                                    
+                                    [공인회계사반] 2026학년도 2학기 공인회계사반 추가 입반시험 공고
+									
+									
+
+                                </a>
+</td>
+<td class="td_write">학과 관리자</td>
+<td>2026-09-14</td>
+<td>389</td>
+<td class="td_file">
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- pagination-->
+<div class="pagenation"><a class="active" href="/article/notice1/list?pageIndex=1" title="선택됨">1</a><a href="/article/notice1/list?pageIndex=2">2</a><a href="/article/notice1/list?pageIndex=3">3</a><a href="/article/notice1/list?pageIndex=4">4</a><a href="/article/notice1/list?pageIndex=5">5</a><a href="/article/notice1/list?pageIndex=6">6</a><a href="/article/notice1/list?pageIndex=7">7</a><a href="/article/notice1/list?pageIndex=8">8</a><a href="/article/notice1/list?pageIndex=9">9</a><a href="/article/notice1/list?pageIndex=10">10</a><a class="direction next" href="/article/notice1/list?pageIndex=2"><span class="blind">다음페이지</span></a><a class="direction next_all" href="/article/notice1/list?pageIndex=60"><span class="blind">마지막페이지</span></a></div>
+<!-- pagination-->
+<!-- 버튼 -->
+<!-- 비회원 -->
+</div>
+<!--//컨텐츠영역-->
+</div>
+<!--contents-->
+</div></body></html>

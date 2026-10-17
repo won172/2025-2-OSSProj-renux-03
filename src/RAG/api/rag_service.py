@@ -1417,6 +1417,7 @@ FALLBACK_REASON_STALE_DATA = "stale_data"
 FALLBACK_REASON_CLARIFICATION_NEEDED = "clarification_needed"
 FALLBACK_REASON_OUT_OF_DOMAIN = "out_of_domain"
 FALLBACK_REASON_SELECTOR_REFUSED = "selector_refused"
+FALLBACK_REASON_INFORMATION_BUDGET = 'information_budget_exceeded'
 # 학과 필터를 적용하지 않는 sentinel 값들(백엔드는 보통 null을 보내지만 방어적으로 처리).
 _NO_MAJOR_SENTINELS = {"Default", "Unknown"}
 
@@ -1595,7 +1596,12 @@ def _semantic_cache_namespace(major: str, *, allow_wise: bool = False) -> str:
     campus_scope = "wise_allowed" if allow_wise else "seoul_bmc"
     # Invalidate answers cached before the exact SQL relationship path changed
     # which document can ground staff, course, and cohort-rule answers.
-    return f"{user_scope}|retrieval-v10-structured:{campus_scope}"
+    suffix=''
+    if rag_config.RAG_CONNECTED_RETRIEVAL_ENABLED:
+        from src.database import DATABASE_FILE
+        from src.services.connected_knowledge import connected_provenance
+        suffix='|connected:'+hashlib.sha256(json.dumps(connected_provenance(DATABASE_FILE),sort_keys=True).encode()).hexdigest()
+    return f"{user_scope}{suffix}|retrieval-v10-structured:{campus_scope}"
 
 
 def _should_cache_answer(
@@ -2649,6 +2655,8 @@ def _build_retrieval_fallback_answer(
         if out_of_scope:
             return out_of_scope
 
+    if reason == FALLBACK_REASON_INFORMATION_BUDGET:
+        return '관련 원문의 조건과 예외를 함께 확인하지 못해 확정해서 안내할 수 없습니다. 특정 항목으로 질문을 좁히거나 공식 원문을 확인해 주세요.'
     if reason == FALLBACK_REASON_ACTIVE_DEADLINE_ELIMINATED_ALL:
         return (
             "마감일이 확인된 공고 중 기준일 현재 접수 중인 것은 "
@@ -2806,6 +2814,17 @@ def _rrf_relevance_floor(
         return False, False, policy.min_score
     hybrid = pd.to_numeric(merged.get("hybrid_score"), errors="coerce")
     row = merged.loc[hybrid.idxmax()] if hybrid.notna().any() else merged.iloc[0]
+    if row.get('connected_candidate') == 1:
+        if row.get('information_match') == 1:
+            # Revision-checked exact source units matched the requested subject
+            # and facet. This is relevance only: selector/grounding still run.
+            return True,True,policy.min_score
+        from src.services.connected_knowledge import terms, relevance
+        core=terms(query)
+        coverage=relevance(core,str(row.get('title') or '')+' '+str(row.get('chunk_text') or ''))
+        # This source-text coverage gate is deliberately separate from dense,
+        # BM25 and RRF score scales. Selection and grounding still run.
+        return bool(core) and coverage>=0.5,coverage>0,policy.min_score
     component_score = max(
         _clean_response_float(row.get("vector_score")) or 0.0,
         _clean_response_float(row.get("sparse_score")) or 0.0,
@@ -3870,6 +3889,10 @@ def _expand_chunk_with_neighbors(row: pd.Series) -> str:
     캐시된 chunks_df를 사용하므로 추가 I/O 비용이 없다. 실패 시 원본 청크 그대로.
     """
     chunk_text = str(row.get("chunk_text", ""))
+    # These are already scoped canonical spans. Expanding from the serving
+    # chunk cache could replace them with different revisions or scope.
+    if row.get('information_match') == 1 or row.get('connected_candidate') == 1:
+        return chunk_text
     if not PARENT_CONTEXT_ENABLED:
         return chunk_text
     dataset = row.get("dataset")
@@ -3998,6 +4021,51 @@ def _build_document_context_part(
     return part
 
 
+def _build_information_evidence_context(selected: pd.DataFrame, prefix: str) -> str:
+    """Pack complete source units fairly; never cut a condition mid-span.
+
+    Citation numbers/groups remain the selector's. URLs remain in returned
+    source references; compact prompt headers reserve room for actual facts.
+    Explicit applicability context travels with a selected dependent method.
+    """
+    headers = {}
+    pools = {}
+    for index, row in selected.iterrows():
+        units = row.get('information_evidence_units')
+        if not isinstance(units, list):
+            units=[{'unit_key':str(row.get('chunk_id') or index),'source_text':_expand_chunk_with_neighbors(row),'facets':[],'qualifiers':{}}]
+        applicability = {k: _clean_response_value(row.get(k)) for k in ('entry_year','academic_year','semester','college_name','program_scope_text','campus_scope','date','meal_date','published_at','evidence_known_at','evidence_known_at_role','audience','schedule_start','schedule_end') if _clean_response_str(row.get(k))}
+        headers[index] = f"문서 {int(row['citation_number'])} [출처: {row['dataset']}]: {row.get('title','')}\n적용 범위: {json.dumps(applicability,ensure_ascii=False)}\n"
+        def priority(unit):
+            q=unit.get('qualifiers') or {}
+            return (q.get('procedure_subrole')=='application_channel',q.get('printed_time_precision')=='clock_time','result_announcement' in q.get('temporal_subroles',[]),'eligibility' in unit.get('facets',[]))
+        pools[index] = sorted(units, key=priority, reverse=True)
+    chosen = {i: [] for i in pools}
+    used = len(prefix) + sum(len(h) for h in headers.values()) + 120
+    omitted = []
+    while any(pools.values()):
+        for index in pools:
+            if not pools[index]:
+                continue
+            unit = pools[index].pop(0)
+            from src.services.information_graph import applicability_context_text
+            context=applicability_context_text((unit.get('qualifiers') or {}).get('source_applicability_context',[]))
+            text=((context+'\n') if context and not any(context in old for old in chosen[index]) else '')+str(unit.get('source_text') or '')+'\n'
+            if used+len(text)<=MAX_CONTEXT_LENGTH:
+                chosen[index].append(text);used+=len(text)
+            else:
+                omitted.append(unit['unit_key'])
+    blocks=[]
+    for group, frame in selected.groupby('evidence_group',sort=True):
+        parts=[headers[i]+''.join(chosen[i]) for i in frame.index if chosen[i]]
+        if parts:blocks.append(f'[근거 그룹 {int(group)}]\n'+'\n'.join(parts))
+    selected.attrs['information_context_omitted_unit_keys']=omitted
+    selected.attrs['information_context_included_rows']=[i for i in chosen if chosen[i]]
+    selected.attrs['information_context_has_evidence']=any(chosen.values())
+    if omitted:_log_event(logging.INFO,'information_context_truncated',omitted_units=len(omitted),limit=MAX_CONTEXT_LENGTH)
+    return (prefix+'\n\n'.join(blocks))[:MAX_CONTEXT_LENGTH] if any(chosen.values()) else ''
+
+
 def _build_selected_evidence_context(
     selected: pd.DataFrame,
     prefix: str = "",
@@ -4006,6 +4074,8 @@ def _build_selected_evidence_context(
 ) -> str:
     if selected.empty:
         return prefix[:MAX_CONTEXT_LENGTH]
+    if ('information_match' in selected and selected['information_match'].fillna(0).eq(1).any()) or ('information_evidence_units' in selected and selected['information_evidence_units'].map(lambda value:isinstance(value,list)).any()):
+        return _build_information_evidence_context(selected, prefix)
     group_count = int(pd.to_numeric(selected["evidence_group"], errors="coerce").max())
     if group_count <= 1:
         parts = [
@@ -5291,9 +5361,9 @@ def _build_balanced_shortlist(
                 .str.strip()
                 .str.lower()
             )
-            ranked = ranked.loc[
-                audience_values.isin({requested_audience, "common", ""})
-            ].copy()
+            accepted=audience_values.isin({requested_audience, "common", ""})
+            if 'connected_candidate' in ranked:accepted=accepted | (ranked['connected_candidate'].eq(1) & audience_values.eq('unknown'))
+            ranked = ranked.loc[accepted].copy()
             if ranked.empty:
                 continue
         if "hybrid_score" in ranked.columns:
@@ -5758,6 +5828,9 @@ def _refine_final_candidate_scope(question: str, shortlist: pd.DataFrame) -> pd.
         entry_year_mask = refined.apply(
             lambda row: (
                 bool(re.search(r"\b20\d{2}\s*학번", _clean_response_str(row.get("title")) or ""))
+                # Source-bound process units retain their cohort/applicability
+                # in selector input. A broad guide title alone is still excluded.
+                and row.get('information_match') != 1
                 and not any(anchor in _candidate_scope_text(row) for anchor in requested_anchors)
             ),
             axis=1,
@@ -5801,7 +5874,7 @@ def _refine_final_candidate_scope(question: str, shortlist: pd.DataFrame) -> pd.
     # candidate evidence exists.
     if not _GRADUATE_SCOPE_RE.search(question):
         graduate_mask = refined.apply(
-            lambda row: bool(_GRADUATE_SCOPE_RE.search(_candidate_scope_text(row))),
+            lambda row: row.get('audience')=='graduate' if row.get('connected_candidate')==1 else bool(_GRADUATE_SCOPE_RE.search(_candidate_scope_text(row))),
             axis=1,
         )
         if (~graduate_mask).any():
@@ -5816,8 +5889,12 @@ def _refine_final_candidate_scope(question: str, shortlist: pd.DataFrame) -> pd.
             refined = refined[anchor_mask].copy()
 
     requested_year, requested_semester = _query_academic_period(question)
+    requested_years={int(y) for y in re.findall(r'(20\d{2})\s*(?:학년도|년도|년)',question)}
     periods = {index: _candidate_academic_period(row) for index, row in refined.iterrows()}
-    if requested_year is not None and any(requested_year in years for years, _ in periods.values()):
+    if len(requested_years)>1:
+        keep=pd.Series([not periods[index][0] or bool(set(periods[index][0])&requested_years) for index in refined.index],index=refined.index)
+        refined=refined[keep].copy()
+    elif requested_year is not None and any(requested_year in years for years, _ in periods.values()):
         year_keep = pd.Series(
             [not periods[index][0] or requested_year in periods[index][0] for index in refined.index],
             index=refined.index,
@@ -5990,9 +6067,28 @@ async def _select_evidence_for_answer(
     """Return selected evidence and whether OpenAI selection fell back deterministically."""
     if shortlist.empty:
         return shortlist, False
+    # Information units were resolved against the conversational query, not
+    # a deictic follow-up's surface words. Keep that target through selection.
+    if 'information_target_query' in shortlist:
+        targets=shortlist['information_target_query'].dropna().astype(str).unique()
+        if len(targets)==1 and targets[0]:question=targets[0]
     shortlist = _refine_final_candidate_scope(question, shortlist)
     if shortlist.empty:
         return shortlist, False
+    from src.services.information_graph import pack_source_units
+    omitted_rows=[]
+    for index,row in shortlist.iterrows():
+        units=row.get('information_evidence_units')
+        if row.get('information_match')==1 or isinstance(units,list):
+            if not isinstance(units,list):units=[{'unit_key':str(row.get('chunk_id') or index),'source_text':_expand_chunk_with_neighbors(row),'qualifiers':{}}]
+            _,kept,omitted=pack_source_units(units,6000)
+            if not kept:omitted_rows.append(index)
+    if omitted_rows:
+        shortlist=shortlist.drop(index=omitted_rows).copy()
+        _log_event(logging.INFO,'information_selector_budget_omitted',documents=len(omitted_rows))
+        if shortlist.empty:
+            shortlist.attrs['information_budget_omitted']=True
+            return shortlist,False
     candidates = [
         {
             "candidate_id": row.get("candidate_id"),
@@ -6003,6 +6099,9 @@ async def _select_evidence_for_answer(
             "campus_scope": _clean_response_str(row.get("campus_scope")) or "",
             "source_type": _clean_response_str(row.get("source_type")) or "",
             "text": _expand_chunk_with_neighbors(row),
+            'information_match':int(row.get('information_match')==1),
+            'information_evidence_units':row.get('information_evidence_units'),
+            'source_applicability':{k:_clean_response_value(row.get(k)) for k in ('campus_scope','academic_year','entry_year','semester','college_name','department_name','major','program_scope_text','date','meal_date','published_at','evidence_known_at','evidence_known_at_role','audience','schedule_start','schedule_end') if _clean_response_str(row.get(k))},
         }
         for _, row in shortlist.iterrows()
     ]
@@ -6012,6 +6111,14 @@ async def _select_evidence_for_answer(
 
     groups = _normalize_evidence_groups(decision, set(shortlist["candidate_id"].astype(str)))
     if not groups:
+        if 'connected_candidate' in shortlist.columns:
+            # A newly collected graph supplement has not earned the legacy
+            # high-coverage refusal override. Preserve the old baseline policy
+            # for old candidates; never resurrect rejected graph candidates.
+            shortlist=shortlist.loc[~pd.to_numeric(shortlist['connected_candidate'],errors='coerce').fillna(0).eq(1)].copy()
+            if shortlist.empty:
+                shortlist.attrs['selector_refused']=True
+                return shortlist,True
         # 셀렉터가 "관련 있는 것이 없다"고 판정한 경우다(프롬프트 규칙 6).
         #
         # 예전에는 이 판정을 통째로 버리고 느슨한 어휘 폴백으로 문서를 되살렸다.
@@ -9512,6 +9619,89 @@ async def _execute_direct_steps(
         ))
         return
 
+def _connected_retrieval_frames(
+    *, query: str, frames: List[pd.DataFrame], major: str | None,
+    where_filter: Dict | None, visibility_filter: Dict | None,
+    date_filter: QueryDateFilter | None, as_of: date, entry_year: int | None,
+    request_id: str,
+) -> List[pd.DataFrame]:
+    """Read-only supplement; retain ordinary scope/date/visibility boundaries.
+
+    Only canonical text becomes a candidate. Graph statements remain in the
+    inspection interface and never enter the answer context independently.
+    """
+    if not rag_config.RAG_CONNECTED_RETRIEVAL_ENABLED:
+        return []
+    from src.database import DATABASE_FILE
+    from src.services.connected_knowledge import Scope, connected_search
+    academic_year, semester = _query_academic_period(query)
+    comparison_years=tuple(sorted({int(y) for y in re.findall(r'(20\d{2})\s*(?:학년도|년도|년)',query)}))
+    if len(comparison_years)>1:academic_year=None
+    else:comparison_years=()
+    # The legacy general router also extracts an event year as entry_year.
+    # A connected applicability gate requires an explicit cohort/admission cue.
+    if not re.search(r'(?:20\d{2}|\b\d{2})\s*학번|20\d{2}.{0,16}(?:입학|신입생)',query):entry_year=None
+    if comparison_years and not re.search(r'게시|등록일|발행|올라온|공지.*작성',query):date_filter=None
+    campus = "seoul" if "서울캠퍼스" in query.replace(" ", "") else (
+        "bmc" if "바이오메디캠퍼스" in query.replace(" ", "") else None
+    )
+    seeds = []
+    for frame in frames:
+        for column in ("document_key", "doc_id"):
+            if column in frame:
+                seeds.extend(str(v) for v in frame[column].dropna().head(3))
+                break
+    result = connected_search(
+        DATABASE_FILE, query,
+        scope=Scope(campus=campus, department=major if major not in _NO_MAJOR_SENTINELS else None,
+                    audience=query_audience(query), entry_year=entry_year,
+                    academic_year=academic_year, semester=semester, as_of=as_of,academic_years=comparison_years,
+                    meal_start=date_filter.start if date_filter else None,meal_end=date_filter.end if date_filter else None),
+        seeds=seeds, limit=6,
+    )
+    _log_event(logging.INFO, "connected_retrieval", request_id=request_id,
+               status=result["status"], reason=result.get("reason"),
+               revision=result.get("revision"), truncated=result.get("truncated"),
+               documents=len(result["hits"]))
+    if not result["hits"]:
+        return []
+    hits = pd.DataFrame(result["hits"]).drop(columns=["connected_path"], errors="ignore")
+    hits["matched_query"] = query
+    if 'information_match' in hits:hits['information_target_query']=query
+    # Connected lexical overlap is a relevance gate, not a hybrid/RRF score.
+    # Use rank-only RRF contribution and a strict total supplement cap.
+    selected=[]
+    for dataset in ('guidance','attachments'):
+        selected.extend(hits.index[hits['dataset'].eq(dataset)].tolist()[:1])
+    selected.extend(index for index in hits.index if index not in selected)
+    supplement_limit=6 if 'information_match' in hits and hits['information_match'].eq(1).any() else 3
+    hits=hits.loc[selected[:supplement_limit]].copy()
+    if 'connected_lexical_score' not in hits:hits['connected_lexical_score']=hits['hybrid_score']
+    hits['connected_candidate']=1
+    hits['sparse_score']=0.0
+    hits['hybrid_score']=[1.0/(rag_config.HYBRID_RRF_K+rank) for rank in range(1,len(hits)+1)]
+    output = []
+    for dataset, group in hits.groupby("dataset", sort=False):
+        if dataset in {'meals','schedule'} and _stale_direct_answer(str(dataset),as_of) is not None:
+            continue
+        current_filter = dict(where_filter or {})
+        if dataset != "courses":
+            current_filter.pop("major", None)
+            current_filter.pop("$or", None)
+        if dataset == "notices":
+            current_filter = _combine_where_filters(current_filter, visibility_filter)
+        if current_filter:
+            group = group[group.apply(lambda row: _matches_where_filter(row, current_filter), axis=1)].copy()
+        # Meal serving dates were already constrained by Scope. They are not
+        # document publication dates and must not be filtered as such.
+        if dataset != 'meals':
+            group, _ = _apply_date_filter(group, str(dataset), date_filter)
+        group, _ = apply_campus_safety_boundary(group, allow_wise=False)
+        if not group.empty:
+            output.append(group)
+    return output
+
+
 async def _execute_retrieval_steps(
     plan: QueryPlan,
     mode: str,
@@ -9585,6 +9775,14 @@ async def _execute_retrieval_steps(
             frames = relaxed_frames
         unavailable_datasets = list(dict.fromkeys(unavailable_datasets + relaxed_unavailable))
 
+    connected_frames = await run_in_threadpool(functools.partial(
+        _connected_retrieval_frames, query=query_for_retrieval, frames=frames, major=req.major,
+        where_filter=final_where_filter, visibility_filter=notice_visibility_filter,
+        date_filter=date_filter, as_of=temporal_context.as_of, entry_year=entry_year,
+        request_id=request_id,
+    ))
+    frames.extend(connected_frames)
+
     frames, staff_unavailable = await _enrich_staff_lookup_frames(
         question=raw_query,
         frames=frames,
@@ -9609,10 +9807,11 @@ async def _execute_retrieval_steps(
             **active_notice_filter_stats.__dict__,
         )
 
+    evidence_query = query_for_retrieval if any('information_match' in frame and frame['information_match'].eq(1).any() for frame in connected_frames) else raw_query
     merged = _build_balanced_shortlist(
         frames,
         per_dataset=(DEFAULT_TOP_K * 2 if date_filter is not None and "schedule" in route else RAG_EVIDENCE_CANDIDATES_PER_DATASET),
-        query=raw_query,
+        query=evidence_query,
         as_of=temporal_context.as_of,
     )
     merged = _apply_cross_encoder_rerank(merged, raw_query)
@@ -9655,6 +9854,14 @@ async def _execute_retrieval_steps(
         topic_aligned = True
     # RRF는 순위 합의도이므로 RRF 점수 자체가 아니라 원 dense/BM25 신호의
     # 하한을 본다. 최신/진행중/날짜표 조회는 결정적 구조화 경로라 제외한다.
+    elif (
+        'information_match' in merged.columns
+        and merged.loc[pd.to_numeric(merged['hybrid_score'], errors='coerce').idxmax()].get('information_match') == 1
+    ):
+        # These rank contributions have no dense/weighted absolute score.
+        # Relevance was established on scoped subject/facet source units;
+        # evidence selection and grounding remain mandatory below.
+        topic_aligned = True
     elif rag_config.HYBRID_FUSION_MODE == "rrf" and not (
         recent_notice_query
         or active_notice_query
@@ -9705,8 +9912,8 @@ async def _execute_retrieval_steps(
         )
         if merged.empty:
             fallback_reason = (
-                FALLBACK_REASON_SELECTOR_REFUSED
-                if merged.attrs.get("selector_refused")
+                FALLBACK_REASON_INFORMATION_BUDGET if merged.attrs.get('information_budget_omitted') else FALLBACK_REASON_SELECTOR_REFUSED
+                if merged.attrs.get("selector_refused") or merged.attrs.get('information_budget_omitted')
                 else FALLBACK_REASON_NO_RESULTS
             )
     else:
@@ -9714,6 +9921,20 @@ async def _execute_retrieval_steps(
             "skipped": True,
             "reason": "retrieval_fallback",
         }
+
+    if fallback_reason is None and not merged.empty and 'information_evidence_units' in merged:
+        preview=_build_selected_evidence_context(merged,prefix=_user_profile_prefix(req.major),as_of=temporal_context.as_of)
+        stage_timings['information_context_omitted_units']=merged.attrs.get('information_context_omitted_unit_keys',[])
+        if not merged.attrs.get('information_context_has_evidence',True):
+            fallback_reason=FALLBACK_REASON_INFORMATION_BUDGET
+            merged=merged.iloc[:0].copy()
+        else:
+            included=merged.attrs.get('information_context_included_rows',list(merged.index))
+            if len(included)<len(merged):
+                merged=merged.loc[included].copy()
+                merged['citation_number']=range(1,len(merged)+1)
+                groups={value:index for index,value in enumerate(merged['evidence_group'].drop_duplicates(),start=1)}
+                merged['evidence_group']=merged['evidence_group'].map(groups)
 
     if fallback_reason is not None:
         # 검색이 비었더라도 학사일정·식단 표에 답이 있는 시점 질문이면 직접 조회해 답한다.
@@ -10362,6 +10583,7 @@ def _build_evaluation_fingerprint() -> dict[str, object]:
             ),
             "single_query_retrieval": rag_config.RAG_SINGLE_QUERY_RETRIEVAL,
             "structured_retrieval_enabled": rag_config.RAG_STRUCTURED_RETRIEVAL_ENABLED,
+            "connected_retrieval_enabled": rag_config.RAG_CONNECTED_RETRIEVAL_ENABLED,
             "recency_weight": rag_config.RECENCY_WEIGHT,
             "hybrid_fusion_mode": rag_config.HYBRID_FUSION_MODE,
             "hybrid_rrf_k": rag_config.HYBRID_RRF_K,
@@ -10378,6 +10600,9 @@ def _build_evaluation_fingerprint() -> dict[str, object]:
         "artifacts": artifact_records,
         "datasets": datasets,
     }
+    from src.database import DATABASE_FILE
+    from src.services.connected_knowledge import connected_provenance
+    payload['connected_graph'] = connected_provenance(DATABASE_FILE) if rag_config.RAG_CONNECTED_RETRIEVAL_ENABLED else {'state':'disabled'}
     payload["fingerprint_sha256"] = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()

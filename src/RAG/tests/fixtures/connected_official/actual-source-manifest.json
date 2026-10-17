@@ -1,0 +1,76 @@
+[
+  {
+    "file": "department-subpage-probes-0.html",
+    "url": "https://mgt.dongguk.edu/page/357",
+    "raw_source_sha256": "218558c49d6147f09820f0d5beebd191aefe66a5d4ffe9cead4e16ec07f39caa",
+    "fixture_excerpt_sha256": "b54fdef5861c84db06a4ae39189973b54d586e803153b1a882832a9e7e8cbebc"
+  },
+  {
+    "file": "department-subpage-probes-1.html",
+    "url": "https://acc.dongguk.edu/page/365",
+    "raw_source_sha256": "df192536331e293b5105db328f297e08c713e699a3f3ff740631dd00c0d3d732",
+    "fixture_excerpt_sha256": "772824eb0927edeb34f71302fd711206716cd0a20b3d9bad225d14a62bcd3455"
+  },
+  {
+    "file": "department-subpage-probes-2.html",
+    "url": "https://archi.dongguk.edu/page/548",
+    "raw_source_sha256": "d6776bc5bbe801224bc402dd8a401948f6debcbe2b8da1d7b11a3c3c778e72bf",
+    "fixture_excerpt_sha256": "dd94a60252b0a55514b945408bac2180d758ca78a6b8d9e55249e6989317a325"
+  },
+  {
+    "file": "cms-detail-probes-0.html",
+    "url": "https://mgt.dongguk.edu/article/notice/detail/215342?pageIndex=1&",
+    "raw_source_sha256": "0350e926868519b5c761c8fbd601e4d6229b55fd651f0ff80fd00af0324c015e",
+    "fixture_excerpt_sha256": "edfb5066e3382d7803cea6379047c9070458464a3faae3a0b8898d92570bd00e"
+  },
+  {
+    "file": "cms-detail-probes-1.html",
+    "url": "https://acc.dongguk.edu/article/notice1/detail/215892?pageIndex=1&",
+    "raw_source_sha256": "5978d18dd86eaea3cfb271f2323473af43b74f7ef97eed778d850e6ea0b191c8",
+    "fixture_excerpt_sha256": "e516bca6fdc09b0626d6cab5d6fc2dcc3f9e0c7d31f0f8775e5b0025f1117bfb"
+  },
+  {
+    "file": "cms-detail-probes-2.html",
+    "url": "https://sba.dongguk.edu/article/graduation/detail/184790?pageIndex=1&",
+    "raw_source_sha256": "94278947ee0ccc73b1c4b22703931e8c17cec61f55a93bc7e3458b7f3818d795",
+    "fixture_excerpt_sha256": "6d2aa1fd0bcb957f70f2b21f9ad85f6369c968067dc0ab01d46b556d67212b52"
+  },
+  {
+    "file": "cms-board-probes-0.html",
+    "url": "https://mgt.dongguk.edu/article/notice/list",
+    "raw_source_sha256": "2c6d041dcb024174da71336fb2b4f7c1bea257cd56a8ca96253eecbb71211382",
+    "fixture_excerpt_sha256": "7cd04b8c2faf68184a39d09ded5633b9491fd3c0b4a8e518883d947609779940"
+  },
+  {
+    "file": "cms-board-probes-1.html",
+    "url": "https://acc.dongguk.edu/article/notice1/list",
+    "raw_source_sha256": "6005f45453f965aba95f195c20cd92b5705f375caab1f014645754a89d954d67",
+    "fixture_excerpt_sha256": "e611788696f2559f325ebf4875a44dad5bd2e54953890d4334524f4df9c9beb9"
+  },
+  {
+    "file": "cms-board-probes-2.html",
+    "url": "https://sba.dongguk.edu/article/graduation/list",
+    "raw_source_sha256": "1e9c1ee7774bc1085782357defeead7435672d76ae2c9f33b979a674b9228077",
+    "fixture_excerpt_sha256": "db701a63590de5050504477d0beaf8bd0d1897c8fded13a822291480c3e6c46a"
+  },
+  {
+    "file": "actual-major-plan.hwp",
+    "url": "https://acc.dongguk.edu/cmmn/fileDown.do?filename=%5B%EA%B3%B5%EC%A7%80%5D%2B2026%ED%95%99%EB%85%84%EB%8F%84%2B2%ED%95%99%EA%B8%B0%2B%EC%A0%84%EA%B3%B5%EA%B2%B0%EC%A0%95%2B%EC%8B%9C%ED%96%89%2B%EA%B3%84%ED%9A%8D.hwp&filepath=/acc/files/article/notice1/215892/&filerealname=BDF0BD14476640A78D3897D003F744C1.hwp",
+    "parent_url": "https://acc.dongguk.edu/article/notice1/detail/215892?pageIndex=1",
+    "name": "[공지]+2026학년도+2학기+전공결정+시행+계획.hwp",
+    "raw_source_sha256": "44397835494a08aa58e431a3496b8079faf63efd0c3417b09e3955926da27ca5",
+    "fixture_excerpt_sha256": "44397835494a08aa58e431a3496b8079faf63efd0c3417b09e3955926da27ca5"
+  },
+  {
+    "file": "actual-guidance-161.html",
+    "url": "https://www.dongguk.edu/page/161",
+    "raw_source_sha256": "93bc70004e7c4f699a79c0a62051de03b40abfa31534b60e7e2c3ea51a2dadb9",
+    "fixture_excerpt_sha256": "ad2ec9a154be263fe23b7b8e682edbccd35b6aa597f39bf2ba48c49a6a7f48d0"
+  },
+  {
+    "file": "actual-guidance-165.html",
+    "url": "https://www.dongguk.edu/page/165",
+    "raw_source_sha256": "ba7731eb94052c9ad145ebcaa1fbd5e89da2b365e3ec001da459d433322a9a17",
+    "fixture_excerpt_sha256": "155af9644f2985819643b7aff079aa565f9ee29bb97f1c5becb3be6dd607d621"
+  }
+]

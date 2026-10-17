@@ -93,6 +93,14 @@ def _bounded_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, str]
         candidate_id = str(candidate.get("candidate_id") or "").strip()
         if not candidate_id:
             continue
+        text=str(candidate.get('text') or '')
+        if candidate.get('information_match')==1 or isinstance(candidate.get('information_evidence_units'),list):
+            from src.services.information_graph import pack_source_units
+            units=candidate.get('information_evidence_units')
+            if not isinstance(units,list):units=[{'unit_key':candidate_id,'source_text':text,'qualifiers':{}}]
+            text,kept,omitted=pack_source_units(units,6000)
+            if not kept:continue
+        else:text=text[:text_limit]
         bounded.append(
             {
                 "candidate_id": candidate_id,
@@ -102,9 +110,10 @@ def _bounded_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, str]
                 "schedule_start": str(candidate.get("schedule_start") or "")[:40],
                 "campus_scope": str(candidate.get("campus_scope") or "")[:40],
                 "source_type": str(candidate.get("source_type") or "")[:80],
-                "text": str(candidate.get("text") or "")[:text_limit],
+                "text": text,
             }
         )
+        if candidate.get('information_match')==1 or isinstance(candidate.get('information_evidence_units'),list):bounded[-1]['source_applicability']=json.dumps(candidate.get('source_applicability') or {},ensure_ascii=False)[:1200]
     return bounded
 
 

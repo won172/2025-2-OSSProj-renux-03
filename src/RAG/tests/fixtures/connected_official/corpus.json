@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "kind": "synthetic_connected_competency",
+  "documents": [
+    [
+      "courses",
+      "course",
+      {
+        "course_code": "CSE101",
+        "course_name": "컴퓨터 졸업설계",
+        "department_name": "컴퓨터공학과",
+        "college_name": "공과대학",
+        "content": "졸업설계 교과목 CSE101 컴퓨터공학과 졸업 기준 과목",
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "rules",
+      "guide",
+      {
+        "_type": "entry_year_guide_pdf",
+        "title": "컴퓨터공학과 졸업기준 (소속 학과: 컴퓨터공학과)",
+        "entry_year": "2026",
+        "section": "단과대학별 졸업기준",
+        "college_name": "공과대학",
+        "content": "졸업 기준 학업이수 가이드 컴퓨터공학과 졸업설계 이수",
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "notices",
+      "notice",
+      {
+        "title": "[컴퓨터공학과] 졸업설계 신청 공지",
+        "department": "컴퓨터공학과",
+        "content": "졸업설계 신청 공지 담당 컴퓨터공학과 사무실",
+        "links": [
+          {
+            "url": "https://www.dongguk.edu/page/page",
+            "locator": "body/a/1"
+          }
+        ],
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "staff",
+      "office",
+      {
+        "성명": "김**",
+        "부서경로": "공과대학 > 컴퓨터공학과",
+        "담당업무": "졸업설계 학사 상담",
+        "전화번호": "02-000-0000",
+        "content": "졸업설계 문의 담당 사무실 전화번호 02-000-0000",
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "guidance",
+      "page",
+      {
+        "title": "졸업설계 안내",
+        "department": "컴퓨터공학과",
+        "content": "졸업설계 안내 및 학사 상담 문의 안내 컴퓨터공학과",
+        "links": [
+          {
+            "url": "https://www.dongguk.edu/page/notice",
+            "locator": "body/section/1/a"
+          }
+        ],
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "attachments",
+      "file",
+      {
+        "title": "졸업설계 첨부 안내",
+        "sections": [
+          {
+            "locator": "page/2",
+            "text": "졸업설계 첨부 문서의 신청 절차"
+          }
+        ],
+        "parent_document_key": "notices:notice",
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "meals",
+      "meal",
+      {
+        "title": "상록원 식단",
+        "date": "2026-10-17",
+        "content": "상록원 점심 비빔밥 5000원",
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "rules",
+      "generic",
+      {
+        "title": "일반 규정",
+        "content": "일반 규정 원문",
+        "campus_scope": "unknown"
+      }
+    ],
+    [
+      "notices",
+      "generic",
+      {
+        "title": "일반 공지",
+        "content": "일반 공지 원문",
+        "campus_scope": "unknown"
+      }
+    ],
+    [
+      "other_future_dataset",
+      "orphan",
+      {
+        "title": "미연결 자료",
+        "content": "미연결 자료 원문",
+        "_url": ""
+      }
+    ],
+    [
+      "guidance",
+      "wise",
+      {
+        "title": "졸업설계 WISE",
+        "content": "졸업설계 WISE 전용 자료",
+        "department": "컴퓨터공학과",
+        "campus_scope": "wise"
+      }
+    ],
+    [
+      "guidance",
+      "old",
+      {
+        "title": "졸업설계 과거 안내",
+        "content": "졸업설계 과거 안내",
+        "effective_to": "2025-12-31",
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "guidance",
+      "private",
+      {
+        "title": "졸업설계 숨김 비밀",
+        "content": "졸업설계 비밀자료",
+        "visibility": "private",
+        "department": "컴퓨터공학과",
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "guidance",
+      "department",
+      {
+        "title": "졸업설계 학과 전용",
+        "content": "졸업설계 학과 전용 공지",
+        "visibility": "department",
+        "department": "컴퓨터공학과",
+        "campus_scope": "seoul"
+      }
+    ],
+    [
+      "schedule",
+      "schedule",
+      {
+        "_type": "academic_schedule",
+        "title": "수강정정 학사일정",
+        "content": "수강정정 학사일정 학사지원팀 문의",
+        "academic_year": "2026",
+        "start_date": "2026-10-17",
+        "end_date": "2026-10-18",
+        "department": "학사지원팀",
+        "campus_scope": "seoul"
+      }
+    ]
+  ]
+}

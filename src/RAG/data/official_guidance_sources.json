@@ -1,0 +1,273 @@
+{
+  "schema_version": 1,
+  "verified_on": "2026-10-17",
+  "base_commit": "8411b2232a02d8cc6c5754fabe7dcb5f8ca9af63",
+  "purpose": "candidate_only_no_ingestion",
+  "discovery_note": "공식 HTML의 href 및 서버가 HTML 안에 포함한 depth4 탭 링크 문자열에서 발견. JavaScript 실행, URL 범위 생성, 재귀 탐색 없음. 수집 CLI는 이 목록만 요청함.",
+  "sources": [
+    {
+      "title": "수강신청/정정/취소",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/150",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "희망 강의 신청"
+      ]
+    },
+    {
+      "title": "재수강",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/151",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "재수강 안내"
+      ]
+    },
+    {
+      "title": "학점이수",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/152",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "학점이수 안내"
+      ]
+    },
+    {
+      "title": "시험",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/153",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "시험안내"
+      ]
+    },
+    {
+      "title": "성적",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/154",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "성적 안내"
+      ]
+    },
+    {
+      "title": "출결기준",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/156",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "유고결석 사유"
+      ]
+    },
+    {
+      "title": "수료 및 졸업",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/158",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "학년별 수료 기준"
+      ]
+    },
+    {
+      "title": "외국어 시험 및 영어강의 이수요건",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/159",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "외국어패스제"
+      ]
+    },
+    {
+      "title": "전공결정",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/161",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "전공결정제도"
+      ]
+    },
+    {
+      "title": "다전공",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/162",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "다전공 제도"
+      ]
+    },
+    {
+      "title": "계절학기제",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/163",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "계절학기제"
+      ]
+    },
+    {
+      "title": "전과(전공변경)제",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/164",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "전과(전공변경)제"
+      ]
+    },
+    {
+      "title": "휴학/복학/제적/퇴학(자퇴)",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/165",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "일반휴학"
+      ]
+    },
+    {
+      "title": "성적경고/성적경고 누적 제적",
+      "content_heading": "학사제도",
+      "category": "academic_procedures",
+      "source_url": "https://www.dongguk.edu/page/167",
+      "discovery_url": "https://www.dongguk.edu/page/165",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "성적 경고"
+      ]
+    },
+    {
+      "title": "등록금 납부",
+      "content_heading": "등록금",
+      "category": "tuition",
+      "source_url": "https://www.dongguk.edu/page/144",
+      "discovery_url": "https://www.dongguk.edu/sitemap/detail",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "학부 등록금 납부"
+      ]
+    },
+    {
+      "title": "등록금 환불",
+      "content_heading": "등록금",
+      "category": "tuition",
+      "source_url": "https://www.dongguk.edu/page/145",
+      "discovery_url": "https://www.dongguk.edu/page/144",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "등록금의 반환"
+      ]
+    },
+    {
+      "title": "등록관련 FAQ",
+      "content_heading": "등록금",
+      "category": "tuition",
+      "source_url": "https://www.dongguk.edu/page/146",
+      "discovery_url": "https://www.dongguk.edu/page/144",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "등록금 카드납부"
+      ]
+    },
+    {
+      "title": "증명서발급",
+      "content_heading": "증명서발급",
+      "category": "certificates",
+      "source_url": "https://www.dongguk.edu/page/207",
+      "discovery_url": "https://www.dongguk.edu/sitemap/detail",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "증명서 종류"
+      ]
+    },
+    {
+      "title": "신편입생 원스탑 안내",
+      "content_heading": "신편입생 원스탑 안내",
+      "category": "student_life",
+      "source_url": "https://www.dongguk.edu/page/209",
+      "discovery_url": "https://www.dongguk.edu/sitemap/detail",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "신입생을 위한 학사제도"
+      ]
+    },
+    {
+      "title": "일반학생증",
+      "content_heading": "학생증발급",
+      "category": "student_life",
+      "source_url": "https://www.dongguk.edu/page/210",
+      "discovery_url": "https://www.dongguk.edu/sitemap/detail",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "신규학생증 발급"
+      ]
+    },
+    {
+      "title": "주차안내",
+      "content_heading": "주차안내",
+      "category": "student_life",
+      "source_url": "https://www.dongguk.edu/page/208",
+      "discovery_url": "https://www.dongguk.edu/sitemap/detail",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "주차요금 안내"
+      ]
+    },
+    {
+      "title": "우산대여",
+      "content_heading": "우산대여",
+      "category": "student_life",
+      "source_url": "https://www.dongguk.edu/page/218",
+      "discovery_url": "https://www.dongguk.edu/sitemap/detail",
+      "campus_scope": "unspecified",
+      "scope_note": "본문의 적용 캠퍼스를 별도 검수하기 전까지 미지정. 공통 머리말·푸터의 서울/바이오메디 주소로 적용 범위를 추정하지 않음.",
+      "body_markers": [
+        "대여 및 반납 절차"
+      ]
+    }
+  ]
+}
