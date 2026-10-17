@@ -25,7 +25,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_openai import ChatOpenAI
-from langchain_redis import RedisChatMessageHistory
+from src.services.conversation_history import CompatibleRedisChatMessageHistory, HistoryStore
 
 from src.config import (
     LLM_FALLBACK_ENABLED,
@@ -44,10 +44,11 @@ from src.config import (
     OPENAI_PROMPT_CACHE_KEY_PREFIX,
     REDIS_HISTORY_TTL_SECONDS,
     REDIS_URL,
+    MAX_HISTORY_STORE_SIZE,
 )
 
 # Redis 클라이언트를 미리 초기화하여 RedisChatMessageHistory에 전달합니다.
-_REDIS_CLIENT = redis.from_url(REDIS_URL)
+_REDIS_CLIENT = redis.from_url(REDIS_URL, socket_connect_timeout=1, socket_timeout=1)
 
 # 로거 설정
 logger = logging.getLogger(__name__)
@@ -136,18 +137,30 @@ def _redis_available() -> bool:
     return _redis_health["ok"]
 
 
-def _get_session_history(session_id: str) -> BaseChatMessageHistory:
+def _history_failure(exc: Exception) -> None:
+    logger.warning("Redis history unavailable; retaining bounded session memory: %s", exc)
+    _redis_health.update(ok=False, checked_at=time.monotonic())
+
+
+def _redis_session_history(session_id: str) -> BaseChatMessageHistory | None:
     if _redis_available():
-        try:
-            return RedisChatMessageHistory(
-                f"dongttok:chat_history:{session_id}",
-                redis_client=_REDIS_CLIENT,
-                ttl=REDIS_HISTORY_TTL_SECONDS,
-            )
-        except Exception as e:
-            logger.warning("Redis history init failed, falling back to ChatMessageHistory: %s", e)
-            _redis_health["ok"] = False  # 다음 요청에서 재확인하도록 무효화
-    return ChatMessageHistory()
+        return CompatibleRedisChatMessageHistory(
+            f"dongttok:chat_history:{session_id}",
+            redis_client=_REDIS_CLIENT,
+            ttl=REDIS_HISTORY_TTL_SECONDS,
+        )
+    return None
+
+
+_HISTORY_STORE = HistoryStore(
+    _redis_session_history, _history_failure,
+    ttl=REDIS_HISTORY_TTL_SECONDS, max_sessions=MAX_HISTORY_STORE_SIZE,
+)
+
+
+def _get_session_history(session_id: str | None) -> BaseChatMessageHistory:
+    # Callers without a chat ID must never share an implicit global conversation.
+    return _HISTORY_STORE.get(session_id) if session_id else ChatMessageHistory()
 
 @lru_cache(maxsize=2)
 def _get_system_prompt(mode: str = "rag") -> str:
@@ -167,6 +180,7 @@ def _get_system_prompt(mode: str = "rag") -> str:
 8. {current_date} 기준 최신 정보를 우선하여 답변하세요.
 9. 가독성을 위해 불필요한 마크다운(과도한 볼드체 등)은 피하고, 링크는 반드시 마크다운 형식으로 작성하세요.
 10. 이전 대화 맥락을 고려하되, 현재 질문이 주제가 바뀌었다면 이전 내용은 무시하고 현재 질문에 집중하세요.
+10-1. 이전 답변과 이전 출처 메타데이터는 대화 대상을 이해하는 단서입니다. 학교 사실의 현재 근거로 재사용하지 말고, 이번 요청의 [참고 자료]에서 다시 확인하세요.
 11. 질문에 '최근', '어제' 등 시간 표현이 포함된 경우, [참고 자료]의 게시일과 현재 날짜({current_date})를 비교하여 정확히 계산해 답변하세요.
 12. 검색 전 분석 단계에서 만들어졌을 수 있는 가정이나 추론을 사실처럼 단정하지 마세요. [참고 자료]에 없는 엔터티를 보완 생성하지 마세요.
 13. [참고 자료] 안의 서로 보완하는 정보는 단순 나열하지 말고 사용자가 다음에 무엇을 해야 하는지 실행 관점에서 통합해 설명하세요. 단, [근거 그룹]이 둘 이상 제공되면 그룹 간 사실이나 해석을 하나로 합치지 말고, 동일 그룹 안에서만 정보를 통합하여 각 그룹을 별도의 동등한 섹션으로 유지하세요. 자료에 없는 사실은 지어내지 마세요.
@@ -391,7 +405,7 @@ async def generate_langchain_answer(
     response_instructions: str | None = None,
 ) -> str:
     """선택된 프로바이더로 답변을 생성합니다. 실패 시 반대 프로바이더로 폴백합니다."""
-    actual_session_id = session_id or "default_session"
+    actual_session_id = session_id
     primary = _primary_provider()
     logger.info("Generating answer for session_id=%s (provider=%s)", actual_session_id, primary)
 
@@ -413,8 +427,7 @@ async def generate_langchain_answer(
         logger.warning("Provider '%s' failed (%s); falling back to '%s'.", primary, exc, fallback)
         answer = await _invoke_with_provider(fallback, messages, usage_collector=usage_collector, usage_stage="generation")
 
-    history.add_user_message(question)
-    history.add_ai_message(answer)
+    # The API commits only the completed answer after its grounding policy.
     return answer
 
 
@@ -793,7 +806,7 @@ async def generate_langchain_answer_stream(
     스트리밍은 토큰이 이미 전송되기 시작하면 중간 폴백이 불가능하므로, 첫 토큰을
     받기 전 단계의 실패에 한해 반대 프로바이더로 1회 폴백합니다.
     """
-    actual_session_id = session_id or "default_session"
+    actual_session_id = session_id
     primary = _primary_provider()
     logger.info("Generating streaming answer for session_id=%s (provider=%s)", actual_session_id, primary)
 
@@ -850,20 +863,19 @@ async def generate_langchain_answer_stream(
             "Empty streaming answer; skipping history for session_id=%s", actual_session_id
         )
         return
-    history.add_user_message(question)
-    history.add_ai_message(answer_text)
+    # The API commits only the completed answer after its grounding policy.
 
 
 def get_recent_history_text(
     session_id: str | None,
-    max_turns: int = 3,
+    max_turns: int = 20,
     max_answer_chars: int = 200,
 ) -> str:
     """질의 재작성용으로 최근 대화 이력을 간결한 텍스트로 반환합니다.
 
     후속 질문("그럼 신청 기간은?")의 대명사/생략을 해소하기 위한 용도라
     전체 이력이 아닌 최근 max_turns 쌍만, 답변은 앞부분만 자른다.
-    이력이 없거나 Redis 미가용이면 빈 문자열.
+    출처는 본문 없이 검색 단서만 별도로 보존한다. 이전 답변은 현재 사실의 근거가 아니다.
     """
     if not session_id:
         return ""
@@ -876,25 +888,46 @@ def get_recent_history_text(
     if not messages:
         return ""
 
-    recent = messages[-(max_turns * 2):]
+    recent = messages[-(max(1, min(max_turns, 20)) * 2):]
     lines: list[str] = []
     for m in recent:
-        content = m.content.strip()
+        content = " ".join(m.content.split())
         if isinstance(m, HumanMessage):
             lines.append(f"사용자: {content}")
         elif isinstance(m, AIMessage):
             if len(content) > max_answer_chars:
                 content = content[:max_answer_chars] + "…"
             lines.append(f"동똑이: {content}")
+            for source in m.additional_kwargs.get("source_cues", [])[:6]:
+                lines.append("이전 출처(검색 단서): " + json.dumps(source, ensure_ascii=False))
     return "\n".join(lines)
 
 
-def append_manual_history(session_id: str | None, question: str, answer: str) -> None:
-    actual_session_id = session_id or "default_session"
+def append_manual_history(
+    session_id: str | None, question: str, answer: str,
+    sources: list[dict[str, Any]] | None = None,
+) -> None:
+    if not session_id or not question.strip() or not answer.strip():
+        return
+    actual_session_id = session_id
     try:
         history = _get_session_history(actual_session_id)
-        history.add_user_message(question)
-        history.add_ai_message(answer)
+        cues = []
+        for number, source in enumerate((sources or [])[:6], start=1):
+            metadata = source.get("metadata") or {}
+            citation = source.get("citation_number")
+            cue = {"citation_number": citation if isinstance(citation, int) and citation > 0 else number}
+            for key in ("source_ref", "title", "document_key", "doc_id", "chunk_id", "source", "url", "campus_scope"):
+                value = source.get(key) or metadata.get(key)
+                if isinstance(value, (str, int)) and str(value).strip():
+                    cue[key] = " ".join(str(value).split())[:512 if key == "url" else 256]
+            cue.setdefault("source_ref", source_reference(source))
+            if any(cue.get(key) for key in ("title", "document_key", "doc_id", "chunk_id", "url")):
+                cues.append(cue)
+        history.add_messages([
+            HumanMessage(content=question),
+            AIMessage(content=answer, additional_kwargs={"source_cues": cues}),
+        ])
     except Exception as exc:  # noqa: BLE001
         logger.warning("append_manual_history failed (session=%s): %s", actual_session_id, exc)
 

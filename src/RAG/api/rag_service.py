@@ -163,10 +163,14 @@ from src.services.ontology_retrieval import OntologyShadowResult, run_ontology_s
 from src.services.retrieval_strategy import RetrievalStrategy, choose_retrieval_strategy
 from src.models.embedding import get_embedder, encode_texts
 from src.services.conversation import (
+    conversation_recall,
+    effective_scope_query,
+    followup_source_clarification,
     detect_smalltalk,
     meaningful_lexical_terms,
     needs_context_rewrite,
     rewrite_with_context,
+    relevant_history,
 )
 from src.services.crisis_support import (
     SUPPORT_NOTE,
@@ -4177,7 +4181,7 @@ async def _plan_retrieval(
 ) -> _RetrievalPlan:
     """Share route, revision-checked SQL evidence, and flags across both APIs."""
     started_at = time.perf_counter()
-    route = _resolve_retrieval_route(raw_query, analysis_meta)
+    route = _resolve_retrieval_route(query_for_retrieval, analysis_meta)
     _mark_stage(stage_timings, "routing", started_at)
     strategy = (
         choose_retrieval_strategy(query_for_retrieval, route)
@@ -4271,7 +4275,7 @@ async def _plan_query(
         return planned("crisis_support", ["crisis_support"], "crisis_signal", crisis=crisis)
 
     user_major = req.major
-    if query_explicitly_requests_wise(raw_query):
+    if query_explicitly_requests_wise(effective_scope_query(raw_query)):
         filters["campus"] = "wise"
         return planned("campus_out_of_scope", ["unknown"], "explicit_wise_campus")
 
@@ -4282,13 +4286,26 @@ async def _plan_query(
         or is_schedule_direct_question(raw_query, as_of)
     )
     future_publication_candidate = bool(future_publication_years(raw_query, as_of))
-    history_text = ""
-    if USE_QUERY_ANALYSIS or RAG_SEMANTIC_CACHE_ENABLED:
-        started_at = time.perf_counter()
-        history_text = await run_in_threadpool(get_recent_history_text, session_id)
-        _mark_stage(stage_timings, "history_load", started_at)
+    started_at = time.perf_counter()
+    history_text = await run_in_threadpool(get_recent_history_text, session_id)
+    _mark_stage(stage_timings, "history_load", started_at)
 
     common = {"history_text": history_text, "semantic_cache_ns": semantic_cache_ns}
+    recall = conversation_recall(raw_query, history_text)
+    if recall is not None:
+        return planned("smalltalk", ["smalltalk"], "conversation_recall", smalltalk=recall, **common)
+    if followup_source_clarification(raw_query, history_text):
+        return planned("clarification", ["unknown"], "source_reference_unresolved",
+                       clarification_fields=("이전 답변의 문서 번호 또는 정확한 문서 제목",),
+                       analysis_meta=QueryAnalysisMeta(result=None, used=False, failed=False), **common)
+    query_for_retrieval = (
+        rewrite_with_context(raw_query, history_text)
+        if needs_context_rewrite(raw_query, history_text) else raw_query
+    )
+    scope_query = effective_scope_query(query_for_retrieval)
+    if query_explicitly_requests_wise(scope_query):
+        filters["campus"] = "wise"
+        return planned("campus_out_of_scope", ["unknown"], "referenced_wise_campus", **common)
     recommendation = await run_in_threadpool(
         _chat_course_recommendation, req, raw_query, history_text,
     )
@@ -4316,7 +4333,7 @@ async def _plan_query(
     if future is not None:
         return planned("future_unannounced", ["notices"], "future_publication_unannounced", future_unannounced=future, **common)
 
-    direct = await run_in_threadpool(_try_direct_answer, raw_query, as_of)
+    direct = await run_in_threadpool(_try_direct_answer, query_for_retrieval, as_of)
     if direct is not None:
         route = ["meals"] if direct.kind.startswith("meal") else ["schedule"]
         return planned("structured_direct", route, direct.kind, direct_answer=direct, **common)
@@ -4344,7 +4361,7 @@ async def _plan_query(
     common["analysis_meta"] = analysis_meta
 
     clarification_fields = _first_turn_clarification_fields(
-        analysis_query, analysis_meta, history_text,
+        analysis_query, analysis_meta, relevant_history(raw_query, history_text),
     )
     if clarification_fields:
         return planned("clarification", ["unknown"], "clarification_needed", clarification_fields=tuple(clarification_fields), **common)
@@ -4352,21 +4369,20 @@ async def _plan_query(
     if (
         analysis_meta.result is not None
         and analysis_meta.result.intent == "unknown"
-        and not _has_school_info_terms(raw_query)
+        and not _has_school_info_terms(query_for_retrieval)
     ):
         return planned("out_of_domain", ["unknown"], "out_of_domain", **common)
 
     started_at = time.perf_counter()
-    query_for_retrieval = raw_query
-    if not analysis_meta.used and needs_context_rewrite(raw_query, history_text):
-        query_for_retrieval = rewrite_with_context(raw_query, history_text)
-        if query_for_retrieval != raw_query:
-            _log_event(logging.INFO, "followup_query_rewritten", request_id=request_id, rewritten=query_for_retrieval)
+    if query_for_retrieval != raw_query:
+        _log_event(logging.INFO, "followup_query_rewritten", request_id=request_id, rewritten=query_for_retrieval)
     expanded_query = expand_query(query_for_retrieval)
     retrieval_queries = _build_retrieval_queries(query_for_retrieval, expanded_query, analysis_meta, user_major)
     if raw_query not in retrieval_queries:
         retrieval_queries.insert(0, raw_query)
     semantic_query = analysis_meta.result.normalized_question if analysis_meta.result is not None else expanded_query
+    if query_for_retrieval != raw_query and query_for_retrieval not in semantic_query:
+        semantic_query = f"{query_for_retrieval} {semantic_query}"
     _mark_stage(stage_timings, "query_expansion", started_at)
     if mode == "ask":
         _log_event(
@@ -4378,7 +4394,7 @@ async def _plan_query(
         _log_event(logging.INFO, "ask_session", request_id=request_id, session_id=session_id)
 
     final_where_filter: Dict = {}
-    requested_major_filter = _requested_major_filter(raw_query)
+    requested_major_filter = _requested_major_filter(scope_query)
     if requested_major_filter is not None:
         final_where_filter.update(requested_major_filter)
         _log_event(logging.INFO, "course_scope_from_query", request_id=request_id, filter=requested_major_filter)
@@ -4403,15 +4419,15 @@ async def _plan_query(
         session_id=session_id, stage_timings=stage_timings,
     )
     route = retrieval_plan.route
-    entry_year = _extract_entry_year_from_query(semantic_query) or _extract_entry_year_from_query(raw_query)
+    entry_year = _extract_entry_year_from_query(scope_query) or _extract_entry_year_from_query(effective_scope_query(semantic_query))
     started_at = time.perf_counter()
-    date_filter = await run_in_threadpool(extract_date_filter_from_query, semantic_query, today=as_of)
+    date_filter = await run_in_threadpool(extract_date_filter_from_query, effective_scope_query(semantic_query), today=as_of)
     _mark_stage(stage_timings, "date_filter_parse", started_at)
     recent_notice_query, notice_board_filter, retrieval_policy = _resolve_notice_retrieval_controls(
-        raw_query, semantic_query, route,
+        scope_query, semantic_query, route,
     )
-    active_notice_query = _is_active_notice_state_query(raw_query, route)
-    current_operational_notice_terms = _current_operational_notice_terms(raw_query, route)
+    active_notice_query = _is_active_notice_state_query(scope_query, route)
+    current_operational_notice_terms = _current_operational_notice_terms(scope_query, route)
     audience_by_query = {query: query_audience(query) for query in retrieval_queries}
     filters.update({
         "date": date_filter, "audience_by_query": audience_by_query,
@@ -5058,12 +5074,13 @@ async def _retrieve_frames_for_queries(
     ontology_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
     structured_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
     as_of: date | None = None,
+    period_query: str | None = None,
 ) -> tuple[List[pd.DataFrame], bool, List[str]]:
     all_frames: List[pd.DataFrame] = []
     date_filter_eliminated_any = False
     unavailable_datasets: List[str] = []
 
-    period_query = queries[0] if queries else ""
+    period_query = period_query or (queries[0] if queries else "")
     semaphore = asyncio.Semaphore(rag_config.RAG_RETRIEVAL_CONCURRENCY)
     embedding_lock = asyncio.Lock()
     primed_queries: set[str] = set()
@@ -9277,7 +9294,7 @@ async def _execute_direct_steps(
                 "fallback_triggered": False,
             })
         yield QueryEvent({"type": "text", "content": answer})
-        await run_in_threadpool(append_manual_history, session_id, raw_query, answer)
+        await run_in_threadpool(append_manual_history, session_id, raw_query, answer, serialized_sources)
         _mark_stage(stage_timings, "total", request_started_at)
         _log_event(
             logging.INFO,
@@ -9307,7 +9324,7 @@ async def _execute_direct_steps(
             yield QueryEvent({"type": "suggestions", "questions": hit["suggested_questions"]})
         if hit.get("grounded") is False:
             yield QueryEvent({"type": "grounding", "grounded": False, "score": hit.get("grounding_score"), "reason": None})
-        await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"])
+        await run_in_threadpool(append_manual_history, session_id, raw_query, hit["answer"], hit.get("sources", []))
         _log_event(logging.INFO, "semantic_cache_hit", request_id=request_id, namespace=semantic_cache_ns)
         yield QueryEvent(_completion_payload(
             request_id=request_id,
@@ -9414,7 +9431,7 @@ async def _execute_direct_steps(
             direct_sources, stage_timings, llm_usage,
             deterministically_grounded=direct_grounded is True,
         )
-        await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer)
+        await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer, serialized_sources)
         _log_event(
             logging.INFO,
             "direct_answer_completed",
@@ -9500,6 +9517,7 @@ async def _execute_direct_steps(
             analysis_meta.used, analysis_meta.failed, None, None, [],
             stage_timings, llm_usage,
         )
+        await run_in_threadpool(append_manual_history, session_id, raw_query, domain_reply)
         yield QueryEvent(_completion_payload(
             request_id=request_id,
             grounded=None,
@@ -9559,6 +9577,7 @@ async def _execute_retrieval_steps(
         ontology_document_keys_by_dataset=ontology_document_keys_by_dataset,
         structured_document_keys_by_dataset=structured_document_keys_by_dataset,
         as_of=temporal_context.as_of,
+        period_query=effective_scope_query(query_for_retrieval),
     )
 
     if not frames and date_filter is not None and date_filter.relaxed_start and date_filter.relaxed_end:
@@ -9580,6 +9599,7 @@ async def _execute_retrieval_steps(
             ontology_document_keys_by_dataset=ontology_document_keys_by_dataset,
             structured_document_keys_by_dataset=structured_document_keys_by_dataset,
             as_of=temporal_context.as_of,
+            period_query=effective_scope_query(query_for_retrieval),
         )
         if relaxed_frames:
             frames = relaxed_frames
@@ -9612,10 +9632,10 @@ async def _execute_retrieval_steps(
     merged = _build_balanced_shortlist(
         frames,
         per_dataset=(DEFAULT_TOP_K * 2 if date_filter is not None and "schedule" in route else RAG_EVIDENCE_CANDIDATES_PER_DATASET),
-        query=raw_query,
+        query=query_for_retrieval,
         as_of=temporal_context.as_of,
     )
-    merged = _apply_cross_encoder_rerank(merged, raw_query)
+    merged = _apply_cross_encoder_rerank(merged, query_for_retrieval)
     if mode == "ask" and merged.empty:
         _log_event(logging.INFO, "retrieval_no_results", request_id=request_id, route=route)
     if mode == "stream":
@@ -9661,7 +9681,7 @@ async def _execute_retrieval_steps(
         or (date_filter is not None and "schedule" in route)
     ):
         passed_floor, topic_aligned, min_score = _rrf_relevance_floor(
-            raw_query,
+            query_for_retrieval,
             merged,
             retrieval_policy,
         )
@@ -9759,7 +9779,7 @@ async def _execute_retrieval_steps(
                 stage_timings, llm_usage,
                 deterministically_grounded=direct_grounded is True,
             )
-            await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer)
+            await run_in_threadpool(append_manual_history, session_id, raw_query, direct_answer, serialized_direct_sources)
             _log_event(
                 logging.INFO,
                 "direct_answer_rescued",
@@ -9854,7 +9874,7 @@ async def _execute_retrieval_steps(
         instruction
         for instruction in (
             _multiple_evidence_response_instructions(group_count),
-            _period_bound_response_instruction(raw_query, merged),
+            _period_bound_response_instruction(query_for_retrieval, merged),
             _active_notice_response_instruction(
                 raw_query,
                 merged,
@@ -9914,7 +9934,7 @@ async def _execute_retrieval_steps(
     # 최종 로깅
     final_answer = "".join(full_answer)
     final_answer = _enforce_active_notice_answer_contract(
-        raw_query,
+        query_for_retrieval,
         final_answer,
         merged,
         temporal_context.as_of,
@@ -9935,7 +9955,7 @@ async def _execute_retrieval_steps(
         try:
             stage_started_at = time.perf_counter()
             grounding_result = await check_answer_grounding(
-                raw_query,
+                query_for_retrieval,
                 final_answer,
                 context_text,
                 min_score=RAG_GROUNDING_MIN_SCORE,
@@ -9977,6 +9997,17 @@ async def _execute_retrieval_steps(
     if mode == "stream" and support_note_needed:
         final_answer = append_support_note(final_answer)
         full_answer = [final_answer]
+    # Generation helpers never commit a candidate. Keep the literal utterance,
+    # and only verified source cues/answer text; an unbuffered/append-policy
+    # response may still contain a rejected candidate, so do not memorise it.
+    memory_answer = final_answer if grounded_flag is True else (
+        _build_grounding_confirmation_answer(grounding_result, [SourceChunk(**s) for s in sources])
+        if grounded_flag is False else "이 답변의 공식 근거 확인을 완료하지 못했습니다."
+    )
+    await run_in_threadpool(
+        append_manual_history, session_id, raw_query, memory_answer,
+        sources if grounded_flag is True else [],
+    )
     if mode == "ask" or active_notice_query or (
         RAG_GROUNDING_CHECK_ENABLED
         and RAG_STREAM_BUFFER_UNTIL_GROUNDED
