@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "scope": "immutable tracked public official guide inputs; no guessed remote URLs or campus assertions",
+  "sources": [
+    {
+      "source_file": "2021_edu.pdf",
+      "sha256": "0a3c37e502a3c17fdcce173d41cc0548ae6d8c552fc0ed001a6b546f9a6478b8",
+      "origin": "tracked official entry-year guide PDF corpus",
+      "remote_url_status": "unresolved_use_existing_verified_url_when_present",
+      "review_status": "candidate_official_snapshot_provenance"
+    },
+    {
+      "source_file": "2022_edu.pdf",
+      "sha256": "f661787a8ea7abcdf256941fd249ae0cf4cf50536ad4f3f7069a698cfe35f7dd",
+      "origin": "tracked official entry-year guide PDF corpus",
+      "remote_url_status": "unresolved_use_existing_verified_url_when_present",
+      "review_status": "candidate_official_snapshot_provenance"
+    },
+    {
+      "source_file": "2023_edu.pdf",
+      "sha256": "1a1dc60f3425adc25bfba3de79b0345480ba24913e4996af6668ffb214604486",
+      "origin": "tracked official entry-year guide PDF corpus",
+      "remote_url_status": "unresolved_use_existing_verified_url_when_present",
+      "review_status": "candidate_official_snapshot_provenance"
+    },
+    {
+      "source_file": "2024_edu.pdf",
+      "sha256": "b2184968440b49d2aa7a9cfc99b1d6e29226d758ba3a134639f7919e15cc38e1",
+      "origin": "tracked official entry-year guide PDF corpus",
+      "remote_url_status": "unresolved_use_existing_verified_url_when_present",
+      "review_status": "candidate_official_snapshot_provenance"
+    },
+    {
+      "source_file": "2025_edu.pdf",
+      "sha256": "6c42ca7dd62d9596851ec0823a43f9dc4059215bc5bcefe4790558b3200d138f",
+      "origin": "tracked official entry-year guide PDF corpus",
+      "remote_url_status": "unresolved_use_existing_verified_url_when_present",
+      "review_status": "candidate_official_snapshot_provenance"
+    },
+    {
+      "source_file": "2026_edu.pdf",
+      "sha256": "b8e8fa3ec1820babe803226994f00f38b242df03c083fae51dc5c1e47b96fb12",
+      "origin": "tracked official entry-year guide PDF corpus",
+      "remote_url_status": "unresolved_use_existing_verified_url_when_present",
+      "review_status": "candidate_official_snapshot_provenance"
+    }
+  ]
+}

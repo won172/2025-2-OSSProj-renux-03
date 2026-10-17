@@ -1,0 +1,105 @@
+[
+  {
+    "id": "CK-01",
+    "query": "졸업설계",
+    "scope": {
+      "campus": "seoul"
+    },
+    "expected_document_keys": [
+      "courses:course",
+      "rules:guide",
+      "notices:notice",
+      "staff:office",
+      "guidance:page",
+      "attachments:file"
+    ]
+  },
+  {
+    "id": "CK-02",
+    "query": "CSE101",
+    "scope": {
+      "campus": "seoul"
+    },
+    "expected_document_keys": [
+      "courses:course"
+    ]
+  },
+  {
+    "id": "CK-03",
+    "query": "졸업 기준",
+    "scope": {
+      "campus": "seoul",
+      "entry_year": 2026
+    },
+    "expected_document_keys": [
+      "rules:guide"
+    ]
+  },
+  {
+    "id": "CK-04",
+    "query": "전화번호",
+    "scope": {
+      "campus": "seoul"
+    },
+    "expected_document_keys": [
+      "staff:office"
+    ]
+  },
+  {
+    "id": "CK-05",
+    "query": "첨부",
+    "scope": {
+      "campus": "seoul"
+    },
+    "expected_document_keys": [
+      "attachments:file"
+    ]
+  },
+  {
+    "id": "CK-06",
+    "query": "비빔밥",
+    "scope": {
+      "campus": "seoul"
+    },
+    "expected_document_keys": [
+      "meals:meal"
+    ]
+  },
+  {
+    "id": "CK-07",
+    "query": "비빔밥",
+    "scope": {
+      "as_of": "2026-10-18"
+    },
+    "expected_document_keys": []
+  },
+  {
+    "id": "CK-08",
+    "query": "비밀자료",
+    "expected_document_keys": []
+  },
+  {
+    "id": "CK-09",
+    "query": "아무근거없는문구",
+    "expected_document_keys": []
+  },
+  {
+    "id": "CK-10",
+    "query": "졸업설계",
+    "scope": {
+      "campus": "bmc"
+    },
+    "expected_document_keys": []
+  },
+  {
+    "id": "CK-11",
+    "query": "수강정정",
+    "scope": {
+      "campus": "seoul",
+      "academic_year": 2026
+    },
+    "expected_document_keys": [
+      "schedule:schedule"
+    ]
+  }
+]

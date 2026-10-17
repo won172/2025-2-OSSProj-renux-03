@@ -1,0 +1,3837 @@
+
+
+
+
+
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta property="og:image" content="https://gsbs.dongguk.edu/resources/images/site/common/og_thumbnail.jpg?v=01">
+    <link rel="shortcut icon" href="/images/favicon/favicon.ico" type="image/x-icon">
+    <link rel="icon" href="/images/favicon/favicon.ico" type="image/x-icon">
+    <title>동국대학교 불교대학원</title>
+    <link rel="stylesheet" href="/resources/site/gsbs/resource/css/pretendard.css">
+    <link rel="stylesheet" href="/resources/site/gsbs/resource/css/slick.css">
+    <link rel="stylesheet" href="/resources/site/gsbs/resource/css/slick-theme.css">
+    <link rel="stylesheet" href="/resources/site/gsbs/resource/css/common.css">
+    <link rel="stylesheet" href="/resources/site/gsbs/resource/css/default.css">
+    <link href="/resources/site/gsbs/resource/css/contents_gsbs.css" rel="stylesheet" type="text/css">
+    <link rel="stylesheet" href="/resources/site/gsbs/resource/css/main.css">
+    <!-- TODO 아래의 JS 는 공통 파일로 이동 -->
+    <script src="/resources/site/gsbs/resource/js/jquery.min.js"></script>
+    
+    <script src="/resources/site/gsbs/resource/js/slick.min.js"></script>
+    
+
+    <script src="/js/jquery/jquery.bxslider.js" type="text/javascript"></script>
+    <script type="text/javascript">
+        /* TODO https: 리다이렉트*/
+        if(window.location.protocol === 'http:'){
+            var host = window.location.host.split(':')[0];
+            var test_state = host.split('.')[2];
+            if(host === 'localhost' || test_state === 'se') {
+            } else { location.href='https://' + host + window.location.pathname + window.location.search;}
+        }
+    </script>
+</head>
+<body>
+
+<!--상단팝업존-->
+
+
+
+
+
+
+<script type="text/javascript">
+
+    // sns 공유할 현재 URL
+    var share_url = window.location.href;
+
+    $(document).ready(function(){
+
+        
+
+        //팝업
+        $("a.popup_open").on("click", function(e){
+            $("html").addClass("fixed");
+			$(".top-layer-pop").addClass("show");
+    		
+
+            
+            $.ajax({
+                url: '/ajax/popup/list',
+                type: 'post',
+                dataType: 'json',
+                success: function (res) {
+                    var pop = '';
+                    if(res.length > 0){
+                        res.forEach(function(v, i){
+                            if(v.popup_type == 'I'){
+                                pop +='<li>';
+                                pop +='<a href="';
+                                if(v.link_type =='P'){
+                                    pop += '#none';
+                                }else {
+                                    pop += v.link_url;
+                                }
+                                pop +='" target="';
+                                if(v.link_type == 'B'){
+                                    pop += '_blank';
+                                }else if(v.link_type =='N') {
+                                    pop += '_self';
+                                }else {
+                                    pop += '';
+                                }
+                                pop +='">';
+                                pop +='<div class="img">';
+                                pop +='<img src="/cmmn/fileView?path='+v.file_path+'&amp;physical='+v.file_sys_nm+'&amp;contentType=image" onerror="this.src=\'/resources/images/site/common/no_image.png\'">';
+                                pop +='</div>';
+                                pop +='<p class="sr-only">'+v.popup_title+'</p>';
+                                pop +='</a></li>';
+							}else if(v.popup_type == 'H'){
+    							pop +='<li>';
+    							pop +='<div class="img">';
+    							pop += v.content;
+    							pop +='</div>';
+    							pop +='</li>';
+							}
+
+                        });
+                    }else{
+                        pop +='<div class="popup-empty">등록된 팝업이 없습니다</div>';
+                    }
+                    $('.tpop-list').empty();
+                    $('.tpop-list').append(pop);
+
+                    if($('.tpop-list > li').length>=1){
+                        popupSlick();
+                    }
+
+                }
+            });
+            
+
+
+        });
+
+        $(".pop-close").on("click", function(){
+            $("html").removeClass("fixed");
+            $(".top-layer-pop").removeClass("show");
+            $('.tpop-list').slick("unslick");
+        });
+
+        if($("#kakaoBtn").length > 0){
+
+//            var url_path = window.location.pathname;
+//            var url_param = window.location.href.split("?");
+//
+//
+//            if(url_param.length > 1){
+//                url_param = url_param[1]
+//            }
+//
+//            var sns_url = url_path + url_param;
+
+//             var share_url = window.location.href;
+
+            // 사용할 앱의 JavaScript 키 설정
+            
+
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+        }
+    });
+
+    //SNS 공유
+    function shareSNS(sns_type){
+        switch (sns_type){
+            case "facebook":
+            
+                window.open("https://www.facebook.com/sharer/sharer.php?u="+encodeURIComponent(share_url));
+                break;
+
+            case "twitter":
+                window.open("https://twitter.com/intent/tweet"
+                    +"?"
+                    +"text="+encodeURIComponent("동국대학교 - ") // Title in this html document
+                    +"&url="+encodeURIComponent(share_url)
+                    
+                );
+                break;
+
+            case "kakao":
+                // 위에 있음.
+                break;
+        }
+    }
+
+    //상단 팝업존
+    function setCookie( name, value, expiredays ) {
+        var todayDate = new Date();
+        todayDate.setDate( todayDate.getDate() + expiredays );
+        document.cookie = name + "=" + escape( value ) + "; path=/; expires=" + todayDate.toGMTString() + ";"
+    }
+
+    function closePop() {
+        setCookie( "imgpop", "done" , 1 );
+        $('.top-layer-pop').removeClass('show');
+        $('.tpop-list').slick("unslick");
+    }
+
+    function getCookie(name) {
+        var Found = false;
+        var start, end;
+        var i = 0;
+
+        while(i <= document.cookie.length) {
+            start = i;
+            end = start + name.length;
+            if(document.cookie.substring(start, end) == name) {
+                Found = true;
+                break;
+            }
+            i++;
+        }
+        if(Found == true) {
+            start = end + 1;
+            end = start+name.length-2;
+            return document.cookie.substring(start, end);
+        }
+        return;
+    }
+
+    function popupSlick(){
+        //slick
+        $('.tpop-list').slick({
+            slidesToShow: 4,/* 화면에 보여질 이미지 갯수*/
+            slidesToScroll: 4,/*  스크롤시 이동할 이미지 갯수 */
+            infinite: true,/* 맨끝이미지에서 끝나지 않고 다시 맨앞으로 이동 */
+            dots: true,/*  아래점  */
+            // variableWidth : true,
+            responsive: [// 반응형 웹 구현 옵션
+                {
+                    breakpoint: 9999,
+                    settings: {
+                        slidesToShow: 4,
+                        slidesToScroll: 4
+                    }
+                },
+
+                {
+                    breakpoint: 1300,
+                    settings: {
+                        slidesToShow: 3,
+                        slidesToScroll: 3
+                    }
+                },
+                {
+                    breakpoint: 1200,
+                    settings: {
+                        slidesToShow: 2,
+                        slidesToScroll: 2
+                    }
+                }
+                ,
+                {
+                    breakpoint: 480,
+                    settings: {
+                        slidesToShow: 1,
+                        slidesToScroll: 1
+                    }
+                }
+            ]
+        });
+    }
+</script>
+<script src="/resources/site/gsbs/resource/js/mobile_menu.js"></script>
+<script src="/resources/site/gsbs/resource/js/script.js"></script>
+<!--상단팝업존-->
+<div class="top-layer-pop" >
+    <!--.pop a 클릭 시 .top-layer-pop 에 클래스 show 추가 , body 클래스 scrn 추가-->
+    <div class="tpop-wrap">
+        <div class="tpop-box">
+            <h2>popup zone</h2>
+            <ul class="tpop-list">
+                
+                    
+                    
+                        <li>
+                            <div class="popup-empty">등록된 팝업이 없습니다</div>
+                        </li>
+
+                    
+                
+            </ul>
+            <div class="pop-btn-area">
+                <a href="javascript:closePop()" class="pop-today-close">오늘 하루 보지 않기</a>
+                <a href="#none" class="pop-close">닫기</a>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    $(document).ready(function() {
+        var eventCookie = getCookie("imgpop");
+        if (eventCookie == "done") {
+            $('.top-layer-pop').removeClass('show');
+        }else{
+            
+
+        }
+
+    });
+</script>
+<!-- header -->
+<div id="header" class="header">
+    <div class="top_util">
+        <div class="wrap">
+            <ul class="link_group">
+                <li class="on"><a href="https://www.dongguk.edu/" target="_blank" title="새창열림">동국대학교</a></li>
+                <li><a href="https://nportal.dongguk.edu" target="_blank" title="새창열림">PORTAL</a></li>
+                <li><a href="https://ndrims.dongguk.edu" target="_blank" title="새창열림">nDRIMS</a></li><li><a href="https://eclass.dongguk.edu/" target="_blank" title="새창열림">e-Class</a></li>
+                <li><a href="https://gw.dongguk.edu" target="_blank" title="새창열림">GROUPWAWRE</a></li>
+                <li><a href="https://mail.dongguk.edu" target="_blank" title="새창열림">WEBMAIL</a></li><li><a href="http://lib.dongguk.edu/" target="_blank" title="새창열림">중앙도서관</a></li>
+                
+                
+                
+                
+                
+            </ul>
+            <div class="link_gr"><a href="https://search.dongguk.edu/" class="search" target="_blank" title="새창열림"><span>SEARCH</span></a><a href="#" class="popup_open"><span>POPUP</span></a></div>
+        </div>
+    </div>
+    <div class="header_wrap">
+        <div class="head_menu">
+            <h1>
+                <a href="/"><img src="/resources/site/gsbs/resource/images/layout/common/header_logo.png" alt="동국대학교 dongguk university"><span>불교대학원</span></a>
+            </h1>
+            <div id="gnb" class="gnb">
+
+                <ul class="depth01">
+                    
+                    
+                    
+            
+            
+            <li>
+                
+                
+                    
+                    <a href="#" target="">
+                        
+                        
+                        <span>대학원소개</span></a>
+
+                    <div class="depth02 header_drop" style="display: none;">
+                        <ul>
+                            
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            <a href="/page/1084" target="">
+                                                
+                                                
+                                                    원장인사말
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            <a href="/page/1085" target="">
+                                                
+                                                
+                                                    대학원 연혁
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            <a href="/page/1086" target="">
+                                                
+                                                
+                                                    학사운영실 안내
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            <a href="/page/1087" target="">
+                                                
+                                                
+                                                    찾아오시는 길
+                                            </a>
+                                </li>
+                            
+                            
+                    
+                </ul>
+            </div>
+            </li>
+            
+            
+            
+            <li>
+                
+                
+                    
+                    <a href="#" target="">
+                        
+                        
+                        <span>입학안내</span></a>
+
+                    <div class="depth02 header_drop" style="display: none;">
+                        <ul>
+                            
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            <a href="/page/1088" target="">
+                                                
+                                                
+                                                    석사/지도자과정
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            <a href="/page/30224" target="">
+                                                
+                                                
+                                                    모집요강
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            <a href="/resources/site/gsbs/resource/pdf/2023_cover_letter.hwp" target="_blank">
+                                                
+                                                
+                                                    자기소개서
+                                            </a>
+                                </li>
+                            
+                            
+                    
+                </ul>
+            </div>
+            </li>
+            
+            
+            
+            <li>
+                
+                
+                    
+                    <a href="#" target="">
+                        
+                        
+                        <span>학과(전공)</span></a>
+
+                    <div class="depth02 header_drop" style="display: none;">
+                        <ul>
+                            
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            
+                                            
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+
+                                            
+                                            
+                                        
+                                        
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        <a href="/page/1090" target="">
+                                            
+                                            
+                                                
+                                                    불교학과
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            
+                                            
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+
+                                            
+                                            
+                                        
+                                        
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        <a href="/page/1093" target="">
+                                            
+                                            
+                                                
+                                                    불교사회복지학과
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            
+                                            
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+
+                                            
+                                            
+                                        
+                                        
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        <a href="/page/1097" target="">
+                                            
+                                            
+                                                
+                                                    생사문화산업학과
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            
+                                            
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+
+                                            
+                                            
+                                        
+                                        
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        <a href="/page/1100" target="">
+                                            
+                                            
+                                                
+                                                    명상심리상담학과
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            
+                                            
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+
+                                            
+                                            
+                                        
+                                        
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        <a href="/page/1104" target="">
+                                            
+                                            
+                                                
+                                                    융합요가학과
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            
+                                            
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+
+                                            
+                                            
+                                        
+                                        
+                                            
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        <a href="/page/1107" target="">
+                                            
+                                            
+                                                
+                                                    차문화콘텐츠학과
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+                </ul>
+            </div>
+            </li>
+            
+            
+            
+            <li>
+                
+                
+                    
+                    <a href="#" target="">
+                        
+                        
+                        <span>정보마당</span></a>
+
+                    <div class="depth02 header_drop" style="display: none;">
+                        <ul>
+                            
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                        
+                                            
+                                            <a href="/page/31827" target="">
+                                                
+                                                
+                                                    학사일정
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                    <a href="/article/notice/list" target="">
+                                        
+                                        
+                                            
+                                                
+                                                    공지사항
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                    <a href="/article/student/list" target="">
+                                        
+                                        
+                                            
+                                                
+                                                    총학생회 게시판
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                    <a href="/article/news/list" target="">
+                                        
+                                        
+                                            
+                                                
+                                                    불교 관련 News
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                    <a href="/article/form/list" target="">
+                                        
+                                        
+                                            
+                                                
+                                                    양식함
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                                <li >
+                                    
+                                    
+                                    <a href="/article/gallery2/list" target="">
+                                        
+                                        
+                                            
+                                                
+                                                    사진첩
+                                            </a>
+                                </li>
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                    
+            
+                            
+                            
+                        </ul>
+                    </div>
+            </li>
+            </ul>
+
+            <div class="m_tit">
+                <strong>동국대학교<br>불교대학원</strong>
+                <p>Dongguk University</p>
+            </div>
+            <div class="gnb_util">
+                <button class="btn_ham"><span class="blind">전체메뉴</span></button>
+                <div class="full_menu" style="display: none;">
+                    <div class="wrap">
+                        <ul class="depth1">
+                            
+                            
+                            
+                        
+                        
+                        <li class="parent_li active" >
+                            
+                            
+                                
+                                <a href="#" target="">
+                                    
+                                    
+                                    <span>대학원소개</span></a>
+                                <ul class="depth2">
+                                    
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    <a href="/page/1084" target="">
+                                                        
+                                                        
+                                                            원장인사말
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    <a href="/page/1085" target="">
+                                                        
+                                                        
+                                                            대학원 연혁
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    <a href="/page/1086" target="">
+                                                        
+                                                        
+                                                            학사운영실 안내
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    <a href="/page/1087" target="">
+                                                        
+                                                        
+                                                            찾아오시는 길
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        </ul>
+                        </li>
+                        
+                        
+                        
+                        <li class="parent_li " >
+                            
+                            
+                                
+                                <a href="#" target="">
+                                    
+                                    
+                                    <span>입학안내</span></a>
+                                <ul class="depth2">
+                                    
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    <a href="/page/1088" target="">
+                                                        
+                                                        
+                                                            석사/지도자과정
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    <a href="/page/30224" target="">
+                                                        
+                                                        
+                                                            모집요강
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    <a href="/resources/site/gsbs/resource/pdf/2023_cover_letter.hwp" target="_blank">
+                                                        
+                                                        
+                                                            자기소개서
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        </ul>
+                        </li>
+                        
+                        
+                        
+                        <li class="parent_li " >
+                            
+                            
+                                
+                                <a href="#" target="">
+                                    
+                                    
+                                    <span>학과(전공)</span></a>
+                                <ul class="depth2">
+                                    
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    
+                                                    
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+
+                                                    
+                                                    
+                                                
+                                                
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                <a href="/page/1090" target="">
+                                                    
+                                                    
+                                                        
+                                                            불교학과
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    
+                                                    
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+
+                                                    
+                                                    
+                                                
+                                                
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                <a href="/page/1093" target="">
+                                                    
+                                                    
+                                                        
+                                                            불교사회복지학과
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    
+                                                    
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+
+                                                    
+                                                    
+                                                
+                                                
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                <a href="/page/1097" target="">
+                                                    
+                                                    
+                                                        
+                                                            생사문화산업학과
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    
+                                                    
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+
+                                                    
+                                                    
+                                                
+                                                
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                <a href="/page/1100" target="">
+                                                    
+                                                    
+                                                        
+                                                            명상심리상담학과
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    
+                                                    
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+
+                                                    
+                                                    
+                                                
+                                                
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                <a href="/page/1104" target="">
+                                                    
+                                                    
+                                                        
+                                                            융합요가학과
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    
+                                                    
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+
+                                                    
+                                                    
+                                                
+                                                
+                                                    
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                <a href="/page/1107" target="">
+                                                    
+                                                    
+                                                        
+                                                            차문화콘텐츠학과
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        </ul>
+                        </li>
+                        
+                        
+                        
+                        <li class="parent_li " >
+                            
+                            
+                                
+                                <a href="#" target="">
+                                    
+                                    
+                                    <span>정보마당</span></a>
+                                <ul class="depth2">
+                                    
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                                
+                                                    
+                                                    <a href="/page/31827" target="">
+                                                        
+                                                        
+                                                            학사일정
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                            <a href="/article/notice/list" target="">
+                                                
+                                                
+                                                    
+                                                        
+                                                            공지사항
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                            <a href="/article/student/list" target="">
+                                                
+                                                
+                                                    
+                                                        
+                                                            총학생회 게시판
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                            <a href="/article/news/list" target="">
+                                                
+                                                
+                                                    
+                                                        
+                                                            불교 관련 News
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                            <a href="/article/form/list" target="">
+                                                
+                                                
+                                                    
+                                                        
+                                                            양식함
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                        <li>
+                                            
+                                            
+                                            <a href="/article/gallery2/list" target="">
+                                                
+                                                
+                                                    
+                                                        
+                                                            사진첩
+                                                    </a>
+                                        </li>
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                            
+                        
+                                    
+                                    
+                                </ul></li></ul>
+                        <div class="logo"><img src="/resources/site/gsbs/resource/images/layout/common/header_logo.png" alt="동국대학교 dongguk university"><span>불교대학원</span></div>
+                        <button class="menu_close"><span class="blind">닫기</span></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+</div>
+
+<div class="m_top">
+    <div class="visual">
+        <ul class="main_slide">
+            
+            
+            
+                
+                    
+                
+            
+                
+            
+                
+            
+
+            
+            
+                
+                    
+                        
+                            <li class="slide" style="background-image: url('/cmmn/fileView?path=/gsbs/files/banner/199/&physical=952234E65560459BA1F5D72A65B7335A.jpg')">
+                                
+                                    
+                                        
+                                        <a>
+                                            
+                                            <div class="inner">
+                                                    <div class="slide_txt">
+<p>세상을 밝히는 지혜의 빛 세계 불교대학의 중심지</p>
+<strong>동국대학교 불교대학원</strong></div>
+
+                                            </div>
+                                        </a>
+                            </li>
+                        
+                    
+                
+                    
+                
+                    
+                
+            
+
+            
+            
+        </ul>
+    </div>
+
+</div>
+
+<script>
+    // 메인슬라이드
+    $('.main_slide').slick({
+        dots: true,
+        infinite: true,
+        speed: 1000,
+        autoplay: true,
+        autoplaySpeed: 4000,
+        slidesToShow: 1,
+        arrow:false,
+        fade: true
+    });
+</script>
+
+<div class="section_wrap">
+    <div class="section_group">
+        <div class="section_01">
+            <div class="m_notice">
+                <dl class="notice_item">
+                    
+                    
+                        <dt><a id="mtab1" class="active" href="javascript:tab_menu('1');"><span>공지사항</span></a></dt>
+                        <dd id="stage1">
+                            <ul>
+                                
+                                    
+                                        <li>
+                                            <a href="/article/notice/detail/215890">
+                                                
+                                                    <span class="sort">공지사항</span>
+                                                
+                                                
+                                                <p class="subject"><span>2026-2 “학위논문작성법” 특강 시행
+                                            
+                                                
+                                                    <i class="new">N</i>
+                                                
+                                            </span>
+                                                </p>
+                                                <span class="txt">
+                                            </span>
+                                                <span class="date">2026-10-16</span>
+                                            </a>
+                                        </li>
+                                    
+                                        <li>
+                                            <a href="/article/notice/detail/215876">
+                                                
+                                                    <span class="sort">공지사항</span>
+                                                
+                                                
+                                                <p class="subject"><span>2027학년도 봄 학위취득시험 안내
+                                            
+                                                
+                                                    <i class="new">N</i>
+                                                
+                                            </span>
+                                                </p>
+                                                <span class="txt">
+                                            </span>
+                                                <span class="date">2026-10-16</span>
+                                            </a>
+                                        </li>
+                                    
+                                        <li>
+                                            <a href="/article/notice/detail/215796">
+                                                
+                                                    <span class="sort">공지사항</span>
+                                                
+                                                
+                                                <p class="subject"><span>[차문화콘텐츠학과] 2026년 차문화콘텐츠지도사 민간자격취득 관련 실습워크숍 (가을 안거 30일 수행) 
+                                            
+                                                ...
+                                            
+                                                
+                                                    <i class="new">N</i>
+                                                
+                                            </span>
+                                                </p>
+                                                <span class="txt">
+                                            </span>
+                                                <span class="date">2026-10-15</span>
+                                            </a>
+                                        </li>
+                                    
+                                        <li>
+                                            <a href="/article/notice/detail/215073">
+                                                
+                                                    <span class="sort">공지사항</span>
+                                                
+                                                
+                                                <p class="subject"><span>[명상심리상담학과] 2026학년도 명상상담사 민간자격취득 관련 실습워크숍(치유와행복융합연구원) 시행
+                                            
+                                                ...
+                                            
+                                                
+                                            </span>
+                                                </p>
+                                                <span class="txt">
+                                            </span>
+                                                <span class="date">2026-09-18</span>
+                                            </a>
+                                        </li>
+                                    
+                                
+                                    
+                                
+                                    
+                                
+                            </ul>
+                            <a href="/article/notice/list" target="_self" class="more"><span class="blind">더보기</span></a>
+                        </dd>
+                    
+                </dl>
+                <dl class="notice_item">
+                    
+                    
+                        <dt><a id="mtab2" href="javascript:tab_menu('2');"><span></span></a></dt>
+                        <dd id="stage2" style="display: none;">
+                            <ul>
+                                
+                                    
+                                
+                                    
+                                
+                                    
+                                
+                            </ul>
+                            <a href="/article//list" target="_self" class="more"><span class="blind">더보기</span></a>
+                        </dd>
+                    
+                </dl>
+            </div>
+            <div class="quick">
+                
+                
+                    <!--html-->
+                    
+                        <ul>
+	<li class="ico_01"><a href="https://www.dongguk.edu/" target="_blank" title="새창열림"><span>동국대학교</span></a></li>
+	<li class="ico_02"><a href="https://mail.dongguk.edu/account/login.do" target="_blank" title="새창열림"><span>웹메일</span></a></li>
+<li class="ico_03"><a href="https://ndrims.dongguk.edu/" target="_blank" title="새창열림"><span>nDRIMS</span></a></li>
+	<li class="ico_04"><a href="https://eclass.dongguk.edu/" target="_blank" title="새창열림"><span>e-class</span></a></li>
+	<!-- <li class="ico_05"><a href="https://www.dongguk.edu/qna/list" target="_blank" title="새창열림"><span>Q&A</span></a></li> --><!-- <li class="ico_06"><a href="https://www.dongguk.edu/page/123" target="_blank" title="새창열림"><span>취업센터</span></a></li> -->
+	<li class="ico_07"><a href="http://lib.dongguk.edu/" target="_blank" title="새창열림"><span>중앙도서관</span></a></li>
+	<li class="ico_08"><a href="https://www.dongguk.edu/page/207" target="_blank" title="새창열림"><span>인터넷 증명발급</span></a></li>
+</ul>
+
+                    
+                        
+                    
+                        
+                    
+                
+            </div>
+        </div>
+        <div class="section_02">
+            <div class="intro_link">
+                
+                
+                    <!--html-->
+                    
+                        
+                    
+                        <div class="intro_link_inner"><h2>대학원 소개</h2><ul>	<li><a href="/page/1084">원장 인사말</a></li>	<li><a href="/page/1085">대학원 연혁</a></li>	<!--<li><a href="/page/1086">학사운영실 안내</a></li>	<li><a href="/page/1087">찾아오시는 길</a></li>--></ul><p><a class="more" href="/page/1084" target="_self"><span class="blind">더보기</span></a></p></div>
+                    
+                        
+                    
+                
+            </div>
+            <div class="m_public">
+                <div class="m_gallery">
+                    <div class="m_gallery_cont">
+                        
+                        
+                            <div class="tit">
+                                <h2>사진첩</h2>
+                            </div>
+                        
+                        <ul>
+                            
+                                
+                            
+                                
+                                    <li>
+                                        <a href="/article/gallery2/detail/213961">
+                                            <div class="thumb">
+                                                
+                                                    <img src="/resources/site/gsbs/resource/images/contents/no_image.jpg"  class="no_img" alt="이미지없음" />
+                                                
+                                                
+                                                
+                                            </div>
+                                            <div class="subject">
+                                                <p>2026학년도 가을 불교대학원 학위수여식
+                                                    
+                                            </div>
+                                            <span class="date">2026.08.21</span>
+                                        </a>
+                                    </li>
+                                
+                                    <li>
+                                        <a href="/article/gallery2/detail/206673">
+                                            <div class="thumb">
+                                                
+                                                
+                                                    <img alt="1" src="/cmmn/fileView?path=/ckeditor//gallery2&amp;physical=1770881861545.jpg&amp;contentType=image" />
+                                                
+                                                
+                                            </div>
+                                            <div class="subject">
+                                                <p>2026학년도 봄 불교대학원 학위수여식
+                                                    
+                                            </div>
+                                            <span class="date">2026.02.12</span>
+                                        </a>
+                                    </li>
+                                
+                            
+                                
+                            
+                        </ul>
+                        <a href="/article/gallery2/list" class="more"><span class="blind">더보기</span></a>
+                    </div>
+                </div>
+                <ul class="sns">
+                    
+                    
+                        <!--html-->
+                        
+                            
+                        
+                            
+                        
+                            <li class="youtube"><a href="#" target="_blank" title="새창열림"><span class="blind">유튜브</span></a></li>                    <li class="twitter"><a href="#" target="_blank" title="새창열림"><span class="blind">트위터</span></a></li>                    <li class="facebook"><a href="#" target="_blank" title="새창열림"><span class="blind">페이스북</span></a>                    </li>                    <li class="blog"><a href="#" target="_blank" title="새창열림"><span class="blind">블로그</span></a></li>                    <li class="instagram"><a href="#" target="_blank" title="새창열림"><span class="blind">인스타그램</span></a>                    </li>
+                        
+                    
+                </ul>
+            </div>
+            <ul class="img_banner">
+                
+                
+                
+                
+                
+                
+                
+                
+                    
+                
+                    
+                
+                    
+                
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="m_news">
+    
+    
+        <div class="tit">
+            <!-- <h2>불교대학원 NEWS <a href="/article/news/list" class="more"><span class="blind">더보기</span></a></h2> -->
+            <h2>불교 관련 NEWS <a href="/article/news/list" class="more"><span class="blind">더보기</span></a></h2>
+        </div>
+    
+    <ul class="news_list">
+        
+            
+        
+            
+        
+            
+                <li>
+                    <a href="/article/news/detail/213812">
+                        <div class="subject">
+                            <p>2026 영캠프 홍보
+                                
+                        </div>
+                        <div class="thumb">
+                            
+                            
+                                <img alt="1" src="/cmmn/fileView?path=/ckeditor//news&amp;physical=1786690460778.png&amp;contentType=image" />
+                            
+                            
+                        </div>
+                    </a>
+                </li>
+            
+                <li>
+                    <a href="/article/news/detail/212426">
+                        <div class="subject">
+                            <p>동국대, 건학 120주년 맞아 불교학 세계화 해법 모색
+                                
+                        </div>
+                        <div class="thumb">
+                            
+                            
+                                <img alt="1" src="/cmmn/fileView?path=/ckeditor//news&amp;physical=1782284980307.png&amp;contentType=image" />
+                            
+                            
+                        </div>
+                    </a>
+                </li>
+            
+                <li>
+                    <a href="/article/news/detail/209092">
+                        <div class="subject">
+                            <p>제20회 동국 시나리오 특별 공모전
+                                
+                        </div>
+                        <div class="thumb">
+                            
+                            
+                                <img alt="1" src="/cmmn/fileView?path=/ckeditor//news&amp;physical=1776305657837.png&amp;contentType=image" />
+                            
+                            
+                        </div>
+                    </a>
+                </li>
+            
+                <li>
+                    <a href="/article/news/detail/208729">
+                        <div class="subject">
+                            <p>제9기 불교어학당 수강생 모집
+                                
+                        </div>
+                        <div class="thumb">
+                            
+                            
+                                <img alt="1" src="/cmmn/fileView?path=/ckeditor//news&amp;physical=1775622736906.jpg&amp;contentType=image" />
+                            
+                            
+                        </div>
+                    </a>
+                </li>
+            
+                <li>
+                    <a href="/article/news/detail/206130">
+                        <div class="subject">
+                            <p>2026년 봄 학위수여식 기념 &#039;이어Dream 캠페인&#039;
+                                
+                        </div>
+                        <div class="thumb">
+                            
+                            
+                                <img alt="1" src="/cmmn/fileView?path=/ckeditor//news&amp;physical=1769138715805.png&amp;contentType=image" />
+                            
+                            
+                        </div>
+                    </a>
+                </li>
+            
+        
+    </ul>
+</div>
+
+
+    <div class="link_banner">
+        <div class="inner">
+            <ul>
+                
+                    
+                
+                    
+                
+                    
+                        <li>
+                            
+                            <a href="https://www.dongguk.edu/qna/list" target="_blank" title="새창열림" style="background:url('/cmmn/fileView?path=/banner_item/2cha/&physical=link_bn_ico_07_26.png') left center no-repeat;">
+                                
+                                
+                                    
+                                            Q&A
+                                    </a>
+                        </li>
+
+                    
+                        <li>
+                            
+                            <a href="http://dongguk.webminwon.kr" target="_blank" title="새창열림" style="background:url('/cmmn/fileView?path=/banner_item/2cha/&physical=link_bn_ico_06_26.png') left center no-repeat;">
+                                
+                                
+                                    
+                                            증명서발급
+                                    </a>
+                        </li>
+
+                    
+                        <li>
+                            
+                            <a href="https://www.dongguk.edu/page/123" target="_blank" title="새창열림" style="background:url('/cmmn/fileView?path=/banner_item/2cha/&physical=link_bn_ico_05_26.png') left center no-repeat;">
+                                
+                                
+                                    
+                                            취업팀
+                                    </a>
+                        </li>
+
+                    
+                        <li>
+                            
+                            <a href="http://lib.dongguk.edu/" target="_blank" title="새창열림" style="background:url('/cmmn/fileView?path=/banner_item/2cha/&physical=link_bn_ico_04_3.png') left center no-repeat;">
+                                
+                                
+                                    
+                                            중앙도서관
+                                    </a>
+                        </li>
+
+                    
+                        <li>
+                            
+                            <a href="https://mail.dongguk.edu/account/login.do" target="_blank" title="새창열림" style="background:url('/cmmn/fileView?path=/banner_item/2cha/&physical=link_bn_ico_03_26.png') left center no-repeat;">
+                                
+                                
+                                    
+                                            웹메일
+                                    </a>
+                        </li>
+
+                    
+                        <li>
+                            
+                            <a href="https://eclass.dongguk.edu/" target="_blank" title="새창열림" style="background:url('/cmmn/fileView?path=/banner_item/2cha/&physical=link_bn_ico_02_26.png') left center no-repeat;">
+                                
+                                
+                                    
+                                            e-class
+                                    </a>
+                        </li>
+
+                    
+                        <li>
+                            
+                            <a href="https://support.dongguk.edu/unis/index.do?t=5544673155325A4E55573178523352595A32517A64464673627A6C70647A3039" target="_blank" title="새창열림" style="background:url('/cmmn/fileView?path=/gsbs/files/banner/31091/&physical=47A3402F53424FE1A7184A3F872E168F.png') left center no-repeat;">
+                                
+                                
+                                    
+                                            대학원 시간표
+                                    </a>
+                        </li>
+
+                    
+                        <li>
+                            
+                            <a href="https://dongguk.copykiller.com/ " target="_blank" title="새창열림" style="background:url('/cmmn/fileView?path=/gsbs/files/banner/31092/&physical=2EECC04DAFEC421B9BE32803B9DE348D.png') left center no-repeat;">
+                                
+                                
+                                    
+                                            카피킬러
+                                    </a>
+                        </li>
+
+                    
+                
+            </ul>
+        </div>
+    </div>
+
+
+
+
+
+
+
+<script>
+    $(document).ready(function() {
+        var menu_up_down = 1;
+        $("#foot_quick").click(function () {
+            if (menu_up_down == 1) {
+                $("#lmenu").animate({height: "328px"});
+                menu_up_down = 0;
+            } else {
+                $("#lmenu").animate({height: "0px"});
+                menu_up_down = 1;
+            }
+        });
+
+
+    });
+</script>
+
+<!--footer-->
+<a href="#" id="scroll" style="display: none;"><i><span class="">TOP</span></i></a>
+<div class="footer">
+    <div class="ft_top">
+        <ul>
+            <li class="on"><a href="https://www.dongguk.edu/page/534" target="_blank">개인정보처리방침</a></li>
+        </ul>
+    </div>
+    <div class="inner">
+        <div class="ft_bottom">
+            <div class="ftb_left">
+            <span class="ft_logo">
+                <img src="/resources/site/gsbs/resource/images/layout/common/footer_logo.png" alt="">
+            </span>
+                <div class="txt">
+                    <p class="address"><span>(04620) 서울특별시 중구 필동로 1길 30 동국대학교 불교대학원 (법학관 1층 166호 불교대학(원) 학사운영실)</span> <span>Tel : 02-2260-3096</span><span> Fax : 02-2260-8627</span></p>
+                    <p class="copyright">COPYRIGHT(C) DONGGUK UNIVERSITY</p>
+                </div>
+            </div>
+           <!-- <div class="ft_sns">
+                <a href="#" target="_blank" title="새창열림" class="youtube"><span class="blind">유튜브</span></a>
+                <a href="#" target="_blank" title="새창열림" class="facebook"><span class="blind">페이스북</span></a>
+                <a href="#" target="_blank" title="새창열림" class="twitter"><span class="blind">트위터</span></a>
+                <a href="#" target="_blank" title="새창열림" class="insta"><span class="blind">인스타그램</span></a>
+            </div> -->
+        </div>
+    </div>
+</div>
+<!--//footer-->
+
+<script>
+    $('.depth01 li').on({
+        mouseover: function() {
+            $('.header').addClass('m_header');
+            $('.head_menu h1 img').attr('src', "/resources/site/gsbs/resource/images/layout/common/header_logo.png");
+
+        },
+        mouseleave: function() {
+            $('.header').removeClass('m_header');
+            $('.head_menu h1 img').attr('src', "/resources/site/gsbs/resource/images/layout/common/header_logo_w.png");
+
+        }
+    });
+    $(document).ready(function(){
+        $('.header').removeClass('m_header');
+        $('.head_menu h1 img').attr('src', "/resources/site/gsbs/resource/images/layout/common/header_logo_w.png");
+    });
+</script>
+</body>
+</html>

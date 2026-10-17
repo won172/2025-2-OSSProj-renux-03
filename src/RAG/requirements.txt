@@ -55,3 +55,4 @@ pydantic>=2.7.4
 sqlalchemy>=2.0.0
 pytest>=8.4.0
 pytest-asyncio>=1.0.0
+olefile>=0.47         # bounded HWP 5 OLE text extraction (no macros/model/OCR)

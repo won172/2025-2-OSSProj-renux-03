@@ -1,0 +1,128 @@
+<html><head><title>
+        동국대학교 - 학사/생활/장학
+                    - 학사센터 
+                    -  학사제도 
+                    -  휴학/복학/제적/퇴학(자퇴)</title></head><body><div class="contents" id="content_focus">
+<div class="inner">
+<div class="section_tit">
+<h1>학사제도</h1>
+</div>
+<script>
+    $(document).ready(function () {
+        // 링크#일경우 새창열기 속성 없앰
+        $("a[href ^= '#']").attr("target", "_self");
+
+        if($('.mTs div div a img.map')) {
+            var prWidth = $('#sub_contents').width();
+            checkerMapSizer(prWidth);
+        }
+    });
+
+    $(window).resize(function (){
+        var windowWidth = $( window ).width();
+        checkerMapSizer(windowWidth);
+    })
+
+    function checkerMapSizer(width) {
+        var widthPx = width + 'px';
+        $('.mTs div div a img.map').css('width',widthPx);
+        $('.mTs div div a img.map').css('max-width','798px');
+        $('.mTs div div a img.map').css('height','auto');
+        var nodes = $('.mTs div div a img.map').parent().parent().parent().parent();
+        nodes.find('div:eq(1)').next().hide();
+    }
+
+    // 탭 메뉴
+    function tab_menu(id,num) {
+        var f = $('.depart_tabmenu'+id).find('li');
+        for (var i = 0; i < f.length; i++) {
+            if (i == num) {
+                f.eq(i).addClass('active');
+                $('.menu_tab0'+id+'_' + i).show();
+            } else {
+                f.eq(i).removeClass('active');
+                $('.menu_tab0'+id+'_' + i).hide();
+            }
+        }
+    }
+
+    // 단대소개 버튼
+    function tabOpen(num){
+        var tab = $("#college_tab0"+num);
+        var btn = $("#college_btn0"+num);
+        if(tab.css("display") == "none"){
+            tab.css("display","block");
+            btn.html("▲");
+        }else{
+            tab.css("display","none");
+            btn.html("▼");
+        }
+    }
+    // 단대 포커싱
+    function tabFocus(f){
+        var offset = $(f).offset();
+        $('html, body').animate({scrollTop : offset.top}, 400);
+        $(f).find('a').first().focus();
+    }
+
+    function fn_goArea(f){
+        console.log(f);
+        var offset = $(f).offset();
+        $('html, body').animate({scrollTop : offset.top}, 400);
+        $(f).find('a').first().focus();
+    }
+
+    function fn_showPDF(filepath){
+        var content =
+            '<iframe title="PDF 파일보기" class="pdf_viewer" src="/resources/viewer/web/viewer.html?file='+
+            filepath +
+            '" style="width:100%; height:900px;"></iframe>';
+        $('#pdfContainer').html(content);
+
+    }
+
+</script>
+<div class="cont_group">
+<h3 class="cont_sub_tit">일반휴학</h3>
+<p>1학년 2학기부터 신청 가능, 외국인 학생은 국제학생센터에 직접 방문하여 신청해야 한다.</p>
+</div>
+<div class="cont_group">
+<h3 class="cont_sub_tit">질병휴학</h3>
+<ul class="dot_list">
+<li>학기 중 장기치료를 요하는 질병으로 휴학하고자 하는 자는 사유 발생 10일 이내에 일반휴학원에 종합병원장이 발행하는 4주 이상의 진단서를 첨부하여 제출해야 함</li>
+<li>질병휴학의 경우 일반휴학 기간을 모두 사용한 자에 한해 인정함 (최대 1년)
+	<p class="refer">단, 일반휴학기간을 사용하더라도 학기 중간에 휴학하는 경우, 종합병원장이 발행한 4주 이상의 진단서가 필요함</p>
+</li>
+</ul>
+</div>
+<div class="cont_group">
+<h3 class="cont_sub_tit">임신·출산 및 육아휴학</h3>
+대학(원)생이 임신·출산 또는 자녀의 양육을 사유로 휴학하는 경우 통산 6학기까지 휴학 가능.</div>
+<div class="cont_group">
+<h3 class="cont_sub_tit">창업휴학</h3>
+대학(원)생이 창업을 사유로 휴학하는 경우 재학기간 중 통산 4학기까지 휴학 가능.</div>
+<div class="cont_group">
+<h3 class="cont_sub_tit">군휴학(병사휴학)</h3>
+입대예정일이 학기 개시 후 일정 기간이 경과한 이후일 경우, 반드시 일반휴학을 해당 학기 신청기간 내에 먼저 신청한 후 입대 직전 병사휴학으로 변경하여야 함</div>
+<div class="cont_group">
+<h3 class="cont_sub_tit">복학</h3>
+<ul class="dot_list">
+<li>복학은 매 학기 정해진 복학신청기간에 한하여 허가함</li>
+<li>병사 휴학자는 전역일로부터 1년 이내에 복학하여야 하며, 군에 복무하는 자가 복학하고자 할 경우 수업결손이 4주를 초과하지 않는 자에 한함
+	<p class="refer">복학예정연도 학기에 미복학 시 휴학기간 만료로 제적 처리됨</p>
+</li>
+</ul>
+</div>
+<div class="cont_group">
+<h3 class="cont_sub_tit">기타사항</h3>
+<p>휴학·복학에 관한 기타 자세한 사항은 학사제도 및 학업이수 가이드 참조</p>
+</div>
+<div style="clear: both;"></div>
+<div class="page_contact">
+<ul>
+<li><span>담당부서 </span><p>학사지원팀</p></li>
+<li><span>연락처</span><p>02-2260-3619</p></li>
+</ul>
+</div>
+</div>
+</div></body></html>

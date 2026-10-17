@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "purpose": "bounded staging collection; external institution links require explicit review",
+  "approved_sources": [
+    {
+      "url": "https://www.dongguk.edu/",
+      "owner": "동국대학교",
+      "campus_scope": "unknown",
+      "allow_descendants": true,
+      "seed": false,
+      "verification_url": "https://www.dongguk.edu/sitemap/detail"
+    },
+    {
+      "url": "https://www.dongguk.edu/campus/list",
+      "owner": "동국대학교 캠퍼스 기관 디렉터리",
+      "campus_scope": "unknown",
+      "kind": "directory",
+      "verification_url": "https://www.dongguk.edu/campus/list"
+    },
+    {
+      "url": "https://www.dongguk.edu/sitemap/detail",
+      "owner": "동국대학교 공식 사이트맵",
+      "campus_scope": "unknown",
+      "kind": "sitemap",
+      "verification_url": "https://www.dongguk.edu/sitemap/detail"
+    }
+  ],
+  "guidance_manifest": "official_guidance_sources.json",
+  "external_policy": "directory-linked origins are candidates only; add exact reviewed HTTPS URL/prefix and verification_url to approved_sources using a reviewed policy upgrade while preserving the checkpoint history",
+  "institution_manifest": "official_institution_sources.json"
+}

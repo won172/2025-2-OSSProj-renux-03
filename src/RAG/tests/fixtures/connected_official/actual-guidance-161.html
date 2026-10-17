@@ -1,0 +1,139 @@
+<html><head><title>
+        동국대학교 - 학사/생활/장학
+                    - 학사센터 
+                    -  학사제도 
+                    -  전공결정</title></head><body><div class="contents" id="content_focus">
+<div class="inner">
+<div class="section_tit">
+<h1>학사제도</h1>
+</div>
+<script>
+    $(document).ready(function () {
+        // 링크#일경우 새창열기 속성 없앰
+        $("a[href ^= '#']").attr("target", "_self");
+
+        if($('.mTs div div a img.map')) {
+            var prWidth = $('#sub_contents').width();
+            checkerMapSizer(prWidth);
+        }
+    });
+
+    $(window).resize(function (){
+        var windowWidth = $( window ).width();
+        checkerMapSizer(windowWidth);
+    })
+
+    function checkerMapSizer(width) {
+        var widthPx = width + 'px';
+        $('.mTs div div a img.map').css('width',widthPx);
+        $('.mTs div div a img.map').css('max-width','798px');
+        $('.mTs div div a img.map').css('height','auto');
+        var nodes = $('.mTs div div a img.map').parent().parent().parent().parent();
+        nodes.find('div:eq(1)').next().hide();
+    }
+
+    // 탭 메뉴
+    function tab_menu(id,num) {
+        var f = $('.depart_tabmenu'+id).find('li');
+        for (var i = 0; i < f.length; i++) {
+            if (i == num) {
+                f.eq(i).addClass('active');
+                $('.menu_tab0'+id+'_' + i).show();
+            } else {
+                f.eq(i).removeClass('active');
+                $('.menu_tab0'+id+'_' + i).hide();
+            }
+        }
+    }
+
+    // 단대소개 버튼
+    function tabOpen(num){
+        var tab = $("#college_tab0"+num);
+        var btn = $("#college_btn0"+num);
+        if(tab.css("display") == "none"){
+            tab.css("display","block");
+            btn.html("▲");
+        }else{
+            tab.css("display","none");
+            btn.html("▼");
+        }
+    }
+    // 단대 포커싱
+    function tabFocus(f){
+        var offset = $(f).offset();
+        $('html, body').animate({scrollTop : offset.top}, 400);
+        $(f).find('a').first().focus();
+    }
+
+    function fn_goArea(f){
+        console.log(f);
+        var offset = $(f).offset();
+        $('html, body').animate({scrollTop : offset.top}, 400);
+        $(f).find('a').first().focus();
+    }
+
+    function fn_showPDF(filepath){
+        var content =
+            '<iframe title="PDF 파일보기" class="pdf_viewer" src="/resources/viewer/web/viewer.html?file='+
+            filepath +
+            '" style="width:100%; height:900px;"></iframe>';
+        $('#pdfContainer').html(content);
+
+    }
+
+</script>
+<div class="cont_group">
+<h3 class="cont_sub_tit">전공결정제도</h3>
+<div class="tbl_wrap">
+<table class="tbl" summary="구분과 내용으로 구분된 전공결정제도안내입니다.">
+<caption>전공결정제도</caption>
+<colgroup>
+<col width="100"/>
+<col/>
+</colgroup>
+<thead>
+<tr>
+<th>구분</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th>대 상</th>
+<td style="text-align: left;">학부모집단위 입학생 및 복학생(학과별 또는 전공확정 후 입학생 제외)</td>
+</tr>
+<tr>
+<th>결정시기</th>
+<td style="text-align: left;">1학년 2학기말</td>
+</tr>
+<tr>
+<th>결정기준</th>
+<td style="text-align: left;">1순위: 지망전공<br/>
+			2순위: 1학기 평점평균(15학점 이상 미취득 시 후순위)</td>
+</tr>
+<tr>
+<th>주요내용</th>
+<td style="text-align: left;">① 전공결정 대상자는 소속 모집단위 내의 개설 전공만 가능<br/>
+			② 반영 성적은 1학년 1학기 성적임.</td>
+</tr>
+<tr>
+<th>신청방법</th>
+<td style="text-align: left;">소속 모집 단위 내의 개설전공에 희망 순위를 정하여 nDRIMS에서 신청</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="cont_group">
+<h3 class="cont_sub_tit">전공결정 승인</h3>
+<p>위 표의 정해진 규칙과 절차에 따라 전공을 신청한 결과, 소속모집단위 내의 각 전공별 배정 가능 인원 내에 포함될 경우, 자동 승인됨.</p>
+</div>
+<div style="clear: both;"></div>
+<div class="page_contact">
+<ul>
+<li><span>담당부서 </span><p>학사지원팀</p></li>
+<li><span>연락처</span><p>02-2260-3620</p></li>
+</ul>
+</div>
+</div>
+</div></body></html>
