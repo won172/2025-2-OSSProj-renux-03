@@ -9,6 +9,7 @@ import AppNav from '../../components/AppNav'
 import type { AuthNameResponse } from '../../types/auth'
 import type { HomeBriefing } from '../../types/briefing'
 import { KIND_LABEL, calendarErrorMessage, fetchCalendarEvents, type CalendarEvent } from '../calendar/calendarApi'
+import { fetchSavedEvents } from '../calendar/savedEventsApi'
 import { addDays, dDayBig, dDayText, kstToday } from '../calendar/calendarDates'
 import {
   UPCOMING_RANGE_DAYS,
@@ -70,12 +71,18 @@ const TodayPage = () => {
 
   const authenticated = viewer.data?.authenticated === true
   const [unread, setUnread] = useState(0)
+  const [savedIds, setSavedIds] = useState<Set<string>>(() => new Set())
   useEffect(() => {
     if (!authenticated) return
     let active = true
     fetchNotifications().then(
       (notifications) => { if (active) setUnread(countUnreadGroups(groupNotifications(Array.isArray(notifications) ? notifications : []))) },
       () => { if (active) setUnread(0) },
+    )
+    // 저장한 일정은 카드에 별로만 표시한다. 실패해도 홈은 그대로 보인다.
+    fetchSavedEvents().then(
+      (result) => { if (active && result.signedIn) setSavedIds(new Set(result.events.map((event) => event.eventId))) },
+      () => {},
     )
     return () => { active = false }
   }, [authenticated])
@@ -129,7 +136,7 @@ const TodayPage = () => {
                 <p className="today-empty">{UPCOMING_RANGE_DAYS}일 안에 다가오는 일정이 없어요.</p>
               ) : (
                 <ul className="today-events">
-                  {upcoming.map((event) => <UpcomingItem key={event.id} event={event} today={today} />)}
+                  {upcoming.map((event) => <UpcomingItem key={event.id} event={event} today={today} saved={savedIds.has(event.id)} />)}
                 </ul>
               )}
             </Section>
@@ -201,13 +208,16 @@ const TodayPage = () => {
   )
 }
 
-const UpcomingItem = ({ event, today }: { event: CalendarEvent; today: string }) => {
+const UpcomingItem = ({ event, today, saved }: { event: CalendarEvent; today: string; saved: boolean }) => {
   const big = dDayBig(event, today)
   return (
     <li>
       <Link className="today-event" to={eventDetailPath(event, today)} state={{ event }}
-        aria-label={`${KIND_LABEL[event.kind]} ${event.title}, ${dDayText(event, today)}`}>
-        <span className={`today-tag kind-${event.kind}`}>{KIND_LABEL[event.kind]}</span>
+        aria-label={`${KIND_LABEL[event.kind]} ${event.title}, ${dDayText(event, today)}${saved ? ', 저장한 일정' : ''}`}>
+        <span className="today-event__head">
+          <span className={`today-tag kind-${event.kind}`}>{KIND_LABEL[event.kind]}</span>
+          {saved && <svg className="today-event__star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" /></svg>}
+        </span>
         <span className="today-event__title">{event.title}</span>
         <span className="today-event__dday">{big.value}</span>
       </Link>
