@@ -15,11 +15,14 @@ internal static class SavedEventsTests
         CheckDueNotifications(check);
         CheckSnapshotRefresh(check);
         await CheckInputValidationAsync(check);
+        await CheckPersonalValidationAsync(check);
+        CheckPersonalWording(check);
 
         var connection = Environment.GetEnvironmentVariable("DONGTTOK_TEST_CONNECTION");
         if (!string.IsNullOrWhiteSpace(connection))
         {
             await CheckSaveFlowAgainstDatabaseAsync(check, connection);
+            await CheckPersonalFlowAgainstDatabaseAsync(check, connection);
         }
     }
 
@@ -276,6 +279,110 @@ internal static class SavedEventsTests
             await cleanup.UserNotifications.Where(n => n.UserId == userId).ExecuteDeleteAsync();
             await cleanup.SavedEvents.Where(e => e.UserId == userId).ExecuteDeleteAsync();
             await cleanup.Users.Where(u => u.Id == userId).ExecuteDeleteAsync();
+        }
+    }
+
+    private static async Task CheckPersonalValidationAsync(Action<bool, string> check)
+    {
+        // DB에 닿기 전에 끝나는 검증.
+        var options = new DbContextOptionsBuilder<ServerDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=model_only;Password=model_only")
+            .Options;
+        await using var db = new ServerDbContext(options);
+        var today = new DateOnly(2026, 10, 17);
+        (PersonalEventRequest Request, string Code, string Label)[] invalid =
+        [
+            (new(null, "  ", null, "2026-10-20", null), "invalid_title", "blank title"),
+            (new(null, new string('가', 101), null, "2026-10-20", null), "invalid_title", "title over 100 characters"),
+            (new(null, "줄\n바꿈", null, "2026-10-20", null), "invalid_title", "control characters"),
+            (new(null, "과제", null, "2026/10/20", null), "invalid_date", "wrong date format"),
+            (new(null, "과제", "2026-10-21", "2026-10-20", null), "invalid_date", "start after end"),
+            (new(null, "과제", "2026-01-01", "2027-01-03", null), "invalid_date", "span over 366 days"),
+            (new(null, "과제", null, "2029-01-01", null), "invalid_date", "beyond today + 2 years"),
+            (new(null, "과제", null, "2026-10-20", new SavedEventReminderDto(true, [3])), "invalid_reminder", "disallowed step"),
+        ];
+        foreach (var (request, code, label) in invalid)
+        {
+            var outcome = await SavedEventApis.UpsertPersonalAsync(db, UserId, request, create: true, CancellationToken.None, today);
+            check(outcome.StatusCode == 400 && ErrorCode(outcome) == code, $"Personal event with {label} must be 400 {code} (got {outcome.StatusCode} {ErrorCode(outcome)}).");
+        }
+
+        var badId = await SavedEventApis.UpsertPersonalAsync(db, UserId, new("schedule:winter", "과제", null, "2026-10-20", null), create: false, CancellationToken.None, today);
+        check(badId.StatusCode == 400 && ErrorCode(badId) == "invalid_event", "Only personal ids can be edited as personal events (official events stay read-only).");
+        check(SavedEventApis.IsDeletableEventId("personal:" + new string('a', 32)) && !SavedEventApis.IsDeletableEventId("personal:x"),
+            "Delete accepts server-made personal ids only.");
+    }
+
+    private static void CheckPersonalWording(Action<bool, string> check)
+    {
+        var personal = Saved(null, "2026-11-13", days: "1");
+        personal.Source = "personal";
+        personal.Title = "동아리 회의";
+        var due = Due(personal, "2026-11-12");
+        check(due.Count == 1 && due[0].Topic == SavedEventApis.PersonalTopic && due[0].Body == "내일(11월 13일) 일정이에요. 동아리 회의",
+            "Personal reminders use their own topic and do not call the day a deadline.");
+    }
+
+    private static async Task CheckPersonalFlowAgainstDatabaseAsync(Action<bool, string> check, string connection)
+    {
+        var options = new DbContextOptionsBuilder<ServerDbContext>().UseNpgsql(connection).Options;
+        var owner = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        await using (var seed = new ServerDbContext(options))
+        {
+            var major = await seed.Majors.FirstAsync();
+            var role = await seed.Roles.FirstAsync();
+            foreach (var id in new[] { owner, other })
+            {
+                seed.Users.Add(new User { Id = id, UserId = $"personal-{id:N}", HashPassword = "x", Username = "개인 일정", MajorId = major.Id, RoleId = role.Id });
+            }
+            await seed.SaveChangesAsync();
+        }
+
+        var today = NotificationApis.TodayKst();
+        try
+        {
+            SavedEventDto? created;
+            await using (var db = new ServerDbContext(options))
+            {
+                var outcome = await SavedEventApis.UpsertPersonalAsync(db, owner,
+                    new(null, "  동아리 회의  ", today.AddDays(3).ToString("yyyy-MM-dd"), today.AddDays(3).ToString("yyyy-MM-dd"), null), create: true, CancellationToken.None);
+                created = outcome.Body as SavedEventDto;
+                check(outcome.StatusCode == 201 && created is not null
+                      && created.Source == "personal" && created.Kind == "personal" && created.Title == "동아리 회의"
+                      && created.StartDate is null && created.Url is null
+                      && created.EventId.StartsWith("personal:", StringComparison.Ordinal) && created.Reminder.DaysBefore.SequenceEqual([7, 1]),
+                    "Creating stores a trimmed title, a single day when start equals end, no link, a server id and default reminders.");
+            }
+
+            var start = today.AddDays(5).ToString("yyyy-MM-dd");
+            var end = today.AddDays(7).ToString("yyyy-MM-dd");
+            await using (var db = new ServerDbContext(options))
+            {
+                var updated = await SavedEventApis.UpsertPersonalAsync(db, owner,
+                    new(created!.EventId, "동아리 MT", start, end, new SavedEventReminderDto(true, [0])), create: false, CancellationToken.None);
+                var dto = updated.Body as SavedEventDto;
+                check(updated.StatusCode == 200 && dto?.Title == "동아리 MT" && dto.StartDate == start && dto.EndDate == end && dto.Reminder.DaysBefore.SequenceEqual([0]),
+                    "Editing changes the title, period and reminders.");
+
+                var stranger = await SavedEventApis.UpsertPersonalAsync(db, other,
+                    new(created.EventId, "가로채기", null, end, null), create: false, CancellationToken.None);
+                check(stranger.StatusCode == 404, "Another user cannot edit someone else's personal event.");
+            }
+
+            await using (var db = new ServerDbContext(options))
+            {
+                var row = await db.SavedEvents.SingleAsync(e => e.UserId == owner);
+                check(row.Title == "동아리 MT" && row.SourceId == created!.EventId["personal:".Length..], "Exactly one personal row is stored with its id as source id.");
+                await db.SavedEvents.Where(e => e.UserId == owner && e.EventId == created.EventId).ExecuteDeleteAsync();
+                check(!await db.SavedEvents.AnyAsync(e => e.UserId == owner), "Deleting removes the personal event.");
+            }
+        }
+        finally
+        {
+            await using var cleanup = new ServerDbContext(options);
+            await cleanup.SavedEvents.Where(e => e.UserId == owner || e.UserId == other).ExecuteDeleteAsync();
+            await cleanup.Users.Where(u => u.Id == owner || u.Id == other).ExecuteDeleteAsync();
         }
     }
 

@@ -125,6 +125,7 @@ static public class NotificationApis
         ["document_submission"] = "서류 제출",
         ["academic_schedule"] = "학사일정",
         [SavedEventApis.Topic] = SavedEventApis.TopicLabel,
+        [SavedEventApis.PersonalTopic] = SavedEventApis.PersonalTopicLabel,
     };
 
     /// <summary>

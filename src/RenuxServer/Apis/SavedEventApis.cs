@@ -29,6 +29,12 @@ public record SavedEventDto(
 /// </summary>
 public record SaveEventRequest(string? EventId, string? EndDate, SavedEventReminderDto? Reminder);
 
+/// <summary>
+/// 개인 일정 만들기·고치기. EventId는 고칠 때만 쓴다(만들 때는 서버가 정한다).
+/// StartDate가 없거나 EndDate와 같으면 하루짜리 일정이다.
+/// </summary>
+public record PersonalEventRequest(string? EventId, string? Title, string? StartDate, string? EndDate, SavedEventReminderDto? Reminder);
+
 /// <summary>엔드포인트와 계약 테스트가 함께 쓰는 처리 결과. Body는 응답 JSON 본문이다.</summary>
 public sealed record SavedEventOutcome(int StatusCode, object? Body);
 
@@ -42,6 +48,8 @@ static public class SavedEventApis
 {
     internal const string Topic = "saved_event";
     internal const string TopicLabel = "저장한 일정";
+    internal const string PersonalTopic = "personal_event";
+    internal const string PersonalTopicLabel = "내 일정";
 
     /// <summary>한 사용자가 저장할 수 있는 일정 수.</summary>
     internal const int MaxSavedPerUser = 200;
@@ -52,6 +60,16 @@ static public class SavedEventApis
     internal static readonly IReadOnlyList<int> DefaultDaysBefore = [7, 1];
 
     private static readonly Regex EventIdPattern = new(@"^(schedule|notices):\S{1,180}$", RegexOptions.CultureInvariant);
+
+    /// <summary>개인 일정. 공식 일정과 같은 테이블·알림을 쓰고, id는 서버가 만든 personal:{guid}다.</summary>
+    internal const string PersonalSource = "personal";
+    internal const int MaxPersonalTitleLength = 100;
+    /// <summary>개인 일정 한 건이 걸칠 수 있는 최대 기간(일).</summary>
+    internal const int MaxPersonalSpanDays = 366;
+    private static readonly Regex PersonalIdPattern = new(@"^personal:[0-9a-f]{32}$", RegexOptions.CultureInvariant);
+
+    internal static bool IsDeletableEventId(string eventId)
+        => EventIdPattern.IsMatch(eventId) || PersonalIdPattern.IsMatch(eventId);
 
     static public void AddSavedEventApis(this WebApplication application)
     {
@@ -103,7 +121,7 @@ static public class SavedEventApis
                 return Results.Unauthorized();
             }
 
-            if (string.IsNullOrWhiteSpace(eventId) || !EventIdPattern.IsMatch(eventId.Trim()))
+            if (string.IsNullOrWhiteSpace(eventId) || !IsDeletableEventId(eventId.Trim()))
             {
                 return Results.BadRequest(new CalendarErrorResponse("invalid_event", "일정 id가 올바르지 않습니다."));
             }
@@ -114,6 +132,131 @@ static public class SavedEventApis
                 .ExecuteDeleteAsync(context.RequestAborted);
             return Results.NoContent();
         });
+
+        app.MapPost("/personal", async (ServerDbContext db, HttpContext context, PersonalEventRequest request) =>
+        {
+            if (!TryGetUserId(context, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+
+            var outcome = await UpsertPersonalAsync(db, userId, request with { EventId = null }, create: true, context.RequestAborted);
+            return Results.Json(outcome.Body, statusCode: outcome.StatusCode);
+        });
+
+        app.MapPut("/personal", async (ServerDbContext db, HttpContext context, PersonalEventRequest request) =>
+        {
+            if (!TryGetUserId(context, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+
+            var outcome = await UpsertPersonalAsync(db, userId, request, create: false, context.RequestAborted);
+            return Results.Json(outcome.Body, statusCode: outcome.StatusCode);
+        });
+    }
+
+    /// <summary>
+    /// 개인 일정 만들기(create)·고치기. 제목·기간은 사용자가 쓴 값이므로 공식 일정과 섞이지 않게
+    /// source/kind를 personal로 두고, 원문 링크는 두지 않는다.
+    /// </summary>
+    internal static async Task<SavedEventOutcome> UpsertPersonalAsync(
+        ServerDbContext db,
+        Guid userId,
+        PersonalEventRequest request,
+        bool create,
+        CancellationToken cancellationToken,
+        DateOnly? today = null)
+    {
+        var title = request.Title?.Trim() ?? "";
+        if (title.Length == 0 || title.Length > MaxPersonalTitleLength || title.Any(char.IsControl))
+        {
+            return Error(StatusCodes.Status400BadRequest, "invalid_title", $"제목은 1~{MaxPersonalTitleLength}자로 입력해 주세요.");
+        }
+
+        if (!NotificationApis.TryParseDateOnly(request.EndDate?.Trim(), out var endDate))
+        {
+            return Error(StatusCodes.Status400BadRequest, "invalid_date", "날짜는 YYYY-MM-DD 형식이어야 합니다.");
+        }
+
+        DateOnly? startDate = null;
+        if (!string.IsNullOrWhiteSpace(request.StartDate))
+        {
+            if (!NotificationApis.TryParseDateOnly(request.StartDate.Trim(), out var parsedStart))
+            {
+                return Error(StatusCodes.Status400BadRequest, "invalid_date", "날짜는 YYYY-MM-DD 형식이어야 합니다.");
+            }
+
+            if (parsedStart > endDate)
+            {
+                return Error(StatusCodes.Status400BadRequest, "invalid_date", "시작일은 종료일과 같거나 이전이어야 합니다.");
+            }
+
+            if (endDate.DayNumber - parsedStart.DayNumber > MaxPersonalSpanDays)
+            {
+                return Error(StatusCodes.Status400BadRequest, "invalid_date", $"기간은 최대 {MaxPersonalSpanDays}일까지 정할 수 있습니다.");
+            }
+
+            startDate = parsedStart < endDate ? parsedStart : null;
+        }
+
+        var anchor = today ?? NotificationApis.TodayKst();
+        if ((startDate ?? endDate) < anchor.AddYears(-CalendarApis.MaxYearsFromToday) || endDate > anchor.AddYears(CalendarApis.MaxYearsFromToday))
+        {
+            return Error(StatusCodes.Status400BadRequest, "invalid_date", $"오늘 기준 앞뒤 {CalendarApis.MaxYearsFromToday}년 이내의 날짜만 정할 수 있습니다.");
+        }
+
+        if (!TryNormalizeReminder(request.Reminder, out var reminder))
+        {
+            return Error(StatusCodes.Status400BadRequest, "invalid_reminder", "알림은 7일 전·1일 전·당일 중에서 고를 수 있습니다.");
+        }
+
+        var now = DateTime.UtcNow;
+        SavedEvent? saved;
+        if (create)
+        {
+            var count = await db.SavedEvents.CountAsync(e => e.UserId == userId, cancellationToken);
+            if (count >= MaxSavedPerUser)
+            {
+                return Error(StatusCodes.Status409Conflict, "too_many_saved", $"일정은 {MaxSavedPerUser}개까지 저장할 수 있습니다.");
+            }
+
+            var id = Guid.NewGuid().ToString("N");
+            saved = new SavedEvent
+            {
+                UserId = userId,
+                EventId = $"{PersonalSource}:{id}",
+                Source = PersonalSource,
+                SourceId = id,
+                Kind = PersonalSource,
+                CreatedTime = now,
+            };
+            await db.SavedEvents.AddAsync(saved, cancellationToken);
+        }
+        else
+        {
+            var eventId = request.EventId?.Trim() ?? "";
+            if (!PersonalIdPattern.IsMatch(eventId))
+            {
+                return Error(StatusCodes.Status400BadRequest, "invalid_event", "개인 일정 id가 올바르지 않습니다.");
+            }
+
+            saved = await db.SavedEvents.FirstOrDefaultAsync(e => e.UserId == userId && e.EventId == eventId, cancellationToken);
+            if (saved is null)
+            {
+                return Error(StatusCodes.Status404NotFound, "event_not_found", "이 일정을 찾을 수 없습니다.");
+            }
+        }
+
+        saved.Title = title;
+        saved.StartDate = startDate is null ? null : NotificationApis.ToUtcDateTime(startDate.Value);
+        saved.EndDate = NotificationApis.ToUtcDateTime(endDate);
+        saved.Url = null;
+        saved.RemindEnabled = reminder.Enabled;
+        saved.RemindDaysBefore = SerializeDays(reminder.DaysBefore);
+        saved.UpdatedTime = now;
+        await db.SaveChangesAsync(cancellationToken);
+        return new SavedEventOutcome(create ? StatusCodes.Status201Created : StatusCodes.Status200OK, ToDto(saved));
     }
 
     internal static async Task<SavedEventOutcome> SaveAsync(
@@ -329,15 +472,16 @@ static public class SavedEventApis
             }
 
             var anchorKind = isStart ? "start" : "end";
+            var personal = saved.Source == PersonalSource;
             due.Add(new UserNotification
             {
                 UserId = saved.UserId,
-                Topic = Topic,
+                Topic = personal ? PersonalTopic : Topic,
                 Source = saved.Source,
                 SourceId = saved.SourceId,
                 DedupKey = $"{saved.UserId}:{Topic}:{saved.EventId}:{anchorKind}:{anchor:yyyy-MM-dd}:{daysBeforeStep}",
                 Title = saved.Title,
-                Body = BuildBody(saved.Title, anchor, anchor.DayNumber - today.DayNumber, isStart),
+                Body = BuildBody(saved.Title, anchor, anchor.DayNumber - today.DayNumber, isStart, personal),
                 TargetDate = NotificationApis.ToUtcDateTime(anchor),
                 ReminderDate = NotificationApis.ToUtcDateTime(anchor.AddDays(-daysBeforeStep)),
                 ReminderDaysBefore = daysBeforeStep,
@@ -347,11 +491,14 @@ static public class SavedEventApis
         }
     }
 
-    /// <summary>알림 문구. daysLeft는 알림을 만드는 날 기준으로 기준일까지 남은 날이다.</summary>
-    internal static string BuildBody(string title, DateOnly anchor, int daysLeft, bool isStart)
+    /// <summary>
+    /// 알림 문구. daysLeft는 알림을 만드는 날 기준으로 기준일까지 남은 날이다.
+    /// 개인 일정은 마감이 아닐 수 있으므로 끝 기준일을 "일정이에요"라고 쓴다.
+    /// </summary>
+    internal static string BuildBody(string title, DateOnly anchor, int daysLeft, bool isStart, bool personal = false)
     {
         var dateText = anchor.ToString("M월 d일", CultureInfo.GetCultureInfo("ko-KR"));
-        var verb = isStart ? "시작합니다" : "마감입니다";
+        var verb = isStart ? "시작합니다" : personal ? "일정이에요" : "마감입니다";
         return daysLeft switch
         {
             <= 0 => $"오늘 {verb}. {title}",
