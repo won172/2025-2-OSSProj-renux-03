@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-10-17 (공식 정보 연결 PR #85·검증/실제 수집 현황)
+Last Updated: 2026-10-18 (공식 정보 연결의 기존 규정 검색 경계 수정 중)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -28,7 +28,7 @@ RAG 503을 운영에서 복구했고, 재발 방지 PR #73을 human 승인 후 m
 우선순위에 따라 개선했다. main 병합, 운영 웹/API 및 TestFlight 1.0(8) 반영을 마쳤고,
 iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자·실제 채팅 저장/복원 검증까지 완료했다.
 
-## 2026-10-17 공식 정보 수집·정보 단위 지식 그래프 (In Progress)
+## 2026-10-18 공식 정보 수집·정보 단위 지식 그래프 (In Progress)
 
 - 정보 연결 코드 후보는 [PR #85](https://github.com/won172/2025-2-OSSProj-renux-03/pull/85)이며,
   `test/integration-connected-information`의 `a456d8fb4b7cf17e9660088b180f03ad2c492996`다.
@@ -49,14 +49,26 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
   Root는 커밋의 patch와 54개 blob이 독립 검토 사본과 같고 worktree가 깨끗함을 확인했다.
 - 독립 read-only QA는 앞서 재현한 공개범위 덮어쓰기, 표/중첩 문맥 우회, 공유 학기 및 빈 항목
   문제와 URL 전송·미입력 표시·curriculum/offering 보존의 후속 수정을 검토했다.
-  최종 판정은 **merge / human_review_required**다. 코드 PR에 대한 자문이며 main·운영 승인이 아니다.
+  당시 54파일의 판정은 **merge / human_review_required**였다. 아래 후속 반례로 현재 병합 근거로 사용하지 않으며, main·운영 승인이 아니다.
   Root는 해당 JSON을 재검증했고, 이전 반례·고정 patch와 실제 증거를 별도로 보존했다.
 - 이후 더 넓은 합성 corpus에서 특정 학부 신청서의 졸업대상·등록학기 조건이 선택 근거의 qualifier에 빠지는 경우를 재현했다.
   기존 `a456d8f`에 대한 병합 권고는 당시 고정 사본의 검토 기록이며, 현재 병합은 보류하고 같은 PR #85에서 수정·재검토 중이다.
   실제 모델 오답/운영 노출을 관측한 판정은 아니다. 기존 main/Vercel 승인 요청으로 이 구버전을 병합하지 않는다.
+- 10월 18일 독립 검토의 59파일 중간 고정 후보(`c7656cf`)는 **revise**다.
+  실제 공통 학칙에서 새 정보 단위가 제외한 WISE 전용 조항과 보류 표가 기존 `build_rule_chunks`의
+  일반 규정 색인/검색으로 다시 들어가는 두 P1을 확인했다. Root도 현재 수정 소스에서 WISE 청크 5개,
+  보류 성적표 청크 1개와 졸업 관련 제55조 청크 4개가 shared로 취급되고 부분 출처 표시가 없음을 재현했다.
+  기존 규정 검색·색인·선택·최종 문맥까지 같은 경계를 적용하는 수정이 진행 중이다. 원문 전체는 보존한다.
+  중간 사본 이후 포괄적 질문 표현과 적용 문맥 검사도 추가돼, 해당 사본의 결과를 최신 수정본에 전용하지 않는다.
 
 ### 로컬 검증 범위
 
+- 아래 54파일의 전체 통과 수치는 구버전 고정 사본의 증거다. 현재 수정본의 전체 통과를 뜻하지 않는다.
+  새 경로 집중 검사와 39개 본문/적용 조건 회귀를 실행했고, 후속 독립 검토의 일반 규정 우회를 수정 중이다.
+  59파일 중간 사본 Root 전체 검사는 2,305 passed / 2 failed / 1 skipped였으며 두 실패는
+  Root 실행기의 `PYTHON_DOTENV_DISABLED=1`이 환경 로더 테스트의 안전한 임시 fixture를 막은 결과였다.
+  그 설정만 제거한 동일 두 테스트는 2/2 통과했다. 테스트 코드는 바꾸거나 제외하지 않았다.
+  수정 소스와 사본의 차이가 확인돼 중간 Root 실행은 종료했고, 최종 사본의 전체 검증은 별도로 필요하다.
 - Root의 최종 54파일 사본에서 전체 일반 및 무작위(`8411223`)가 각각
   **2,274 passed / 1 skipped / 기존 경고 10개**다. 연결 기능 활성화의 19파일 회귀는 **668 passed**다.
   기존 skip은 복사하지 않은 실제 공지/lexical 산출물이 필요한 검사다.
@@ -79,10 +91,15 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
 
 - 공식 교내 목록의 188개 항목/179개 호스트를 수집 origin 발견에 활용했다.
   이 목록과 HTTPS 도달성 확인은 기관 내부 본문 전체의 coverage와 구분한다.
-- 원본 공개 수집 22차 checkpoint(`2026-10-17T12:08Z`)는 extracted 2,260,
-  pending 20,000, deferred 2,767, OCR-required 370, unsupported-layout 581,
+- 원본 공개 수집 27차 checkpoint(`2026-10-17T14:43:50Z`)는 extracted 2,260,
+  pending 20,000, deferred 12,483, OCR-required 370, unsupported-layout 581,
   authority-review 20이다. 미승인 원천/구조 검토 1,817개도 남아 있다.
   frontier 한도 밖 작업은 metadata와 함께 보존하며 전체 수집 완료로 세지 않는다.
+- 원문 확보를 늘리기 위해 실제 부모 본문의 다운로드 링크를 대조한 첨부 URL 144개를 별도 수집했다.
+  본문 추출 108, 미지원 16, 추출 실패 18, HTTP 실패 1, OCR 필요 1로 모두 집계했다.
+  144개 URL의 raw hash는 123종이므로 응답 수를 서로 다른 정보 수로 취급하지 않는다.
+  부모 원문·policy·receipt/hash와 복사 파일 331개를 두 입력 버전으로 고정했고 정본 활성화는 하지 않았다.
+  앞서 확보한 안내/정정문/계획 첨부의 실제 응답 17개도 별도 입력 버전으로 보존했다.
 - 한글/공백 주소 오류가 있었던 공개 첨부 21개는 검토된 코드로 별도 staging에서 재수집했다.
   인코딩 오류 0개, 18개 추출, 3개는 응답 용량 제한으로 보류했다.
   원본 checkpoint나 운영 정본을 덮어쓰지 않았고, 새 capture의 정본 합성/검증은 별도 작업이다.
@@ -93,7 +110,9 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
   운영 정본의 ID·전체 크기·신선도와 구분한다. human이 제공할 read-only 정본 사본이 필요하다.
   primary의 공개 원천 CSV 3개를 수정 없이 비교해 현재 courses 4,405행(추적본 4,395),
   rules 1,029행(추적본 520), guide 105행의 차이도 기록했다. 이 추가분은 아직 기존 평가 사본에 합치지 않았다.
-- 다음 작업은 human 코드 검토/병합, 새 capture와 현재 공개 원천의 버전/출처 보존 합성,
+  이후 현재 공개 CSV 7종 10,017행을 raw 필드·행 위치·crosswalk와 함께 archive했으며 자동 활성화하지 않았다.
+  12,291문서의 별도 합성 검증 사본은 새 적용 범위 반례와 보류 조문을 남긴 상태여서 서빙 승인 상태가 아니다.
+- 다음 작업은 기존 규정의 병렬 근거 경계 수정, 최종 고정 후보의 전체/독립 검증, 새 capture와 현재 공개 원천의 버전/출처 보존 합성,
   계속된 수집과 OCR/미지원 adapter·캠퍼스/대상 검토, 실제 모델/사람 평가 및 승인된 rollout이다.
   source 스냅샷·복구 지점·파생물 lineage 검증과 별도 human 승인 없이 운영에 적용하지 않는다.
 
@@ -446,7 +465,7 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `test/integration-connected-information` ([PR #85](https://github.com/won172/2025-2-OSSProj-renux-03/pull/85)) | 핵심·통합·고정 QA 사본 별도 | In Progress | 최종 Root 전체/무작위2,274/1skip·flag668·원천130·독립QA human_review_required·UI155/Root32·C#계약 | 추가 corpus에서 신청서 적용 조건 누락 수정 중. 전체 수집·실제 정본·모델/사람 평가·운영 적용 미완료 | 조건 전달 수정·새 고정 후보 검증 후 human 검토, 출처/버전 보존 합성 |
+| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `test/integration-connected-information` ([PR #85](https://github.com/won172/2025-2-OSSProj-renux-03/pull/85)) | 핵심·통합·고정 QA 사본 별도 | In Progress | 구54파일 전체/무작위2,274·flag668·원천130은 역사적 증거; 후속59파일 독립QA revise, 실제 규정 우회 Root 재현 | 기존 규정 검색의 WISE/보류 표 우회 수정 중. 전체 수집·실제 정본·모델/사람 평가·운영 적용 미완료 | 일반 규정까지 동일 경계 적용·최종 전체/독립 검증·출처/버전 보존 합성 후 human 검토 |
 | 동일 채팅 이력·문서 참조·조건 정정 | P1 | RAG/Backend / QA / Orchestrator | `fix/conversation-memory`·`fix/document-reference-domain-context` | 정리 완료 | Completed | full-main1,925/1skip·이미지1,669/1skip·독립QA305·CI·공개SSE4건·Redis보존·6개lineage·13테이블/63산출물 무결성 | 최근20턴; 장애 중 미동기화 이력의 프로세스 유실 한계; 실제 후보190문항 미실행 | PR #80·#82 병합·운영 반영 및 문서 재질문 확인 완료 |
 | RAG revision·학식 published 상태 503 복구 | P0 | RAG/Backend / QA / Orchestrator | `fix/rag-lineage-recovery` | 정리 완료 | Completed | 신규 회귀 3개·RAG 1,523/1skip·QA 67·CI·6개 strict lineage·실제 기본 Compose 기동·외부 SSE·기존 PostgreSQL 793행 보존 | 물리적 전원 재부팅·전체 운영 골든 평가는 미실행 | PR #73 병합·운영 적용·503 해소 완료 |
 | Compose 단일 명령 전체 기동 | P0 | RAG/Backend / QA | `fix/compose-one-command-startup` | 정리 완료 | Completed | 후보 RAG 1,509/1skip·QA 48·CI, 최신 운영 기본 Compose 기동·ready200·외부 SSE 확인 | 엔진/물리적 전원 재부팅 자체는 미실행 | PR #68·#69 병합 및 primary·운영 반영 완료 |
