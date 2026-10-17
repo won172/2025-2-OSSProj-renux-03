@@ -1,6 +1,6 @@
 # Dongttok Current Status
 
-Last Updated: 2026-10-18 (공식 정보 연결의 기존 규정 검색 경계 수정 중)
+Last Updated: 2026-10-18 (정보 연결 70파일 검증·새 데이터 합성 및 후속 보완)
 
 이 문서는 현재 작업과 다음 실행 순서의 요약이다. 코드·로컬 검증 기준이며,
 운영 서버의 실시간 상태나 배포 승인 여부를 대신하지 않는다.
@@ -60,9 +60,22 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
   보류 성적표 청크 1개와 졸업 관련 제55조 청크 4개가 shared로 취급되고 부분 출처 표시가 없음을 재현했다.
   기존 규정 검색·색인·선택·최종 문맥까지 같은 경계를 적용하는 수정이 진행 중이다. 원문 전체는 보존한다.
   중간 사본 이후 포괄적 질문 표현과 적용 문맥 검사도 추가돼, 해당 사본의 결과를 최신 수정본에 전용하지 않는다.
+- 이후 구현 종료와 21개 인계 파일 해시 일치를 확인하고 전체 기능 70파일을 고정했다.
+  patch SHA-256 `c9c3b738f5dd431bfd3d97f87a3ee5e9f1441203a0e85593b2b9721dd3bbf69d`, 3,039,005 bytes다.
+  기존·신규 규정 경로의 캠퍼스 조항·보류 표·조건 보존은 이 사본에서 검증했으나 독립 검토는 **revise**다.
+  API 요청의 BMC/필동 별칭 범위 누락과, 현재 원문에 옛 검색행의 제목·게시일·학년도·대상 표시가 남는 경우를 Root도 재현했다.
+  정확한 K 원문 후보 자체를 계약 위반으로 본 지적은 추가 검토에서 축소·철회했다. 조건을 붙인 원문 설명·비교는 유지하며
+  타 단과대학에 K 신청서 의무를 부여한 실제 답변은 미확정이다. 원본 검토와 교정 부록을 함께 보존했다.
+  현재 요청 범위·정본 메타데이터·시점 계약을 후속 보완 중이므로 이 고정 사본도 병합 승인이 아니다.
 
 ### 로컬 검증 범위
 
+- Root의 70파일 고정 사본 전체 일반·빈 DB·무작위(`8411223`)는 각각 **2,455 passed / 1 skipped / 경고 10개**,
+  연결 기능 ON의 관련 26파일 검사는 **1,088 passed / 경고 10개**다. 네 실행 모두 exit 0이고 소스·검토 사본 70개 해시가 유지됐다.
+  외부 통신과 작업공간 밖 쓰기를 제한하고 loopback을 검증한 호스트에서 실행해, source sandbox의 기존 bind 실패도 통과했다.
+  Python·159개 패키지 버전을 구현 환경과 맞췄고, 전역 dotenv 비활성화로 안전한 임시 테스트를 막지 않았다.
+  secret scan·whitespace 검사와 추가 70파일 secret 패턴 검사도 통과했다. macOS 임시 파일 경로 제한은 QA 전용 scratch 배치만 보정했고
+  스캐너 패턴·소스·테스트를 약화하지 않았다. 이 결과는 c9 사본에 한하며 후속 수정본으로 전용하지 않는다.
 - 아래 54파일의 전체 통과 수치는 구버전 고정 사본의 증거다. 현재 수정본의 전체 통과를 뜻하지 않는다.
   새 경로 집중 검사와 39개 본문/적용 조건 회귀를 실행했고, 후속 독립 검토의 일반 규정 우회를 수정 중이다.
   59파일 중간 사본 Root 전체 검사는 2,305 passed / 2 failed / 1 skipped였으며 두 실패는
@@ -115,6 +128,24 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
 - 다음 작업은 기존 규정의 병렬 근거 경계 수정, 최종 고정 후보의 전체/독립 검증, 새 capture와 현재 공개 원천의 버전/출처 보존 합성,
   계속된 수집과 OCR/미지원 adapter·캠퍼스/대상 검토, 실제 모델/사람 평가 및 승인된 rollout이다.
   source 스냅샷·복구 지점·파생물 lineage 검증과 별도 human 승인 없이 운영에 적용하지 않는다.
+
+### 새 합성 데이터 v2 (고정 코드 c9 / 독립 검토 중)
+
+- 별도 ignored staging에서 기존 키 12,291개·fixture 9,498개와 원본 CSV/crosswalk/proof-gap 각 10,017행,
+  rule input 515개·기존 receipt/history 14,216개 및 archive 11개 테이블 digest를 보존했다.
+  새 실제 HTTP receipt 232버전/231URL의 처분은 신규 canonical 158·N 공지 갱신 1·raw/history 보류 66·guide 부모 identity 복수 보류 6이다.
+  DIC PDF는 20MB 제한으로 receipt가 없고, ZIP retry는 HTTP 200/unsupported로 보존한다. OCR 2개·ZIP 내부 PDF 13개는 비활성 후보다.
+- 파생 정보 단위 98,232개를 재구성했고, 작업자 검사에서 구조/identity/span/revision 307,021건, 정책/부모/raw/CRC 2,086건,
+  실제 규정 69/65/120 legacy/connected 소비 경계 89건이 통과했다. 동일 revision·projection hash의 재구성과 파일 16,674개 봉인을 확인했다.
+  output manifest SHA-256 `46af815efea4b03fe63011ba759cb6e36ee560ab3295aff4d57f4b304be2ea64`이며 독립 읽기 전용 데이터 검토가 진행 중이다.
+  작업자 무결성 통과를 전체 의미 검증·서빙 승인으로 취급하지 않는다.
+- 변경 없는 18일 oracle은 151 통과/2 실패, 최초 추가 검사는 3 통과/1 실패로 보존했다.
+  실제 K 양식이 있는 전체 corpus에 전역적 서류 부재를 적용한 가정과 plan facet을 요청하지 않은 검사 역할 문제를 구분하고,
+  별도 명시적 HWP/N→H source-bound 추가 검사의 13 통과 기록도 남겼다. 과거 oracle을 고쳐서 통과로 만들지 않았다.
+- 관측이 18일 KST이고 게시일 미상인 새 문서 40개가 as_of 17일에서 eligible인 현상을 보고했다.
+  새 평가는 18일을 사용했으며 17일에 알려졌다는 근거로 삼지 않았다. 관측·게시·적용·버전·학번 시점의 계약을 검토·보완 중이다.
+  장학금·학점 인정·조기졸업·일부 외국인 입학 조건에는 source/개념/범위 공백이 남아 있다. 새 코드·파생 재평가는 새 버전으로 만들고
+  이 봉인 사본의 해시·판정을 소급 변경하지 않는다. 운영 ID·모델/사람·준비도·승인 적용은 미확인이다.
 
 ## 2026-10-17 대화 기억·문서 후속 질문 운영 반영 완료
 
@@ -465,7 +496,7 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `test/integration-connected-information` ([PR #85](https://github.com/won172/2025-2-OSSProj-renux-03/pull/85)) | 핵심·통합·고정 QA 사본 별도 | In Progress | 구54파일 전체/무작위2,274·flag668·원천130은 역사적 증거; 후속59파일 독립QA revise, 실제 규정 우회 Root 재현 | 기존 규정 검색의 WISE/보류 표 우회 수정 중. 전체 수집·실제 정본·모델/사람 평가·운영 적용 미완료 | 일반 규정까지 동일 경계 적용·최종 전체/독립 검증·출처/버전 보존 합성 후 human 검토 |
+| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `test/integration-connected-information` ([PR #85](https://github.com/won172/2025-2-OSSProj-renux-03/pull/85)) | 핵심·통합·불변 QA·새 데이터 사본 별도 | In Progress | c9/70파일 Root 일반·빈DB·무작위2,455/1skip·flag1,088; 독립QA revise/교정 보존; v2 데이터 작업자 무결성 통과·의미 미통과 | API 요청 별칭·현재 출처 메타데이터·시점 계약 보완 및 v2 독립 검토 중. 전체 자료·운영 ID·모델/사람·운영 미완료 | 보완 후 새 파일 고정·전체/독립 재검증·새 데이터 버전 평가 후 human 검토 |
 | 동일 채팅 이력·문서 참조·조건 정정 | P1 | RAG/Backend / QA / Orchestrator | `fix/conversation-memory`·`fix/document-reference-domain-context` | 정리 완료 | Completed | full-main1,925/1skip·이미지1,669/1skip·독립QA305·CI·공개SSE4건·Redis보존·6개lineage·13테이블/63산출물 무결성 | 최근20턴; 장애 중 미동기화 이력의 프로세스 유실 한계; 실제 후보190문항 미실행 | PR #80·#82 병합·운영 반영 및 문서 재질문 확인 완료 |
 | RAG revision·학식 published 상태 503 복구 | P0 | RAG/Backend / QA / Orchestrator | `fix/rag-lineage-recovery` | 정리 완료 | Completed | 신규 회귀 3개·RAG 1,523/1skip·QA 67·CI·6개 strict lineage·실제 기본 Compose 기동·외부 SSE·기존 PostgreSQL 793행 보존 | 물리적 전원 재부팅·전체 운영 골든 평가는 미실행 | PR #73 병합·운영 적용·503 해소 완료 |
 | Compose 단일 명령 전체 기동 | P0 | RAG/Backend / QA | `fix/compose-one-command-startup` | 정리 완료 | Completed | 후보 RAG 1,509/1skip·QA 48·CI, 최신 운영 기본 Compose 기동·ready200·외부 SSE 확인 | 엔진/물리적 전원 재부팅 자체는 미실행 | PR #68·#69 병합 및 primary·운영 반영 완료 |
