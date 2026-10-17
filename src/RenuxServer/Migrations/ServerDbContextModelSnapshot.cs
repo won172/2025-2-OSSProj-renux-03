@@ -66,13 +66,13 @@ namespace RenuxServer.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<Guid>("ChatId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("chat_id");
-
                     b.Property<int?>("AnswerVersion")
                         .HasColumnType("integer")
                         .HasColumnName("answer_version");
+
+                    b.Property<Guid>("ChatId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("chat_id");
 
                     b.Property<string>("Content")
                         .IsRequired()
@@ -99,12 +99,6 @@ namespace RenuxServer.Migrations
                         .HasColumnType("double precision")
                         .HasColumnName("grounding_score");
 
-                    b.Property<bool>("IsFallback")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_fallback");
-
                     b.Property<bool>("IsAsk")
                         .HasColumnType("boolean")
                         .HasColumnName("is_ask");
@@ -114,6 +108,12 @@ namespace RenuxServer.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(true)
                         .HasColumnName("is_current");
+
+                    b.Property<bool>("IsFallback")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_fallback");
 
                     b.Property<Guid?>("ParentQuestionId")
                         .HasColumnType("uuid")
@@ -157,13 +157,13 @@ namespace RenuxServer.Migrations
                         .IsUnique()
                         .HasFilter("parent_question_id IS NOT NULL AND is_ask = FALSE AND is_current = TRUE");
 
-                    b.HasIndex("ParentQuestionId", "AnswerVersion")
-                        .IsUnique()
-                        .HasFilter("parent_question_id IS NOT NULL AND answer_version IS NOT NULL AND is_ask = FALSE");
-
                     b.HasIndex("RequestId")
                         .IsUnique()
                         .HasFilter("request_id IS NOT NULL");
+
+                    b.HasIndex("ParentQuestionId", "AnswerVersion")
+                        .IsUnique()
+                        .HasFilter("parent_question_id IS NOT NULL AND answer_version IS NOT NULL AND is_ask = FALSE");
 
                     b.ToTable("chat_messages", (string)null);
                 });
@@ -228,58 +228,6 @@ namespace RenuxServer.Migrations
                     b.ToTable("council_signup_requests", (string)null);
                 });
 
-            modelBuilder.Entity("RenuxServer.Models.NotificationPreference", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("Channel")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("in_app")
-                        .HasColumnName("channel");
-
-                    b.Property<DateTime>("CreatedTime")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_time");
-
-                    b.Property<bool>("Enabled")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("enabled");
-
-                    b.Property<string>("RemindDaysBefore")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("7,1,0")
-                        .HasColumnName("remind_days_before");
-
-                    b.Property<string>("Topic")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("topic");
-
-                    b.Property<DateTime>("UpdatedTime")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_time");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "Topic")
-                        .IsUnique();
-
-                    b.ToTable("notification_preferences", (string)null);
-                });
-
             modelBuilder.Entity("RenuxServer.Models.GuestChat", b =>
                 {
                     b.Property<Guid>("Id")
@@ -341,6 +289,58 @@ namespace RenuxServer.Migrations
                             Id = new Guid("f762ae12-21f7-4943-a78d-ab3931506306"),
                             Majorname = "수학과"
                         });
+                });
+
+            modelBuilder.Entity("RenuxServer.Models.NotificationPreference", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("in_app")
+                        .HasColumnName("channel");
+
+                    b.Property<DateTime>("CreatedTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_time");
+
+                    b.Property<bool>("Enabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("RemindDaysBefore")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("7,1,0")
+                        .HasColumnName("remind_days_before");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("topic");
+
+                    b.Property<DateTime>("UpdatedTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_time");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Topic")
+                        .IsUnique();
+
+                    b.ToTable("notification_preferences", (string)null);
                 });
 
             modelBuilder.Entity("RenuxServer.Models.Organization", b =>
@@ -449,12 +449,12 @@ namespace RenuxServer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
                     b.HasIndex("AnswerKey", "EventType");
 
                     b.HasIndex("EventType", "OccurredTime");
-
-                    b.HasIndex("IdempotencyKey")
-                        .IsUnique();
 
                     b.HasIndex("SubjectKey", "OccurredTime");
 
@@ -501,6 +501,84 @@ namespace RenuxServer.Migrations
                             Id = new Guid("7a3f2c44-9d1e-4b6a-8f25-6c0e9b51d7a2"),
                             Rolename = "총학생회"
                         });
+                });
+
+            modelBuilder.Entity("RenuxServer.Models.SavedEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_time");
+
+                    b.Property<DateTime>("EndDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("end_date");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("event_id");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("RemindDaysBefore")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("7,1")
+                        .HasColumnName("remind_days_before");
+
+                    b.Property<bool>("RemindEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("remind_enabled");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source_id");
+
+                    b.Property<DateTime?>("StartDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("start_date");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.Property<DateTime>("UpdatedTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_time");
+
+                    b.Property<string>("Url")
+                        .HasColumnType("text")
+                        .HasColumnName("url");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "EventId")
+                        .IsUnique();
+
+                    b.ToTable("saved_events", (string)null);
                 });
 
             modelBuilder.Entity("RenuxServer.Models.User", b =>
@@ -695,6 +773,17 @@ namespace RenuxServer.Migrations
                     b.Navigation("Organization");
                 });
 
+            modelBuilder.Entity("RenuxServer.Models.NotificationPreference", b =>
+                {
+                    b.HasOne("RenuxServer.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("RenuxServer.Models.Organization", b =>
                 {
                     b.HasOne("RenuxServer.Models.Major", "Major")
@@ -706,7 +795,7 @@ namespace RenuxServer.Migrations
                     b.Navigation("Major");
                 });
 
-            modelBuilder.Entity("RenuxServer.Models.NotificationPreference", b =>
+            modelBuilder.Entity("RenuxServer.Models.SavedEvent", b =>
                 {
                     b.HasOne("RenuxServer.Models.User", "User")
                         .WithMany()

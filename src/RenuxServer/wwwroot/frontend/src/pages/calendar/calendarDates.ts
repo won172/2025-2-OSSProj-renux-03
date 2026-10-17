@@ -3,7 +3,7 @@
  * 기기 시간대와 무관하게 날짜 문자열 ↔ UTC 기준 일수로만 계산한다.
  */
 
-export type EventKind = 'academic' | 'exam' | 'notice'
+export type EventKind = 'academic' | 'exam' | 'notice' | 'personal'
 
 /** 날짜 계산에 필요한 최소 필드. startDate가 null이면 하루짜리(마감) 항목이다. */
 export interface DatedItem {
@@ -112,7 +112,7 @@ export const formatPeriod = (item: DatedItem, today: string) => isSingleDay(item
   ? shortDate(item.endDate, today)
   : `${shortDate(eventStart(item), today)} – ${shortDate(item.endDate, today)}`
 
-export const kindOrder: Record<EventKind, number> = { academic: 0, notice: 1, exam: 2 }
+export const kindOrder: Record<EventKind, number> = { personal: 0, academic: 1, notice: 2, exam: 3 }
 
 /** 끝나지 않은 일정을 정렬해 '곧 마감' → '다음 주' → 월별로 묶는다. */
 export const groupUpcoming = <T extends DatedItem>(items: T[], today: string) => {
