@@ -18,6 +18,8 @@ const datasetLabels: Record<string, string> = {
   courses: '강의/수업',
   staff: '전화번호부',
   meals: '학식',
+  guidance: '공식 안내',
+  attachments: '첨부자료',
 }
 
 const formatDate = (value?: string | null) => {
