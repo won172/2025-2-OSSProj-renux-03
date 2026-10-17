@@ -18,7 +18,7 @@ Last Updated: 2026-10-17 (대화 기억 검증 기록·공식 정보 연결 후�
 캠퍼스·대상·학번·학기·유효기간을 보존한 정보 단위와 출처를 공통 검색에 연결한다.
 현재는 별도 worktree와 임시 검증 DB에서 진행하며, 실제 전체 수집·운영 반영 완료 상태가 아니다.
 
-대화 기억과 이전 문서 참조의 수정 후보(PR #80)를 구현·독립 검증했다. main 병합과 운영 RAG 반영은 human 승인 대기다.
+대화 기억과 이전 문서 참조의 수정 후보(PR #80)는 main에 병합된 것을 확인했다(`707ecc9`). 아래 상세 검증 기록은 병합 전 후보 스냅샷이며, 운영 RAG 반영 여부는 이 정보 연결 작업에서 재확인하지 않았다.
 
 RAG 503을 운영에서 복구했고, 재발 방지 PR #73을 human 승인 후 main에 병합했다.
 기존 primary 경로에서 별도 override 없는 Compose 전체 기동과 외부 게스트 채팅을 확인했다.
@@ -30,7 +30,7 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
 ## 2026-10-17 공식 정보 수집·정보 단위 지식 그래프 (In Progress)
 
 - 작업 기준 `origin/main=8411b22`, branch `feat/connected-official-knowledge`,
-  worktree `../dongttok-worktrees/connected-official-knowledge`다. 별도 QA·검증 worktree를 사용한다.
+  worktree `../dongttok-worktrees/connected-official-knowledge`다. 핵심 후보를 `03a40b1`로 고정했고, 별도 QA·통합 worktree를 사용한다.
 - 사용자 요구는 기존 데이터와 신규 공식 자료를 함께 수집하고, 장학금/학사제도/졸업 요건 등의
   자격·기간·서류·방법·조건·예외·관련 근거가 연결되는 정보 중심 그래프다.
   조직·연락처는 해당 정보의 문의처 등 보조 항목으로 취급한다.
@@ -54,12 +54,28 @@ iOS 26.5 시뮬레이터에서 테스트 계정 로그인 후 설정·관리자�
   FK 오류 0건이다. 이는 공개 사본의 정합성 검증이며 수집 전체 완료나 운영 DB 수치가 아니다.
 - 전공결정의 일반 안내·학과 공지·실제 HWP와 기존 가이드로 신청 대상·기간·방법·예외,
   외국인 신입생의 다음 학기 신청, 5지망 요구, 계획 첨부와 제출서류 구분,
-  2025/2026년 기간 비교를 검증 중이다. 최신 staged 결과의 원천 기반 자동 검사 109개는
-  통과했지만, 미검토 표가 적용 대상 문맥을 통해 재유입되는 경로를 Root가 발견해 수정 중이다.
+  2025/2026년 기간 비교를 검사했다. 실제 G/N/H와 기존 가이드 9,501문서 재생에서 원천 기반 자동 검사 130개가 통과했다.
+  독립 QA가 찾은 표의 중첩 문맥 우회, PDF/HWPX 검토 경계, 긴 조건의 잘림, 공개 대상/요청자 권한 혼용,
+  비공개 중복의 공개 참조 영향, 정상 문단 검색 누락, 실제 관측 시점 및 대상 학위 구분을 수정했다.
   자동 검사는 사람의 답변 품질 평가나 최종 독립 QA 통과를 대신하지 않는다.
-- 최신 main의 별도 빈 DB 기준선은 `1779 passed, 1 skipped, 10 warnings`다.
+- 작업 시작 기준 `8411b22`의 별도 빈 DB 기준선은 `1779 passed, 1 skipped, 10 warnings`다.
   후보의 정보 단위 관계·원문 span·조건·기간 구분·기존/신규 자료 연결과 공통 ask/SSE 소비는
-  구현 및 독립 검증 중이다. 초기 문서/조직 연결 수나 개별 테스트 통과를 최종 완료로 세지 않는다.
+  핵심 구현 및 최초 독립 검토를 수행했다. 초기 문서/조직 연결 수나 개별 테스트 통과를 최종 완료로 세지 않는다.
+- Root가 41개 파일을 고정한 독립 QA 사본에서 전체 빈 DB 테스트 **1,845 passed / 1 skipped / 10 warnings**를 재실행했다.
+  같은 사본의 원천 기반 116개 자동 검사와 52개 중첩 문맥의 검토 상태도 확인했다.
+  이후 발견한 대상/권한·과거 연도 비교·식단 관측 시점 수정은 이 검사 결과에 포함되지 않는다.
+- 핵심 후보의 agent 집중 **103 passed**, 전체 일반·빈 DB·무작위(`8411223`) 각각 **1,882 passed / 1 skipped / 10 warnings**다.
+  연결 기능 활성화의 관련 회귀 199개도 통과했다. 이 증거는 Root의 코드 끝 공백 1개 정리 전의 43파일 후보 기준이며,
+  고정 커밋은 원본 HTML bytes를 보존하는 fixture-local `.gitattributes`를 포함한 44파일이다. 최종 통합 SHA는 별도 검증한다.
+- 새 출처 카드 이름을 `guidance=공식 안내`, `attachments=첨부자료`로 추가한 `58597c5`는 2줄 변경이다.
+  Client의 전체 frontend 155개·lint·build, Root의 관련 32개·staged diff·secret 검사를 통과했다.
+- 검증 중 main에 대화 기억·정확한 문서 재참조·상태 기록이 병합되어 `639c160`까지 진행했다.
+  `test/integration-connected-information`은 최신 main과 출처 이름 변경을 포함하고,
+  핵심 `03a40b1` 병합의 `rag_service.py` 충돌을 선언한 상태에서 RAG/Backend agent가 통합 중이다.
+  새 안내/첨부의 정확한 재참조·명시적 첨부 관계, 신규 정본의 미래 공고 판정,
+  실제 달력 연도/학년도 구분 및 여러 대상·학기 비교의 알려진 누락을 검증·보완한다.
+- 통합 트리의 변경 없는 C#은 Release build 경고/오류 0개, backend 계약 및 출처 ID 8 scenarios/160 assertions가 통과했다.
+  최신 main 코드 자체의 별도 빈 DB 기준선은 1,925/1skip/10warnings다. 이는 새 RAG 통합 후보의 통과 결과가 아니다.
 - 현재 수집 범위·미지원 구조·추출 실패·미연결 정보·검색 회귀를 따로 기록한다.
   실제 전체 원천 수집, 사람 판정 답변 품질, 운영 데이터 적용 및 배포는 완료되지 않았다.
 
@@ -391,7 +407,7 @@ Status 값:
 
 | Task | Priority | Owner Role | Branch | Worktree | Status | Tests | Known Issues | Next Action |
 |---|---|---|---|---|---|---|---|---|
-| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / QA / Orchestrator | `feat/connected-official-knowledge` | `connected-official-knowledge` | In Progress | main 빈 DB 기준선 1,779/1skip, 공개 CSV 사본·공식 URL·실제 HWP staged 검증 | 정보 내용의 조건·기간·서류·절차 연결 및 실제 검색 회귀 검증 중. 전체 수집·운영 적용 미완료 | 정보 단위 그래프·공통 ask/SSE 연결 구현 및 독립 검증 |
+| 공식 정보 수집·정보 단위 지식 그래프 | P1 | RAG/Backend / Client / QA / Orchestrator | `feat/connected-official-knowledge` / `test/integration-connected-information` | 별도 핵심·통합·QA | In Progress | 핵심103·전체1,882/1skip·원천130검사, UI155·Root32, C#계약 | 최신 main 재참조·다중 대상/시점 통합 중. 전체 수집·실제 정본·모델/사람 평가·운영 적용 미완료 | 통합 후보의 고정 SHA 독립 QA 및 전체 회귀 |
 
 | 동일 채팅 이력·문서 참조·조건 정정 | P1 | RAG/Backend / QA / Orchestrator | `fix/conversation-memory` | `conversation-memory` / `conversation-memory-review` | Review | 집중256·빈 DB/무작위 각1,853/1skip·독립QA233+합성9·실 Redis 격리 smoke·secret/diff | 프로세스 로컬 장애 완충의 재시작 유실 한계; 실제 후보190문항 미실행 | PR #80 human 검토·main 병합·운영 RAG 반영 승인 |
 | RAG revision·학식 published 상태 503 복구 | P0 | RAG/Backend / QA / Orchestrator | `fix/rag-lineage-recovery` | 정리 완료 | Completed | 신규 회귀 3개·RAG 1,523/1skip·QA 67·CI·6개 strict lineage·실제 기본 Compose 기동·외부 SSE·기존 PostgreSQL 793행 보존 | 물리적 전원 재부팅·전체 운영 골든 평가는 미실행 | PR #73 병합·운영 적용·503 해소 완료 |
