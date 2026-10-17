@@ -18,6 +18,7 @@ public class ServerDbContext : DbContext
     public DbSet<NotificationPreference> NotificationPreferences { get; set; }
     public DbSet<UserNotification> UserNotifications { get; set; }
     public DbSet<ProductEvent> ProductEvents { get; set; }
+    public DbSet<SavedEvent> SavedEvents { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,6 +35,7 @@ public class ServerDbContext : DbContext
         var notificationPreference = modelBuilder.Entity<NotificationPreference>();
         var userNotification = modelBuilder.Entity<UserNotification>();
         var productEvent = modelBuilder.Entity<ProductEvent>();
+        var savedEvent = modelBuilder.Entity<SavedEvent>();
 
         users.ToTable("users").HasIndex(p => p.UserId).IsUnique();
         activeChats.ToTable("active_chats");
@@ -175,6 +177,24 @@ public class ServerDbContext : DbContext
         userNotification.Property(n => n.IsRead).HasColumnName("is_read").HasDefaultValue(false);
         userNotification.Property(n => n.CreatedTime).HasColumnName("created_time");
         userNotification.Property(n => n.ReadTime).HasColumnName("read_time");
+
+        savedEvent.ToTable("saved_events");
+        savedEvent.HasIndex(e => new { e.UserId, e.EventId }).IsUnique();
+        savedEvent.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        savedEvent.Property(e => e.Id).HasColumnName("id");
+        savedEvent.Property(e => e.UserId).HasColumnName("user_id");
+        savedEvent.Property(e => e.EventId).HasColumnName("event_id");
+        savedEvent.Property(e => e.Source).HasColumnName("source");
+        savedEvent.Property(e => e.SourceId).HasColumnName("source_id");
+        savedEvent.Property(e => e.Kind).HasColumnName("kind");
+        savedEvent.Property(e => e.Title).HasColumnName("title");
+        savedEvent.Property(e => e.StartDate).HasColumnName("start_date");
+        savedEvent.Property(e => e.EndDate).HasColumnName("end_date");
+        savedEvent.Property(e => e.Url).HasColumnName("url");
+        savedEvent.Property(e => e.RemindEnabled).HasColumnName("remind_enabled").HasDefaultValue(true);
+        savedEvent.Property(e => e.RemindDaysBefore).HasColumnName("remind_days_before").HasDefaultValue("7,1");
+        savedEvent.Property(e => e.CreatedTime).HasColumnName("created_time");
+        savedEvent.Property(e => e.UpdatedTime).HasColumnName("updated_time");
 
         productEvent.Property(e => e.Id).HasColumnName("id");
         productEvent.Property(e => e.EventType).HasColumnName("event_type").HasMaxLength(40);

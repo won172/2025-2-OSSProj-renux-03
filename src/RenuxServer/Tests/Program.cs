@@ -184,6 +184,7 @@ await ChatStreamTicketTests.RunAsync(Check);
 await NotificationCandidateScopeTests.RunAsync(Check);
 await CalendarEventsTests.RunAsync(Check);
 await RequestAbortAndRateLimitTests.RunAsync(Check);
+await SavedEventsTests.RunAsync(Check);
 
 string keyDirectory = Path.Combine(Path.GetTempPath(), $"dongttok-dp-{Guid.NewGuid():N}");
 string otherKeyDirectory = Path.Combine(Path.GetTempPath(), $"dongttok-dp-other-{Guid.NewGuid():N}");

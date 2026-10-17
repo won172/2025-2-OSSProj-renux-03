@@ -222,7 +222,7 @@ static public class CalendarApis
             .ToList();
     }
 
-    private static (DateOnly? Start, DateOnly End, CalendarEventDto Event)? ToEvent(
+    internal static (DateOnly? Start, DateOnly End, CalendarEventDto Event)? ToEvent(
         NotificationCandidateDto candidate,
         ILogger? logger)
     {
