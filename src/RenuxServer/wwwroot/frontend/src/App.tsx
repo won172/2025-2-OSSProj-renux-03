@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, Route, RouterProvider } from 'react-router-dom'
 import ErrorBoundary from './components/ErrorBoundary'
+import { CALENDAR_ENABLED } from './components/appNavItems'
 import { importWithRecovery } from './moduleRecovery'
 
 const HomePage = lazy(() => importWithRecovery(() => import('./pages/home/HomePage')))
@@ -8,6 +9,8 @@ const SignInPage = lazy(() => importWithRecovery(() => import('./pages/auth/Sign
 const SignUpPage = lazy(() => importWithRecovery(() => import('./pages/auth/SignUpPage')))
 const SettingsPage = lazy(() => importWithRecovery(() => import('./pages/settings/SettingsPage')))
 const PrivacyPolicyPage = lazy(() => importWithRecovery(() => import('./pages/legal/PrivacyPolicyPage')))
+// 캘린더는 별도 청크·CSS로 지연 로드하고 PWA 사전 캐시에서 제외한다(vite.config.ts globIgnores).
+const CalendarPage = lazy(() => importWithRecovery(() => import('./pages/calendar/CalendarPage')))
 
 const AdminLayout = lazy(() => importWithRecovery(() => import('./components/admin/AdminLayout')))
 const AdminIndex = lazy(() => importWithRecovery(() => import('./components/admin/AdminIndex')))
@@ -40,6 +43,8 @@ const router = createBrowserRouter(createRoutesFromElements(
     <Route path="/chat/:chatId" element={<HomePage />} />
     <Route path="/settings" element={<SettingsPage />} />
     <Route path="/privacy" element={<PrivacyPolicyPage />} />
+    {/* 월·목록(/calendar)과 상세(/calendar/event/:id)가 한 화면을 공유해 보던 달·필터가 유지된다. */}
+    {CALENDAR_ENABLED && <Route path="/calendar/*" element={<CalendarPage />} />}
 
     {/* 이전 URL 북마크 보존 — 재설계로 경로가 바뀌었지만 링크는 계속 동작해야 한다. */}
     <Route path="/admin/university" element={<Navigate to="/admin/dashboard" replace />} />

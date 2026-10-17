@@ -359,35 +359,7 @@
     font-size: 1rem;
 }
 
-.gpt-home {
-    height: 100vh; /* min-height 대신 height로 고정 */
-    height: 100dvh;
-    display: grid;
-    grid-template-columns: clamp(220px, 24vw, 280px) minmax(0, 1fr);
-    grid-template-rows: auto 1fr;
-    grid-template-areas:
-        "sidebar topbar"
-        "sidebar main";
-    gap: 22px;
-    padding: 24px;
-    background: radial-gradient(circle at 15% -10%, rgba(249, 115, 22, 0.16), transparent 36%),
-        radial-gradient(circle at 90% 10%, rgba(249, 115, 22, 0.12), transparent 32%),
-        linear-gradient(180deg, #FFF7ED 0%, #FFF7ED 50%, #FFF7ED 100%);
-    overflow: hidden; /* 전체 스크롤 방지 */
-    box-sizing: border-box;
-}
 
-/* .gpt-home__content style removed */
-
-.gpt-home__main {
-    grid-area: main;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    flex: 1; /* 남은 공간 모두 차지 */
-    min-height: 0; /* 중요: Flex 아이템 축소 허용 */
-    min-width: 0;
-}
 .home-chat {
     height: 100%; /* 부모 높이에 맞춤 */
     display: flex;
@@ -401,30 +373,6 @@
     min-width: 0;
     box-sizing: border-box;
     overflow: hidden; /* 내부 스크롤 제어 */
-}
-
-.gpt-home__sidebar {
-    grid-area: sidebar;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    padding: 18px;
-    border-radius: 22px;
-    background: linear-gradient(160deg, #1f2937 0%, #2c1c10 55%, #f97316 110%);
-    color: #fff7ed;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: var(--buddy-shadow-elegant);
-}
-
-.gpt-home__sidebar.hidden {
-    display: none;
-}
-
-.gpt-home__brand {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
 }
 
 .home-logo-row {
@@ -449,12 +397,6 @@
 
 .home-logo--mascot {
     height: 48px;
-}
-
-.gpt-home__brand-text strong {
-    display: block;
-    margin-top: 6px;
-    letter-spacing: 0.04em;
 }
 
 .buddy-topbar {
@@ -556,18 +498,6 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-}
-.gpt-home__top-actions {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 8px;
-}
-
-.gpt-home__welcome {
-    color: var(--buddy-foreground);
-    font-weight: 600;
-    margin-right: 4px;
 }
 
 .gpt-hero {
@@ -1304,8 +1234,6 @@
 
 :where(
     .mobile-menu-btn,
-    .gpt-home__new,
-    .gpt-home__chat-item,
     .hero-btn,
     .ghost-btn,
     .copy-button,
@@ -2490,16 +2418,6 @@
 }
 
 @media (min-width: 769px) and (max-width: 1100px) {
-    .gpt-home {
-        grid-template-columns: 220px minmax(0, 1fr);
-        gap: 16px;
-        padding: 16px;
-    }
-
-    .gpt-home__sidebar {
-        gap: 12px;
-        padding: 14px;
-    }
 
     .buddy-topbar {
         grid-template-columns: minmax(0, 1fr) auto;
@@ -2520,63 +2438,6 @@
         display: none; /* Hide topbar user info/actions on mobile */
     }
 
-    .gpt-home {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto minmax(0, 1fr);
-        grid-template-areas:
-            "topbar"
-            "main";
-        padding: 0; /* Remove padding for full width on mobile */
-        gap: 0;
-        background: #f0f2f5; /* Simplified bg for mobile performance */
-    }
-
-    .gpt-home__sidebar {
-        position: fixed;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        height: 100dvh;
-        width: min(280px, calc(100vw - 40px));
-        z-index: 1000;
-        transform: translateX(-100%); /* Hidden by default */
-        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        margin: 0;
-        border-radius: 0;
-        box-shadow: 2px 0 12px rgba(0,0,0,0.15); /* Shadow for drawer effect */
-        overflow: hidden;
-        
-        /* Flex layout for sidebar content */
-        display: flex;
-        flex-direction: column;
-    }
-
-    .gpt-home__chat-section {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-    }
-
-    .gpt-home__chat-section .gpt-home__section-head {
-        flex-shrink: 0;
-    }
-
-    .gpt-home__chat-list {
-        flex: 1;
-        min-height: 0;
-        max-height: none;
-    }
-    
-    .gpt-home__sidebar-footer {
-        margin-top: auto; /* Push footer to bottom */
-        flex-shrink: 0;
-    }
-    
-    .gpt-home__sidebar.mobile-open {
-        transform: translateX(0); /* Slide in */
-    }
-
     .buddy-topbar {
         border-radius: 0;
         border: none;
@@ -2587,13 +2448,6 @@
         background: rgba(255, 255, 255, 0.95); /* Slightly transparent background */
         backdrop-filter: blur(10px); /* Glassmorphism effect */
         padding: 12px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left));
-    }
-
-    .gpt-home__main {
-        padding: 0;
-        gap: 0;
-        height: auto;
-        min-height: 0;
     }
     
     .home-chat {
