@@ -49,9 +49,9 @@ export default defineConfig(({ mode }) => {
           globIgnores: [
             '**/assets/dongddoki-logo-*.png',
             '**/assets/{admin*,Admin*,DashboardPage*,ReviewPage*,ContentPage*,ChatLogPage*,FeedbackPage*,UsersPage*,SystemPage*,DepartmentAdminPage*,UniversityOnly*,TrendChart*,QuickFaqModal*,StaffRefreshPreview*,display-*,Modal-*,ui-*,format-*}.{js,css}',
-            // 캘린더·오늘 홈 화면과 둘이 함께 쓰는 캘린더 API 청크는 열 때 받아 런타임 캐시(dongttok-assets)에
-            // 둔다. 사전 캐시 예산 밖이다.
-            '**/assets/{CalendarPage,TodayPage,calendarApi}-*.{js,css}',
+            // 캘린더·오늘 홈 화면과 둘이 함께 쓰는 캘린더 청크(calendar-shared, 아래 manualChunks)는 열 때 받아
+            // 런타임 캐시(dongttok-assets)에 둔다. 사전 캐시 예산 밖이다.
+            '**/assets/{CalendarPage,TodayPage,calendar-shared}-*.{js,css}',
           ],
           runtimeCaching: [
             {
@@ -86,6 +86,9 @@ export default defineConfig(({ mode }) => {
           manualChunks(id) {
             if (/\/node_modules\/(?:react|react-dom|scheduler)\//.test(id) || id.includes('commonjsHelpers.js')) return 'react-vendor'
             if (/\/node_modules\/(?:react-router|react-router-dom)\//.test(id)) return 'router'
+            // 캘린더 화면과 오늘 홈이 함께 쓰는 모듈(API·날짜 계산·저장한 일정). 이름을 고정해 사전 캐시 제외
+            // 규칙이 rollup이 고르는 청크 이름에 따라 빗나가지 않게 한다.
+            if (/\/src\/pages\/calendar\/(?:calendarApi|calendarDates|savedEventsApi|useSavedEvents)\.ts$/.test(id)) return 'calendar-shared'
           },
         },
       },

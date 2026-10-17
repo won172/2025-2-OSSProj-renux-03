@@ -1,10 +1,11 @@
 import { apiFetch, type ApiError } from '../../api/client.ts'
-import { diffDays, isYmd, kindOrder, eventStart, type EventKind } from './calendarDates.ts'
+import { dDayBig, dDayText, diffDays, isYmd, kindOrder, eventStart, type EventKind } from './calendarDates.ts'
 
 /** GET /calendar/events 계약. 날짜는 모두 KST 달력 날짜다. */
 export interface CalendarEvent {
   id: string
-  source: 'schedule' | 'notices'
+  /** personal은 사용자가 직접 추가한 일정이다(공식 일정 API에는 없다). */
+  source: 'schedule' | 'notices' | 'personal'
   kind: EventKind
   title: string
   startDate: string | null
@@ -101,9 +102,24 @@ export const calendarErrorMessage = (error: unknown) => {
   return '네트워크 연결을 확인해 주세요.'
 }
 
-export const KIND_LABEL: Record<EventKind, string> = { academic: '학사', notice: '공지', exam: '시험' }
+/** 카드의 D-day 문구. 개인 일정은 마감이 아니므로 "마감"이라고 쓰지 않는다. */
+export const eventDdayText = (event: CalendarEvent, today: string) => {
+  const text = dDayText(event, today)
+  return event.source === 'personal' ? text.replace(/^마감 /, '').replace('오늘 마감', '오늘') : text
+}
 
-export const sourceLabel = (event: CalendarEvent) => event.source === 'schedule'
+/** 상세의 큰 D-day와 설명. 개인 일정은 "마감까지"·"종료까지" 대신 "남은 날"이다. */
+export const eventDdayBig = (event: CalendarEvent, today: string) => {
+  const big = dDayBig(event, today)
+  if (event.source !== 'personal') return big
+  return { value: big.value, caption: big.caption === '마감까지' || big.caption === '종료까지' ? '남은 날' : big.caption === '오늘 마감' ? '오늘' : big.caption }
+}
+
+export const KIND_LABEL: Record<EventKind, string> = { academic: '학사', notice: '공지', exam: '시험', personal: '내 일정' }
+
+export const sourceLabel = (event: CalendarEvent) => event.source === 'personal'
+  ? '내가 추가한 일정'
+  : event.source === 'schedule'
   ? '동국대 학사일정'
   : event.department ? `${event.department} 공지` : '동국대 공지사항'
 

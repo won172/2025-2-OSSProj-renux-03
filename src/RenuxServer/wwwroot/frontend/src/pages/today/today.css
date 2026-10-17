@@ -40,9 +40,12 @@
 .today-event__title { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
 .today-event__dday { flex: none; color: var(--ch-accent-strong); font-size: 13px; font-weight: 700; white-space: nowrap; }
 .today-tag { flex: none; padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.today-event__head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.today-event__star { width: 16px; height: 16px; fill: #e06a00; stroke: #e06a00; stroke-width: 1.8; stroke-linejoin: round; }
 .kind-academic { background: var(--today-academic-bg); color: var(--today-academic-fg); }
 .kind-notice { background: var(--today-notice-bg); color: var(--today-notice-fg); }
 .kind-exam { background: var(--today-exam-bg); color: var(--today-exam-fg); }
+.kind-personal { background: #e6f4ec; color: #14613b; }
 
 .today-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .today-chip { padding: 0 12px; font-size: 12px; }
@@ -85,6 +88,7 @@
   .today-events::-webkit-scrollbar { display: none; }
   .today-events li { flex: none; scroll-snap-align: start; }
   .today-event, .today-events li:first-child .today-event { flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 4px; width: 148px; height: 112px; padding: 12px; border: 1px solid var(--ch-line); border-radius: var(--ch-radius); background: var(--ch-surface); }
+  .today-event__head { align-self: stretch; }
   .today-event__title { flex: none; font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .today-event__dday { font-size: 22px; letter-spacing: -0.02em; }
   .today-chips { flex-wrap: nowrap; overflow-x: auto; }

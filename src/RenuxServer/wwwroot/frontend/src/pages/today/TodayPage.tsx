@@ -8,8 +8,9 @@ import { countUnreadGroups, groupNotifications } from '../../chat/notifications'
 import AppNav from '../../components/AppNav'
 import type { AuthNameResponse } from '../../types/auth'
 import type { HomeBriefing } from '../../types/briefing'
-import { KIND_LABEL, calendarErrorMessage, fetchCalendarEvents, type CalendarEvent } from '../calendar/calendarApi'
-import { addDays, dDayBig, dDayText, kstToday } from '../calendar/calendarDates'
+import { KIND_LABEL, calendarErrorMessage, eventDdayText, fetchCalendarEvents, type CalendarEvent } from '../calendar/calendarApi'
+import { fetchSavedEvents, personalToEvent } from '../calendar/savedEventsApi'
+import { addDays, dDayBig, kstToday } from '../calendar/calendarDates'
 import {
   UPCOMING_RANGE_DAYS,
   briefingNotices,
@@ -70,6 +71,8 @@ const TodayPage = () => {
 
   const authenticated = viewer.data?.authenticated === true
   const [unread, setUnread] = useState(0)
+  const [savedIds, setSavedIds] = useState<Set<string>>(() => new Set())
+  const [personal, setPersonal] = useState<CalendarEvent[]>([])
   useEffect(() => {
     if (!authenticated) return
     let active = true
@@ -77,10 +80,20 @@ const TodayPage = () => {
       (notifications) => { if (active) setUnread(countUnreadGroups(groupNotifications(Array.isArray(notifications) ? notifications : []))) },
       () => { if (active) setUnread(0) },
     )
+    // 저장한 일정은 카드에 별로만 표시한다. 실패해도 홈은 그대로 보인다.
+    fetchSavedEvents().then(
+      (result) => {
+        if (!active || !result.signedIn) return
+        setSavedIds(new Set(result.events.filter((event) => event.source !== 'personal').map((event) => event.eventId)))
+        setPersonal(result.events.filter((event) => event.source === 'personal').map(personalToEvent))
+      },
+      () => {},
+    )
     return () => { active = false }
   }, [authenticated])
 
-  const events = useMemo(() => calendar.data?.events ?? [], [calendar.data])
+  // 내가 추가한 일정도 다가오는 일정·7일 표에 함께 보인다.
+  const events = useMemo(() => [...personal, ...(calendar.data?.events ?? [])], [calendar.data, personal])
   const upcoming = useMemo(() => upcomingEvents(events, today, UPCOMING_LIMIT), [events, today])
   const week = useMemo(() => nextSevenDays(events, today), [events, today])
   const restaurants = useMemo(() => restaurantsFromBriefing(briefing.data), [briefing.data])
@@ -117,7 +130,7 @@ const TodayPage = () => {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /></svg>
             <label htmlFor="today-ask-input" className="today-sr">동똑이에게 질문하기</label>
             <input id="today-ask-input" value={question} maxLength={CHAT_INPUT_MAX_LENGTH}
-              onChange={(event) => setQuestion(event.target.value)} placeholder="학사·장학·학식, 동똑이에게 물어보세요" />
+              onChange={(event) => setQuestion(event.target.value)} placeholder="동똑이에게 물어보세요" />
             <button type="submit">물어보기</button>
           </form>
 
@@ -129,7 +142,7 @@ const TodayPage = () => {
                 <p className="today-empty">{UPCOMING_RANGE_DAYS}일 안에 다가오는 일정이 없어요.</p>
               ) : (
                 <ul className="today-events">
-                  {upcoming.map((event) => <UpcomingItem key={event.id} event={event} today={today} />)}
+                  {upcoming.map((event) => <UpcomingItem key={event.id} event={event} today={today} saved={savedIds.has(event.id)} />)}
                 </ul>
               )}
             </Section>
@@ -201,13 +214,16 @@ const TodayPage = () => {
   )
 }
 
-const UpcomingItem = ({ event, today }: { event: CalendarEvent; today: string }) => {
+const UpcomingItem = ({ event, today, saved }: { event: CalendarEvent; today: string; saved: boolean }) => {
   const big = dDayBig(event, today)
   return (
     <li>
       <Link className="today-event" to={eventDetailPath(event, today)} state={{ event }}
-        aria-label={`${KIND_LABEL[event.kind]} ${event.title}, ${dDayText(event, today)}`}>
-        <span className={`today-tag kind-${event.kind}`}>{KIND_LABEL[event.kind]}</span>
+        aria-label={`${KIND_LABEL[event.kind]} ${event.title}, ${eventDdayText(event, today)}${saved ? ', 저장한 일정' : ''}`}>
+        <span className="today-event__head">
+          <span className={`today-tag kind-${event.kind}`}>{KIND_LABEL[event.kind]}</span>
+          {saved && <svg className="today-event__star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" /></svg>}
+        </span>
         <span className="today-event__title">{event.title}</span>
         <span className="today-event__dday">{big.value}</span>
       </Link>

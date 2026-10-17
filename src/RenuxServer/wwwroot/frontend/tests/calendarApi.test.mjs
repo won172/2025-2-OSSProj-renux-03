@@ -97,3 +97,19 @@ test('normalizeEvent treats an out-of-order startDate as a single-day item and b
   assert.equal(event.startDate, null)
   assert.equal(buildCalendarQuestion(event), '2학기 중간고사 기간 일정 자세히 알려줘')
 })
+
+test('personal event input is validated like the server', async () => {
+  const { validatePersonalInput, personalToEvent, normalizeSavedEvent } = await import('../src/pages/calendar/savedEventsApi.ts')
+  const base = { title: '회의', startDate: null, endDate: '2026-10-20', reminder: { enabled: true, daysBefore: [7, 1] } }
+  assert.equal(validatePersonalInput(base), null)
+  assert.match(validatePersonalInput({ ...base, title: '  ' }), /제목을 입력/)
+  assert.match(validatePersonalInput({ ...base, title: '가'.repeat(101) }), /100자/)
+  assert.match(validatePersonalInput({ ...base, startDate: '2026-10-21' }), /종료일은 시작일과 같거나 뒤/)
+  assert.match(validatePersonalInput({ ...base, startDate: '2025-10-01', endDate: '2026-10-20' }), /366일/)
+  const saved = normalizeSavedEvent({ eventId: 'personal:abc', source: 'personal', kind: 'personal', title: '회의', startDate: null, endDate: '2026-10-20', url: 'https://x', reminder: { enabled: true, daysBefore: [1] } })
+  assert.equal(normalizeSavedEvent({ ...saved, source: 'personal', kind: 'notice' }), null, 'personal rows must have the personal kind')
+  const event = personalToEvent(saved)
+  assert.equal(event.kind, 'personal')
+  assert.equal(event.url, null, 'personal events never carry a link')
+  assert.equal(event.dateStatus, 'confirmed')
+})
