@@ -34,6 +34,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 from sklearn import __version__ as sklearn_version
 
@@ -149,6 +150,7 @@ from src.services.course_recommendation import (
 from src.services.evidence_selector import EvidenceSelectionDecision, select_evidence_groups
 from src.services.campus_scope import (
     apply_campus_safety_boundary,
+    classify_campus_scope,
     query_explicitly_requests_wise,
 )
 from src.services.data_quality import (
@@ -163,9 +165,12 @@ from src.services.ontology_retrieval import OntologyShadowResult, run_ontology_s
 from src.services.retrieval_strategy import RetrievalStrategy, choose_retrieval_strategy
 from src.models.embedding import get_embedder, encode_texts
 from src.services.conversation import (
+    FollowupSourceReference,
     conversation_recall,
     effective_scope_query,
     followup_source_clarification,
+    followup_source_reference,
+    requires_source_identity,
     detect_smalltalk,
     meaningful_lexical_terms,
     needs_context_rewrite,
@@ -212,6 +217,7 @@ from src.services.staff_contact import (
 from src.utils.department_match import resolve_departments
 from src.utils.dept_college import college_grad_queries, college_of, college_scope_queries, personalized_grad_queries, user_scope_label
 from src.utils.preprocess import make_doc_id
+from src.utils.academic_period import extract_declared_period, extract_requested_period, period_from_date
 from src.utils.notice_visibility import (
     DEPARTMENT_VISIBILITY,
     PUBLIC_VISIBILITY,
@@ -1888,6 +1894,7 @@ _SOURCE_INTERNAL_COLUMNS = {
     "ontology_document_key",
     "ontology_temporal_rank",
     "structured_match",
+    "source_reference_match",
     "dense_rank", "sparse_rank", "fusion_rank", "corpus_revision",
     "dense_distance_raw", "dense_similarity_raw", "sparse_score_raw",
 } | _SOURCE_SCORE_COLUMNS
@@ -3874,6 +3881,10 @@ def _expand_chunk_with_neighbors(row: pd.Series) -> str:
     캐시된 chunks_df를 사용하므로 추가 I/O 비용이 없다. 실패 시 원본 청크 그대로.
     """
     chunk_text = str(row.get("chunk_text", ""))
+    if row.get("source_reference_match") == 1:
+        # Referenced chunks have already crossed current permission/time
+        # filters. Unfiltered cached siblings must not expand that evidence.
+        return chunk_text
     if not PARENT_CONTEXT_ENABLED:
         return chunk_text
     dataset = row.get("dataset")
@@ -4164,6 +4175,8 @@ class QueryPlan:
     retrieval_policy: RetrievalPolicy | None = None
     active_notice_query: bool = False
     current_operational_notice_terms: list[str] | None = None
+    source_reference: FollowupSourceReference | None = None
+    source_reference_required: bool = False
 
     @property
     def route(self) -> List[str]:
@@ -4298,6 +4311,10 @@ async def _plan_query(
         return planned("clarification", ["unknown"], "source_reference_unresolved",
                        clarification_fields=("이전 답변의 문서 번호 또는 정확한 문서 제목",),
                        analysis_meta=QueryAnalysisMeta(result=None, used=False, failed=False), **common)
+    source_reference = followup_source_reference(raw_query, history_text)
+    source_reference_required = source_reference is not None or requires_source_identity(raw_query, history_text)
+    common["source_reference"] = source_reference
+    common["source_reference_required"] = source_reference_required
     query_for_retrieval = (
         rewrite_with_context(raw_query, history_text)
         if needs_context_rewrite(raw_query, history_text) else raw_query
@@ -4306,7 +4323,7 @@ async def _plan_query(
     if query_explicitly_requests_wise(scope_query):
         filters["campus"] = "wise"
         return planned("campus_out_of_scope", ["unknown"], "referenced_wise_campus", **common)
-    recommendation = await run_in_threadpool(
+    recommendation = None if source_reference_required else await run_in_threadpool(
         _chat_course_recommendation, req, raw_query, history_text,
     )
     if recommendation is not None:
@@ -4329,11 +4346,11 @@ async def _plan_query(
     if deterministic_smalltalk is not None:
         return planned("smalltalk", ["smalltalk"], "smalltalk_detected", smalltalk=deterministic_smalltalk, **common)
 
-    future = await run_in_threadpool(_try_future_unannounced_answer, raw_query, as_of)
+    future = None if source_reference_required else await run_in_threadpool(_try_future_unannounced_answer, raw_query, as_of)
     if future is not None:
         return planned("future_unannounced", ["notices"], "future_publication_unannounced", future_unannounced=future, **common)
 
-    direct = await run_in_threadpool(_try_direct_answer, query_for_retrieval, as_of)
+    direct = None if source_reference_required else await run_in_threadpool(_try_direct_answer, query_for_retrieval, as_of)
     if direct is not None:
         route = ["meals"] if direct.kind.startswith("meal") else ["schedule"]
         return planned("structured_direct", route, direct.kind, direct_answer=direct, **common)
@@ -4360,7 +4377,7 @@ async def _plan_query(
         analysis_meta = _analysis_to_meta(result, failed=result is None)
     common["analysis_meta"] = analysis_meta
 
-    clarification_fields = _first_turn_clarification_fields(
+    clarification_fields = [] if source_reference else _first_turn_clarification_fields(
         analysis_query, analysis_meta, relevant_history(raw_query, history_text),
     )
     if clarification_fields:
@@ -4370,7 +4387,11 @@ async def _plan_query(
         analysis_meta.result is not None
         and analysis_meta.result.intent == "unknown"
         and not _has_school_info_terms(query_for_retrieval)
+        and source_reference is None
     ):
+        if source_reference_required:
+            return planned("clarification", ["unknown"], "source_reference_unresolved",
+                           clarification_fields=("이전 답변의 문서 번호 또는 정확한 문서 제목",), **common)
         return planned("out_of_domain", ["unknown"], "out_of_domain", **common)
 
     started_at = time.perf_counter()
@@ -4413,7 +4434,10 @@ async def _plan_query(
     if mode == "ask":
         _log_event(logging.INFO, "ask_filters", request_id=request_id, filters=final_where_filter)
 
-    retrieval_plan = await _plan_retrieval(
+    retrieval_plan = _RetrievalPlan(
+        [source_reference.dataset], RetrievalStrategy("hybrid"), {},
+        {source_reference.dataset: (source_reference.document_key,)} if source_reference.document_key else {},
+    ) if source_reference else await _plan_retrieval(
         raw_query=raw_query, query_for_retrieval=query_for_retrieval,
         analysis_meta=analysis_meta, request_id=request_id,
         session_id=session_id, stage_timings=stage_timings,
@@ -4592,6 +4616,134 @@ def _ontology_candidate_hits(
             "ontology_document_key", sort=False, group_keys=False
         ).head(chunks_per_document)
     return candidates.drop(columns=["_ontology_position"], errors="ignore")
+
+
+def _retrieve_referenced_source_frames(
+    *,
+    reference: FollowupSourceReference,
+    query: str,
+    final_where_filter: Dict,
+    notice_visibility_filter: Dict | None,
+    notice_board_filter: str | None,
+    date_filter: QueryDateFilter | None,
+    entry_year: int | None,
+    allow_wise: bool,
+    as_of: date | None,
+) -> tuple[List[pd.DataFrame], bool, List[str]]:
+    """Read only the selected current canonical document through normal filters.
+
+    A missing/withdrawn/forbidden identity is terminal, never permission for a
+    broad title search. Neither historical snippets nor source_ref hashes are
+    evidence. source_ref includes a snippet hash and can change on publication.
+    """
+    dataset = reference.dataset
+    try:
+        chunks, _, _, _ = _ensure_dataset(dataset)
+        document_key = reference.document_key
+        if document_key is None:
+            if "chunk_id" not in chunks.columns:
+                return [], False, []
+            selected = chunks[chunks["chunk_id"].astype(str).eq(reference.chunk_id)]
+            keys = {
+                _clean_response_str(row.get("document_key")) or _clean_response_str(row.get("doc_id"))
+                for _, row in selected.iterrows()
+            }
+            if len(keys) != 1 or None in keys:
+                return [], False, []
+            document_key = next(iter(keys))
+        session = SessionLocal()
+        try:
+            document = session.query(SourceDocument).filter(
+                SourceDocument.dataset == dataset,
+                SourceDocument.document_key == document_key,
+                SourceDocument.status.in_(("active", "updated")),
+            ).one_or_none()
+            if document is None:
+                return [], False, []
+            payload = json.loads(document.normalized_payload_json or "{}")
+            if not isinstance(payload, dict):
+                return [], False, []
+            current = {**payload, "dataset": dataset, "document_key": document_key,
+                       "title": document.title or payload.get("title", ""),
+                       "url": document.source_url or payload.get("url", ""),
+                       "major": payload.get("major") or payload.get("department_name", ""),
+                       "topics": payload.get("topics") or payload.get("board_name", ""),
+                       "schedule_start": payload.get("schedule_start") or payload.get("start_date", ""),
+                       "schedule_end": payload.get("schedule_end") or payload.get("end_date", ""),
+                       "chunk_text": payload.get("chunk_text") or payload.get("content_text") or payload.get("text", "")}
+            if dataset == "staff":
+                # Both canonical organization aliases carry campus scope. A
+                # generic department in one must not mask the other's path.
+                current["department"] = "\n".join(
+                    str(payload.get(key) or "").strip()
+                    for key in ("department", "department_path", "조직(트리)", "부서경로")
+                    if str(payload.get(key) or "").strip()
+                )
+            # Canonical crawled notices are public in the normal projection;
+            # manual_notice carries explicit department/visibility instead.
+            if dataset == "notices" and document.source_type == "html_notice":
+                current.setdefault("visibility", PUBLIC_VISIBILITY)
+        finally:
+            session.close()
+    except (KeyError, FileNotFoundError, ValueError, SQLAlchemyError):
+        logging.warning("Referenced source is unavailable", exc_info=True)
+        return [], False, [dataset]
+
+    where = final_where_filter.copy()
+    if dataset != "courses":
+        where.pop("major", None)
+        where.pop("$or", None)
+    if dataset == "notices":
+        where = _combine_where_filters(
+            where, notice_visibility_filter,
+            {"topics": {"$eq": notice_board_filter}} if notice_board_filter else None,
+        )
+    # Check canonical permissions as well as the loaded projection. An old
+    # public chunk cannot revive a document whose current payload is private.
+    current_frame = enrich_retrieval_fields(pd.DataFrame([current]))
+    current_frame, _ = apply_campus_safety_boundary(current_frame, allow_wise=allow_wise)
+    if current_frame.empty or not _matches_where_filter(current_frame.iloc[0], where):
+        return [], False, []
+    requested_audience = query_audience(query)
+    requested_campus = classify_campus_scope({"title": effective_scope_query(query)}).value
+    requested_period = extract_requested_period(effective_scope_query(query))
+
+    def permitted(row: pd.Series) -> bool:
+        if dataset in {"notices", "schedule"} and requested_audience != "common":
+            if str(row.get("audience", "common")).lower() not in {requested_audience, "common", ""}:
+                return False
+        campus = classify_campus_scope(row).value
+        if requested_campus in {"seoul", "bmc"} and campus not in {requested_campus, "shared"}:
+            return False
+        declared_period = extract_declared_period(row.get("title"), row.get("chunk_text"))
+        if dataset == "schedule" and not declared_period:
+            declared_period = period_from_date(row.get("schedule_start"))
+        if requested_period.conflicts_with(declared_period):
+            return False
+        cohort = re.search(r"(?<!\d)(20\d{2}|\d{2})\s*학번", str(row.get("title", "")))
+        candidate_entry_year = _clean_response_str(row.get("entry_year")) or (
+            str(int(cohort.group(1)) if len(cohort.group(1)) == 4 else 2000 + int(cohort.group(1))) if cohort else None
+        )
+        return not (entry_year and candidate_entry_year and candidate_entry_year != str(entry_year))
+
+    if not permitted(current_frame.iloc[0]):
+        return [], False, []
+    hits = _ontology_candidate_hits(
+        chunks_df=chunks, dataset=dataset, document_keys=(document_key,),
+        query=query, where_filter=where,
+        date_filter=date_filter, as_of=as_of, chunks_per_document=0,
+    )
+    hits, _ = apply_campus_safety_boundary(hits, allow_wise=allow_wise)
+    if not hits.empty:
+        hits = hits[hits.apply(permitted, axis=1)].copy()
+        if reference.document_key is None:
+            hits = hits[hits["chunk_id"].astype(str).eq(reference.chunk_id)].copy()
+    if hits.empty:
+        return [], date_filter is not None, []
+    hits["source_reference_match"] = 1
+    hits["structured_match"] = 1
+    hits["matched_query"] = query
+    return [hits], False, []
 
 
 def _rank_structured_rule_hits(
@@ -5075,7 +5227,19 @@ async def _retrieve_frames_for_queries(
     structured_document_keys_by_dataset: Dict[str, tuple[str, ...]] | None = None,
     as_of: date | None = None,
     period_query: str | None = None,
+    source_reference: FollowupSourceReference | None = None,
+    source_reference_required: bool = False,
 ) -> tuple[List[pd.DataFrame], bool, List[str]]:
+    if source_reference_required and source_reference is None:
+        return [], False, []
+    if source_reference is not None:
+        return await run_in_threadpool(functools.partial(
+            _retrieve_referenced_source_frames, reference=source_reference,
+            query=period_query or (queries[0] if queries else ""),
+            final_where_filter=final_where_filter, notice_visibility_filter=notice_visibility_filter,
+            notice_board_filter=notice_board_filter, date_filter=date_filter, entry_year=entry_year,
+            allow_wise=allow_wise, as_of=as_of,
+        ))
     all_frames: List[pd.DataFrame] = []
     date_filter_eliminated_any = False
     unavailable_datasets: List[str] = []
@@ -9578,9 +9742,11 @@ async def _execute_retrieval_steps(
         structured_document_keys_by_dataset=structured_document_keys_by_dataset,
         as_of=temporal_context.as_of,
         period_query=effective_scope_query(query_for_retrieval),
+        **({"source_reference": plan.source_reference} if plan.source_reference else {}),
+        **({"source_reference_required": True} if plan.source_reference_required else {}),
     )
 
-    if not frames and date_filter is not None and date_filter.relaxed_start and date_filter.relaxed_end:
+    if not plan.source_reference_required and not frames and date_filter is not None and date_filter.relaxed_start and date_filter.relaxed_end:
         date_filter_relaxed = True
         relaxed_filter = QueryDateFilter(
             start=date_filter.relaxed_start, end=date_filter.relaxed_end,
@@ -9605,7 +9771,7 @@ async def _execute_retrieval_steps(
             frames = relaxed_frames
         unavailable_datasets = list(dict.fromkeys(unavailable_datasets + relaxed_unavailable))
 
-    frames, staff_unavailable = await _enrich_staff_lookup_frames(
+    frames, staff_unavailable = (frames, []) if plan.source_reference_required else await _enrich_staff_lookup_frames(
         question=raw_query,
         frames=frames,
         final_where_filter=final_where_filter,
@@ -9738,7 +9904,7 @@ async def _execute_retrieval_steps(
     if fallback_reason is not None:
         # 검색이 비었더라도 학사일정·식단 표에 답이 있는 시점 질문이면 직접 조회해 답한다.
         # (폴백 로그의 절반이 이 유형이었다.)
-        direct = await run_in_threadpool(
+        direct = None if plan.source_reference_required else await run_in_threadpool(
             _try_direct_answer,
             raw_query,
             temporal_context.as_of,
